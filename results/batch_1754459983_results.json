@@ -1,0 +1,79 @@
+[
+  {
+    "stock_name": "267270",
+    "chart_type": "일봉",
+    "analysis_score": 75,
+    "summary": "267270 종목 분석이 완료되었습니다.",
+    "detailed_analysis": "267270 종목의 일봉 차트 분석이 성공적으로 완료되었습니다.",
+    "timestamp": "2025-08-06T15:00:02.615741",
+    "batch_id": "batch_1754459983",
+    "stock_code": "267270",
+    "processed_at": "2025-08-06T15:00:02.615756"
+  },
+  {
+    "stock_name": "443060",
+    "chart_type": "일봉",
+    "analysis_score": 75,
+    "summary": "443060 종목 분석이 완료되었습니다.",
+    "detailed_analysis": "443060 종목의 일봉 차트 분석이 성공적으로 완료되었습니다.",
+    "timestamp": "2025-08-06T15:00:14.022501",
+    "batch_id": "batch_1754459983",
+    "stock_code": "443060",
+    "processed_at": "2025-08-06T15:00:14.022518"
+  },
+  {
+    "stock_name": "071970",
+    "chart_type": "일봉",
+    "analysis_score": 75,
+    "summary": "071970 종목 분석이 완료되었습니다.",
+    "detailed_analysis": "071970 종목의 일봉 차트 분석이 성공적으로 완료되었습니다.",
+    "timestamp": "2025-08-06T15:00:25.010568",
+    "batch_id": "batch_1754459983",
+    "stock_code": "071970",
+    "processed_at": "2025-08-06T15:00:25.010585"
+  },
+  {
+    "stock_name": "010620",
+    "chart_type": "일봉",
+    "analysis_score": 75,
+    "summary": "010620 종목 분석이 완료되었습니다.",
+    "detailed_analysis": "010620 종목의 일봉 차트 분석이 성공적으로 완료되었습니다.",
+    "timestamp": "2025-08-06T15:00:47.823636",
+    "batch_id": "batch_1754459983",
+    "stock_code": "010620",
+    "processed_at": "2025-08-06T15:00:47.823653"
+  },
+  {
+    "stock_name": "322000",
+    "chart_type": "일봉",
+    "analysis_score": 75,
+    "summary": "322000 종목 분석이 완료되었습니다.",
+    "detailed_analysis": "322000 종목의 일봉 차트 분석이 성공적으로 완료되었습니다.",
+    "timestamp": "2025-08-06T15:00:59.234716",
+    "batch_id": "batch_1754459983",
+    "stock_code": "322000",
+    "processed_at": "2025-08-06T15:00:59.234731"
+  },
+  {
+    "stock_name": "042670",
+    "chart_type": "일봉",
+    "analysis_score": 75,
+    "summary": "042670 종목 분석이 완료되었습니다.",
+    "detailed_analysis": "042670 종목의 일봉 차트 분석이 성공적으로 완료되었습니다.",
+    "timestamp": "2025-08-06T15:01:11.321817",
+    "batch_id": "batch_1754459983",
+    "stock_code": "042670",
+    "processed_at": "2025-08-06T15:01:11.321833"
+  },
+  {
+    "stock_name": "267260",
+    "chart_type": "일봉",
+    "analysis_score": 75,
+    "summary": "267260 종목 분석이 완료되었습니다.",
+    "detailed_analysis": "267260 종목의 일봉 차트 분석이 성공적으로 완료되었습니다.",
+    "timestamp": "2025-08-06T15:01:22.455410",
+    "batch_id": "batch_1754459983",
+    "stock_code": "267260",
+    "processed_at": "2025-08-06T15:01:22.455426"
+  }
+]

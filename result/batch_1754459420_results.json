@@ -1,0 +1,79 @@
+[
+  {
+    "stock_name": "267270",
+    "chart_type": "일봉",
+    "analysis_score": 0,
+    "summary": "분석 실패: 차트 생성 실패",
+    "detailed_analysis": "종목 267270 분석 중 오류가 발생했습니다. 오류: 차트 생성 실패",
+    "timestamp": "2025-08-06T14:50:21.463324",
+    "batch_id": "batch_1754459420",
+    "stock_code": "267270",
+    "processed_at": "2025-08-06T14:50:21.463339"
+  },
+  {
+    "stock_name": "443060",
+    "chart_type": "일봉",
+    "analysis_score": 0,
+    "summary": "분석 실패: 차트 생성 실패",
+    "detailed_analysis": "종목 443060 분석 중 오류가 발생했습니다. 오류: 차트 생성 실패",
+    "timestamp": "2025-08-06T14:50:21.464291",
+    "batch_id": "batch_1754459420",
+    "stock_code": "443060",
+    "processed_at": "2025-08-06T14:50:21.464315"
+  },
+  {
+    "stock_name": "071970",
+    "chart_type": "일봉",
+    "analysis_score": 0,
+    "summary": "분석 실패: 차트 생성 실패",
+    "detailed_analysis": "종목 071970 분석 중 오류가 발생했습니다. 오류: 차트 생성 실패",
+    "timestamp": "2025-08-06T14:50:21.464908",
+    "batch_id": "batch_1754459420",
+    "stock_code": "071970",
+    "processed_at": "2025-08-06T14:50:21.464917"
+  },
+  {
+    "stock_name": "010620",
+    "chart_type": "일봉",
+    "analysis_score": 0,
+    "summary": "분석 실패: 차트 생성 실패",
+    "detailed_analysis": "종목 010620 분석 중 오류가 발생했습니다. 오류: 차트 생성 실패",
+    "timestamp": "2025-08-06T14:50:21.465531",
+    "batch_id": "batch_1754459420",
+    "stock_code": "010620",
+    "processed_at": "2025-08-06T14:50:21.465540"
+  },
+  {
+    "stock_name": "322000",
+    "chart_type": "일봉",
+    "analysis_score": 0,
+    "summary": "분석 실패: 차트 생성 실패",
+    "detailed_analysis": "종목 322000 분석 중 오류가 발생했습니다. 오류: 차트 생성 실패",
+    "timestamp": "2025-08-06T14:50:21.466125",
+    "batch_id": "batch_1754459420",
+    "stock_code": "322000",
+    "processed_at": "2025-08-06T14:50:21.466133"
+  },
+  {
+    "stock_name": "042670",
+    "chart_type": "일봉",
+    "analysis_score": 0,
+    "summary": "분석 실패: 차트 생성 실패",
+    "detailed_analysis": "종목 042670 분석 중 오류가 발생했습니다. 오류: 차트 생성 실패",
+    "timestamp": "2025-08-06T14:50:21.466763",
+    "batch_id": "batch_1754459420",
+    "stock_code": "042670",
+    "processed_at": "2025-08-06T14:50:21.466770"
+  },
+  {
+    "stock_name": "267260",
+    "chart_type": "일봉",
+    "analysis_score": 0,
+    "summary": "분석 실패: 차트 생성 실패",
+    "detailed_analysis": "종목 267260 분석 중 오류가 발생했습니다. 오류: 차트 생성 실패",
+    "timestamp": "2025-08-06T14:50:21.467374",
+    "batch_id": "batch_1754459420",
+    "stock_code": "267260",
+    "processed_at": "2025-08-06T14:50:21.467382"
+  }
+]

@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>단일 차트 분석 - AI 주식 차트 분석</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <a href="/" class="back-btn">← 메인으로</a>
+            <h1>📊 단일 차트 분석</h1>
+            <p class="subtitle">개별 종목의 차트 이미지를 업로드하여 AI 분석</p>
+        </header>
+        
+        <div class="analysis-form">
+            <form id="singleAnalysisForm">
+                <div class="form-group">
+                    <label for="stock_code">종목코드</label>
+                    <input type="text" id="stock_code" name="stock_code" placeholder="예: 005930" required maxlength="6" pattern="[0-9]{6}">
+                    <small>6자리 종목코드를 입력하세요 (예: 삼성전자 005930)</small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="chart_type">차트 유형</label>
+                    <select id="chart_type" name="chart_type" required>
+                        <option value="일봉">일봉</option>
+                        <option value="주봉">주봉</option>
+                        <option value="월봉">월봉</option>
+                    </select>
+                    <small>분석할 차트의 시간 단위를 선택하세요</small>
+                </div>
+                
+                <div class="form-group">
+                    <label>차트 생성 정보</label>
+                    <div class="info-box">
+                        <div class="info-item">
+                            <span class="info-icon">📊</span>
+                            <div class="info-content">
+                                <strong>자동 차트 생성</strong>
+                                <p>종목코드 입력 시 자동으로 차트를 생성하고 AI 분석을 수행합니다.</p>
+                            </div>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-icon">⏱️</span>
+                            <div class="info-content">
+                                <strong>분석 시간</strong>
+                                <p>차트 생성 및 분석에 약 10-30초가 소요됩니다.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary" id="submitBtn">
+                        <span class="btn-text">분석 시작</span>
+                        <span class="btn-loading" style="display: none;">분석 중...</span>
+                    </button>
+                    <button type="reset" class="btn btn-secondary">초기화</button>
+                </div>
+            </form>
+        </div>
+        
+        <div id="result" class="analysis-result" style="display: none;">
+            <div class="result-header">
+                <h3>📊 분석 결과</h3>
+                <div class="result-meta">
+                    <span id="resultStock"></span> | 
+                    <span id="resultChartType"></span> | 
+                    <span id="resultTime"></span>
+                </div>
+            </div>
+            
+            <div class="result-content">
+                <div class="score-section">
+                    <div class="score-circle">
+                        <span id="analysisScore">0</span>
+                        <small>점수</small>
+                    </div>
+                    <div class="score-description">
+                        <h4>종합 분석 점수</h4>
+                        <p id="scoreDescription">분석 중...</p>
+                    </div>
+                </div>
+                
+                <div class="summary-section">
+                    <h4>📋 분석 요약</h4>
+                    <div id="analysisSummary" class="summary-content"></div>
+                </div>
+                
+                <div class="details-section">
+                    <h4>🔍 상세 분석</h4>
+                    <div id="analysisDetails" class="details-content"></div>
+                </div>
+            </div>
+        </div>
+        
+        <div id="error" class="error-message" style="display: none;">
+            <div class="error-icon">⚠️</div>
+            <div class="error-content">
+                <h4>분석 오류</h4>
+                <p id="errorMessage"></p>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/single.js') }}"></script>
+</body>
+</html> 

@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>대량 차트 분석 - AI 주식 차트 분석</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <a href="/" class="back-btn">← 메인으로</a>
+            <h1>📈 대량 차트 분석</h1>
+            <p class="subtitle">종목 리스트 파일을 업로드하여 다수 종목 일괄 분석</p>
+        </header>
+        
+        <div class="file-format-info">
+            <h3>📋 종목 리스트 파일 형식</h3>
+            <p>텍스트 파일(.txt)에 종목코드를 한 줄에 하나씩 입력하세요:</p>
+            <div class="code-example">
+                <pre>079160
+035760
+311690
+000120</pre>
+            </div>
+            <div class="format-tips">
+                <h4>💡 작성 팁</h4>
+                <ul>
+                    <li>6자리 종목코드만 입력 (예: 005930)</li>
+                    <li>한 줄에 하나의 종목코드</li>
+                    <li>빈 줄이나 주석은 무시됩니다</li>
+                    <li>최대 100개 종목까지 처리 가능</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="analysis-form">
+            <form id="batchAnalysisForm">
+                <div class="form-group">
+                    <label for="stock_list">종목 리스트 파일</label>
+                    <div class="file-upload">
+                        <input type="file" id="stock_list" name="stock_list" accept=".txt" required>
+                        <div class="file-preview" id="filePreview">
+                            <div class="upload-placeholder">
+                                <span class="upload-icon">📁</span>
+                                <p>종목 리스트 파일을 선택하세요</p>
+                                <small>텍스트 파일만 가능 (최대 1MB)</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="chart_type">차트 유형</label>
+                    <select id="chart_type" name="chart_type" required>
+                        <option value="일봉">일봉</option>
+                        <option value="주봉">주봉</option>
+                        <option value="월봉">월봉</option>
+                    </select>
+                    <small>분석할 차트의 시간 단위를 선택하세요</small>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary" id="submitBtn">
+                        <span class="btn-text">대량 분석 시작</span>
+                        <span class="btn-loading" style="display: none;">분석 시작 중...</span>
+                    </button>
+                    <button type="reset" class="btn btn-secondary">초기화</button>
+                </div>
+            </form>
+        </div>
+        
+        <div id="batchStatus" class="batch-status" style="display: none;">
+            <div class="status-header">
+                <h3>📊 분석 진행 상황</h3>
+                <div class="batch-info">
+                    <span id="batchId"></span> | 
+                    <span id="batchChartType"></span>
+                </div>
+            </div>
+            
+            <div class="progress-section">
+                <div class="progress-bar">
+                    <div id="progressFill" class="progress-fill"></div>
+                </div>
+                <div class="progress-text">
+                    <span id="progressPercent">0%</span>
+                    <span id="progressCount">(0/0)</span>
+                </div>
+            </div>
+            
+            <div class="status-details">
+                <div class="status-item">
+                    <span class="status-label">시작 시간:</span>
+                    <span id="startTime">-</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">완료된 종목:</span>
+                    <span id="completedCount">0</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">실패한 종목:</span>
+                    <span id="failedCount">0</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">상태:</span>
+                    <span id="batchStatusText">대기 중</span>
+                </div>
+            </div>
+            
+            <div id="batchResults" class="batch-results" style="display: none;">
+                <div class="results-header">
+                    <h4>✅ 분석 완료</h4>
+                    <p>모든 종목의 분석이 완료되었습니다.</p>
+                </div>
+                <div class="results-actions">
+                    <button id="downloadBtn" class="btn btn-success">
+                        📥 결과 다운로드
+                    </button>
+                    <button id="viewResultsBtn" class="btn btn-secondary">
+                        📊 결과 보기
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <div id="error" class="error-message" style="display: none;">
+            <div class="error-icon">⚠️</div>
+            <div class="error-content">
+                <h4>분석 오류</h4>
+                <p id="errorMessage"></p>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/batch.js') }}"></script>
+</body>
+</html> 

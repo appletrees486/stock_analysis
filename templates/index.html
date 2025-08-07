@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 주식 차트 분석</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>🤖 AI 주식 차트 분석</h1>
+            <p class="subtitle">Google Gemini AI를 활용한 전문적인 주식 차트 분석</p>
+        </header>
+        
+        <div class="analysis-types">
+            <div class="type-card" onclick="location.href='/single'">
+                <div class="card-icon">📊</div>
+                <h3>단일 분석</h3>
+                <p>개별 종목의 차트 이미지를 업로드하여 AI 분석</p>
+                <ul class="feature-list">
+                    <li>✅ 차트 이미지 업로드</li>
+                    <li>✅ 종목명 직접 입력</li>
+                    <li>✅ 즉시 분석 결과 확인</li>
+                    <li>✅ 상세한 기술적 분석</li>
+                </ul>
+                <div class="card-button">단일 분석 시작</div>
+            </div>
+            
+            <div class="type-card" onclick="location.href='/batch'">
+                <div class="card-icon">📈</div>
+                <h3>대량 분석</h3>
+                <p>종목 리스트 파일을 업로드하여 다수 종목 일괄 분석</p>
+                <ul class="feature-list">
+                    <li>✅ 종목 리스트 파일 업로드</li>
+                    <li>✅ 백그라운드에서 일괄 처리</li>
+                    <li>✅ 진행 상황 실시간 확인</li>
+                    <li>✅ 결과 파일 다운로드</li>
+                </ul>
+                <div class="card-button">대량 분석 시작</div>
+            </div>
+        </div>
+        
+        <div class="info-section">
+            <h3>📋 사용 방법</h3>
+            <div class="info-grid">
+                <div class="info-item">
+                    <h4>1. 분석 타입 선택</h4>
+                    <p>단일 분석 또는 대량 분석 중 원하는 옵션을 선택하세요.</p>
+                </div>
+                <div class="info-item">
+                    <h4>2. 파일 업로드</h4>
+                    <p>차트 이미지 또는 종목 리스트 파일을 업로드하세요.</p>
+                </div>
+                <div class="info-item">
+                    <h4>3. 분석 실행</h4>
+                    <p>AI가 자동으로 차트를 분석하고 결과를 제공합니다.</p>
+                </div>
+                <div class="info-item">
+                    <h4>4. 결과 확인</h4>
+                    <p>상세한 분석 결과와 투자 아이디어를 확인하세요.</p>
+                </div>
+            </div>
+        </div>
+        
+        <footer class="footer">
+            <p>© 2025 AI 주식 차트 분석 시스템 | Powered by Google Gemini AI</p>
+        </footer>
+    </div>
+</body>
+</html> 

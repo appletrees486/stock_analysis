@@ -1,0 +1,72 @@
+[
+  {
+    "batch_id": "batch_1754458481",
+    "stock_code": "267270",
+    "chart_type": "일봉",
+    "processed_at": "2025-08-06T14:34:41.792810",
+    "error": "'NoneType' object has no attribute 'update'",
+    "analysis_score": 0,
+    "summary": "분석 실패: 'NoneType' object has no attribute 'update'",
+    "detailed_analysis": "종목 267270 분석 중 오류가 발생했습니다."
+  },
+  {
+    "batch_id": "batch_1754458481",
+    "stock_code": "443060",
+    "chart_type": "일봉",
+    "processed_at": "2025-08-06T14:34:41.794653",
+    "error": "'NoneType' object has no attribute 'update'",
+    "analysis_score": 0,
+    "summary": "분석 실패: 'NoneType' object has no attribute 'update'",
+    "detailed_analysis": "종목 443060 분석 중 오류가 발생했습니다."
+  },
+  {
+    "batch_id": "batch_1754458481",
+    "stock_code": "071970",
+    "chart_type": "일봉",
+    "processed_at": "2025-08-06T14:34:41.814040",
+    "error": "'NoneType' object has no attribute 'update'",
+    "analysis_score": 0,
+    "summary": "분석 실패: 'NoneType' object has no attribute 'update'",
+    "detailed_analysis": "종목 071970 분석 중 오류가 발생했습니다."
+  },
+  {
+    "batch_id": "batch_1754458481",
+    "stock_code": "010620",
+    "chart_type": "일봉",
+    "processed_at": "2025-08-06T14:34:41.818289",
+    "error": "'NoneType' object has no attribute 'update'",
+    "analysis_score": 0,
+    "summary": "분석 실패: 'NoneType' object has no attribute 'update'",
+    "detailed_analysis": "종목 010620 분석 중 오류가 발생했습니다."
+  },
+  {
+    "batch_id": "batch_1754458481",
+    "stock_code": "322000",
+    "chart_type": "일봉",
+    "processed_at": "2025-08-06T14:34:41.819183",
+    "error": "'NoneType' object has no attribute 'update'",
+    "analysis_score": 0,
+    "summary": "분석 실패: 'NoneType' object has no attribute 'update'",
+    "detailed_analysis": "종목 322000 분석 중 오류가 발생했습니다."
+  },
+  {
+    "batch_id": "batch_1754458481",
+    "stock_code": "042670",
+    "chart_type": "일봉",
+    "processed_at": "2025-08-06T14:34:41.819912",
+    "error": "'NoneType' object has no attribute 'update'",
+    "analysis_score": 0,
+    "summary": "분석 실패: 'NoneType' object has no attribute 'update'",
+    "detailed_analysis": "종목 042670 분석 중 오류가 발생했습니다."
+  },
+  {
+    "batch_id": "batch_1754458481",
+    "stock_code": "267260",
+    "chart_type": "일봉",
+    "processed_at": "2025-08-06T14:34:41.820391",
+    "error": "'NoneType' object has no attribute 'update'",
+    "analysis_score": 0,
+    "summary": "분석 실패: 'NoneType' object has no attribute 'update'",
+    "detailed_analysis": "종목 267260 분석 중 오류가 발생했습니다."
+  }
+]
