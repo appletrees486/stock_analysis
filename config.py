@@ -24,14 +24,30 @@ class Config:
             self.api_key = self.load_from_file()
     
     def load_from_file(self) -> Optional[str]:
-        """환경변수에서만 API 키 로드 (config.txt 파일 제거됨)"""
+        """config.txt 파일에서 API 키 로드"""
+        try:
+            config_file = 'config.txt'
+            if os.path.exists(config_file):
+                with open(config_file, 'r', encoding='utf-8') as f:
+                    api_key = f.read().strip()
+                    if api_key:
+                        return api_key
+        except Exception as e:
+            print(f"⚠️ 설정 파일 로드 오류: {e}")
         return None
     
     def save_api_key(self, api_key: str) -> bool:
-        """API 키를 환경변수에 저장 (config.txt 파일 제거됨)"""
+        """API 키를 환경변수와 파일에 저장"""
         try:
+            # 환경변수에 저장
             os.environ['GOOGLE_AI_API_KEY'] = api_key
-            print("✅ API 키가 환경변수에 저장되었습니다.")
+            
+            # 파일에 저장 (영구 보관)
+            config_file = 'config.txt'
+            with open(config_file, 'w', encoding='utf-8') as f:
+                f.write(api_key)
+            
+            print("✅ API 키가 환경변수와 설정 파일에 저장되었습니다.")
             return True
         except Exception as e:
             print(f"❌ API 키 저장 오류: {e}")

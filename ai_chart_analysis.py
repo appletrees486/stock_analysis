@@ -589,15 +589,19 @@ class AIChartAnalyzer:
             print(f"❌ 이미지 인코딩 오류: {e}")
             return ""
 
-    def analyze_chart_image(self, image_path: str, stock_name: str = "", chart_type: str = "일봉", chart_data: Optional[pd.DataFrame] = None) -> Optional[Dict[str, Any]]:
+    def analyze_chart_image(self, image_path: str, stock_name: str = "", chart_type: str = "일봉", chart_data: Optional[pd.DataFrame] = None, 
+                           json_data_path: str = "", csv_data_path: str = "", text_summary_path: str = "") -> Optional[Dict[str, Any]]:
         """
-        차트 이미지를 AI로 분석 (개선된 버전)
+        차트 이미지를 AI로 분석 (개선된 버전 - JSON/CSV/텍스트 데이터 지원)
         
         Args:
             image_path (str): 차트 이미지 파일 경로
             stock_name (str): 종목명
             chart_type (str): 차트 유형 (일봉/주봉/월봉)
             chart_data (pd.DataFrame): 차트 데이터 (Open, High, Low, Close, Volume)
+            json_data_path (str): JSON 데이터 파일 경로
+            csv_data_path (str): CSV 데이터 파일 경로
+            text_summary_path (str): 텍스트 요약 파일 경로
             
         Returns:
             Dict[str, Any]: 분석 결과 JSON
@@ -668,7 +672,13 @@ class AIChartAnalyzer:
             # 3. 차트 유형에 따른 프롬프트 선택
             prompt = ChartAnalysisPrompts.get_prompt(chart_type)
             
-            # 4. 차트 데이터 정보를 프롬프트에 추가
+            # 4. 추가 데이터 파일들 로드 및 프롬프트에 추가
+            additional_data_info = self._load_additional_data_files(json_data_path, csv_data_path, text_summary_path)
+            if additional_data_info:
+                prompt += f"\n\n{additional_data_info}"
+                print(f"✅ 추가 데이터 파일 정보가 프롬프트에 추가되었습니다.")
+            
+            # 5. 차트 데이터 정보를 프롬프트에 추가 (기존 방식)
             if chart_data is not None and not chart_data.empty:
                 print(f"📊 차트 데이터 정보 추가: {len(chart_data)}개 데이터 포인트")
                 
@@ -709,13 +719,13 @@ class AIChartAnalyzer:
                 
                 print(f"✅ 차트 데이터 정보가 프롬프트에 추가되었습니다.")
             else:
-                print(f"⚠️ 차트 데이터가 제공되지 않았습니다. 이미지만으로 분석을 진행합니다.")
+                print(f"⚠️ 차트 데이터가 제공되지 않았습니다. 이미지와 추가 데이터 파일만으로 분석을 진행합니다.")
             
             # 종목명 정보를 프롬프트에 추가
             prompt += f"\n\n**중요: 분석할 종목은 '{stock_name}' (종목번호: {extracted_stock_code})입니다.**"
             prompt = prompt.replace("[종목명]", stock_name)
             
-            # 5. AI 분석 재시도 메커니즘
+            # 6. AI 분석 재시도 메커니즘
             max_retries = 3
             for attempt in range(max_retries):
                 try:
@@ -784,7 +794,7 @@ class AIChartAnalyzer:
                         print(f"📝 AI 응답 길이: {len(response.text)}")
                         print(f"📝 AI 응답 시작: {response.text[:100]}...")
                         
-                        # 6. 응답 검증 및 JSON 파싱
+                        # 7. 응답 검증 및 JSON 파싱
                         if self._is_valid_json_response(response.text):
                             try:
                                 analysis_result = self._parse_json_response(response.text)
@@ -1263,9 +1273,215 @@ class AIChartAnalyzer:
             print(f"❌ Word 문서 생성 중 오류: {e}")
             return False
 
+    def _load_additional_data_files(self, json_data_path: str, csv_data_path: str, text_summary_path: str) -> str:
+        """
+        추가 데이터 파일들을 로드하고 프롬프트용 텍스트로 변환
+        
+        Args:
+            json_data_path (str): JSON 데이터 파일 경로
+            csv_data_path (str): CSV 데이터 파일 경로
+            text_summary_path (str): 텍스트 요약 파일 경로
+            
+        Returns:
+            str: 프롬프트에 추가할 데이터 정보 텍스트
+        """
+        additional_info = ""
+        
+        # 1. JSON 데이터 파일 로드
+        if json_data_path and os.path.exists(json_data_path):
+            try:
+                print(f"📊 JSON 데이터 파일 로드 중: {json_data_path}")
+                with open(json_data_path, 'r', encoding='utf-8') as f:
+                    json_data = json.load(f)
+                
+                # JSON 데이터를 구조화된 텍스트로 변환
+                json_info = f"""
+**JSON 구조화 데이터 정보:**
+- 종목명: {json_data.get('metadata', {}).get('stock_name', 'N/A')}
+- 종목코드: {json_data.get('metadata', {}).get('stock_code', 'N/A')}
+- 데이터 기간: {json_data.get('metadata', {}).get('data_period', {}).get('start', 'N/A')} ~ {json_data.get('metadata', {}).get('data_period', {}).get('end', 'N/A')}
+- 총 데이터 수: {json_data.get('metadata', {}).get('total_records', 'N/A')}개
+
+**요약 정보:**
+- 최근 종가: {json_data.get('summary', {}).get('latest_close', 'N/A'):,.0f}원
+- 최근 거래량: {json_data.get('summary', {}).get('latest_volume', 'N/A'):,}주
+- 가격 변동: {json_data.get('summary', {}).get('price_change', 'N/A'):+,.0f}원
+- 변동률: {json_data.get('summary', {}).get('price_change_pct', 'N/A'):+.2f}%
+- 최고가: {json_data.get('summary', {}).get('highest_price', 'N/A'):,.0f}원
+- 최저가: {json_data.get('summary', {}).get('lowest_price', 'N/A'):,.0f}원
+- 평균 거래량: {json_data.get('summary', {}).get('avg_volume', 'N/A'):,.0f}주
+
+**기술적 지표 (최근값):**
+"""
+                
+                # 기술적 지표 정보 추가
+                tech_indicators = json_data.get('technical_indicators', {}).get('latest_values', {})
+                for indicator, value in tech_indicators.items():
+                    if value is not None:
+                        if 'ma' in indicator.lower():
+                            json_info += f"- {indicator.upper()}: {value:,.0f}원\n"
+                        else:
+                            json_info += f"- {indicator.upper()}: {value:.2f}\n"
+                
+                # 최근 차트 데이터 (최대 5개)
+                chart_data = json_data.get('chart_data', [])
+                if chart_data:
+                    json_info += f"\n**최근 5개 거래일 데이터:**\n"
+                    for i, data_point in enumerate(chart_data[-5:]):
+                        json_info += f"- {data_point['date']}: 시가 {data_point['open']:,.0f}, 고가 {data_point['high']:,.0f}, 저가 {data_point['low']:,.0f}, 종가 {data_point['close']:,.0f}, 거래량 {data_point['volume']:,}\n"
+                
+                additional_info += json_info
+                print(f"✅ JSON 데이터 로드 완료")
+                
+            except Exception as e:
+                print(f"❌ JSON 데이터 파일 로드 실패: {e}")
+        
+        # 2. CSV 데이터 파일 로드
+        if csv_data_path and os.path.exists(csv_data_path):
+            try:
+                print(f"📊 CSV 데이터 파일 로드 중: {csv_data_path}")
+                import pandas as pd
+                csv_data = pd.read_csv(csv_data_path, encoding='utf-8-sig')
+                
+                csv_info = f"""
+**CSV 데이터 정보:**
+- 파일 경로: {csv_data_path}
+- 데이터 수: {len(csv_data)}개
+- 컬럼: {', '.join(csv_data.columns.tolist())}
+
+**최근 5개 데이터:**
+"""
+                
+                # 최근 5개 데이터 추가
+                for i, row in csv_data.tail(5).iterrows():
+                    csv_info += f"- {row.iloc[0]}: 시가 {row['Open']:,.0f}, 고가 {row['High']:,.0f}, 저가 {row['Low']:,.0f}, 종가 {row['Close']:,.0f}, 거래량 {row['Volume']:,}\n"
+                
+                additional_info += csv_info
+                print(f"✅ CSV 데이터 로드 완료")
+                
+            except Exception as e:
+                print(f"❌ CSV 데이터 파일 로드 실패: {e}")
+        
+        # 3. 텍스트 요약 파일 로드
+        if text_summary_path and os.path.exists(text_summary_path):
+            try:
+                print(f"📊 텍스트 요약 파일 로드 중: {text_summary_path}")
+                with open(text_summary_path, 'r', encoding='utf-8') as f:
+                    text_content = f.read()
+                
+                text_info = f"""
+**텍스트 요약 정보:**
+{text_content}
+"""
+                
+                additional_info += text_info
+                print(f"✅ 텍스트 요약 로드 완료")
+                
+            except Exception as e:
+                print(f"❌ 텍스트 요약 파일 로드 실패: {e}")
+        
+        return additional_info
+
+    def analyze_chart_with_data_files(self, image_path: str, json_data_path: str = "", csv_data_path: str = "", 
+                                     text_summary_path: str = "", stock_name: str = "", chart_type: str = "일봉") -> Optional[Dict[str, Any]]:
+        """
+        차트 이미지와 데이터 파일들을 함께 AI로 분석하는 편의 메서드
+        
+        Args:
+            image_path (str): 차트 이미지 파일 경로
+            json_data_path (str): JSON 데이터 파일 경로
+            csv_data_path (str): CSV 데이터 파일 경로
+            text_summary_path (str): 텍스트 요약 파일 경로
+            stock_name (str): 종목명
+            chart_type (str): 차트 유형 (일봉/주봉/월봉)
+            
+        Returns:
+            Dict[str, Any]: 분석 결과 JSON
+        """
+        print(f"🚀 차트 이미지와 데이터 파일들을 함께 분석합니다...")
+        print(f"📈 차트 이미지: {image_path}")
+        print(f"📊 JSON 데이터: {json_data_path if json_data_path else '없음'}")
+        print(f"📋 CSV 데이터: {csv_data_path if csv_data_path else '없음'}")
+        print(f"📝 텍스트 요약: {text_summary_path if text_summary_path else '없음'}")
+        
+        return self.analyze_chart_image(
+            image_path=image_path,
+            stock_name=stock_name,
+            chart_type=chart_type,
+            json_data_path=json_data_path,
+            csv_data_path=csv_data_path,
+            text_summary_path=text_summary_path
+        )
+
+    def find_related_data_files(self, image_path: str) -> tuple:
+        """
+        차트 이미지 파일과 관련된 데이터 파일들을 자동으로 찾기
+        
+        Args:
+            image_path (str): 차트 이미지 파일 경로
+            
+        Returns:
+            tuple: (json_path, csv_path, text_path)
+        """
+        print(f"🔍 관련 데이터 파일들을 찾는 중: {image_path}")
+        
+        # 이미지 파일명에서 기본 정보 추출
+        image_filename = os.path.basename(image_path)
+        image_name_without_ext = os.path.splitext(image_filename)[0]
+        
+        # 파일명에서 종목명과 종목코드 추출
+        parts = image_name_without_ext.split('_')
+        if len(parts) >= 3:
+            chart_type = parts[0]  # daily, weekly, monthly
+            stock_name = parts[1]
+            stock_code = parts[2]
+            date_part = parts[3] if len(parts) > 3 else ""
+        else:
+            print(f"⚠️ 이미지 파일명 형식을 인식할 수 없습니다: {image_filename}")
+            return "", "", ""
+        
+        # 관련 파일들 찾기
+        json_path = ""
+        csv_path = ""
+        text_path = ""
+        
+        # 1. JSON 파일 찾기
+        json_pattern = f"{chart_type}_{stock_name}_{stock_code}_{date_part}.json"
+        json_dir = "chart_data_json"
+        if os.path.exists(json_dir):
+            for file in os.listdir(json_dir):
+                if file.startswith(f"{chart_type}_{stock_name}_{stock_code}_{date_part}"):
+                    json_path = os.path.join(json_dir, file)
+                    break
+        
+        # 2. CSV 파일 찾기
+        csv_pattern = f"{chart_type}_{stock_name}_{stock_code}_{date_part}.csv"
+        csv_dir = "chart_data_csv"
+        if os.path.exists(csv_dir):
+            for file in os.listdir(csv_dir):
+                if file.startswith(f"{chart_type}_{stock_name}_{stock_code}_{date_part}"):
+                    csv_path = os.path.join(csv_dir, file)
+                    break
+        
+        # 3. 텍스트 요약 파일 찾기
+        text_pattern = f"{chart_type}_{stock_name}_{stock_code}_{date_part}_summary.txt"
+        text_dir = "chart_data_text"
+        if os.path.exists(text_dir):
+            for file in os.listdir(text_dir):
+                if file.startswith(f"{chart_type}_{stock_name}_{stock_code}_{date_part}_summary"):
+                    text_path = os.path.join(text_dir, file)
+                    break
+        
+        print(f"📊 찾은 관련 파일들:")
+        print(f"   JSON: {json_path if json_path else '없음'}")
+        print(f"   CSV: {csv_path if csv_path else '없음'}")
+        print(f"   텍스트: {text_path if text_path else '없음'}")
+        
+        return json_path, csv_path, text_path
+
 def main():
     """메인 함수"""
-    print("🤖 AI 제미나이 차트 분석 프로그램")
+    print("�� AI 제미나이 차트 분석 프로그램 (개선된 버전)")
     print("="*60)
     
     # 설정 파일에서 API 키 로드
@@ -1339,12 +1555,52 @@ def main():
     print(f"📁 파일: {image_path}")
     print(f"📊 차트 유형: {chart_type}")
     
-    # AI 분석 실행 (종목명은 파일명에서 자동 추출)
-    result = analyzer.analyze_chart_image(image_path, "", chart_type)
+    # 관련 데이터 파일들 자동 찾기
+    print(f"\n🔍 관련 데이터 파일들을 찾는 중...")
+    json_path, csv_path, text_path = analyzer.find_related_data_files(image_path)
+    
+    # 분석 모드 선택
+    print(f"\n📊 분석 모드를 선택하세요:")
+    print(f"1. 이미지만으로 분석 (기본)")
+    print(f"2. 이미지 + 데이터 파일들과 함께 분석 (권장)")
+    
+    while True:
+        try:
+            mode_choice = input("선택 (1 또는 2): ").strip()
+            if mode_choice in ['1', '2']:
+                break
+            else:
+                print("❌ 1 또는 2를 입력해주세요.")
+        except ValueError:
+            print("❌ 숫자를 입력해주세요.")
+    
+    # AI 분석 실행
+    if mode_choice == '1':
+        print(f"\n📊 이미지만으로 분석을 진행합니다...")
+        result = analyzer.analyze_chart_image(image_path, "", chart_type)
+    else:
+        print(f"\n📊 이미지와 데이터 파일들을 함께 분석합니다...")
+        if json_path or csv_path or text_path:
+            print(f"✅ 관련 데이터 파일들을 찾았습니다!")
+            result = analyzer.analyze_chart_with_data_files(
+                image_path=image_path,
+                json_data_path=json_path,
+                csv_data_path=csv_path,
+                text_summary_path=text_path,
+                stock_name="",
+                chart_type=chart_type
+            )
+        else:
+            print(f"⚠️ 관련 데이터 파일을 찾을 수 없어 이미지만으로 분석합니다.")
+            result = analyzer.analyze_chart_image(image_path, "", chart_type)
     
     if result:
         # 결과 저장
         output_dir = "ai_analysis_results"
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+            print(f"📁 {output_dir} 폴더를 생성했습니다.")
+        
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
         # 종목정보 추출
@@ -1400,6 +1656,90 @@ def main():
                 print("❌ Word 문서 생성에 실패했습니다.")
     else:
         print("❌ AI 분석에 실패했습니다.")
+
+def analyze_single_chart_with_data(image_path: str, json_data_path: str = "", csv_data_path: str = "", 
+                                  text_summary_path: str = "", chart_type: str = "일봉"):
+    """
+    단일 차트를 데이터 파일들과 함께 분석하는 편의 함수
+    
+    Args:
+        image_path (str): 차트 이미지 파일 경로
+        json_data_path (str): JSON 데이터 파일 경로
+        csv_data_path (str): CSV 데이터 파일 경로
+        text_summary_path (str): 텍스트 요약 파일 경로
+        chart_type (str): 차트 유형 (일봉/주봉/월봉)
+    """
+    print("🤖 AI 제미나이 차트 분석 프로그램 (단일 파일 분석)")
+    print("="*60)
+    
+    # 설정 파일에서 API 키 로드
+    from config import config
+    
+    api_key = config.get_api_key()
+    if not api_key:
+        print("❌ API 키가 설정되지 않았습니다.")
+        return None
+    
+    # AI 분석기 초기화
+    analyzer = AIChartAnalyzer(api_key)
+    
+    # 파일 존재 확인
+    if not os.path.exists(image_path):
+        print(f"❌ 차트 이미지 파일을 찾을 수 없습니다: {image_path}")
+        return None
+    
+    print(f"🔍 분석 시작: {os.path.basename(image_path)}")
+    print(f"📁 파일: {image_path}")
+    print(f"📊 차트 유형: {chart_type}")
+    
+    # AI 분석 실행
+    result = analyzer.analyze_chart_with_data_files(
+        image_path=image_path,
+        json_data_path=json_data_path,
+        csv_data_path=csv_data_path,
+        text_summary_path=text_summary_path,
+        stock_name="",
+        chart_type=chart_type
+    )
+    
+    if result:
+        # 결과 저장
+        output_dir = "ai_analysis_results"
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        # 종목정보 추출
+        stock_info = result.get("종목정보", {})
+        stock_name = stock_info.get("종목명", "unknown")
+        stock_code = stock_info.get("종목번호", "000000")
+        
+        # JSON 파일 저장
+        json_filename = f"analysis_{chart_type}_{stock_name}_{stock_code}_{timestamp}.json"
+        json_path = os.path.join(output_dir, json_filename)
+        
+        # Word 문서 저장
+        doc_filename = f"analysis_{chart_type}_{stock_name}_{stock_code}_{timestamp}.docx"
+        doc_path = os.path.join(output_dir, doc_filename)
+        
+        # JSON 파일 저장
+        json_success = analyzer.save_analysis_result(result, json_path)
+        
+        # Word 문서 생성
+        doc_success = analyzer.create_word_document(result, image_path, doc_path, chart_type)
+        
+        if json_success and doc_success:
+            print("\n✅ AI 차트 분석이 완료되었습니다!")
+            print(f"📄 JSON 결과 파일: {json_path}")
+            print(f"📄 Word 문서 파일: {doc_path}")
+            return result
+        else:
+            print("❌ 결과 저장에 실패했습니다.")
+            return None
+    else:
+        print("❌ AI 분석에 실패했습니다.")
+        return None
 
 if __name__ == "__main__":
     main() 

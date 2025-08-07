@@ -1,0 +1,57 @@
+[
+  {
+    "stock_name": "019210",
+    "chart_type": "주봉",
+    "analysis_score": 0,
+    "summary": "분석 실패: AI 분석 실패",
+    "detailed_analysis": "종목 019210 분석 중 오류가 발생했습니다. 오류: AI 분석 실패",
+    "timestamp": "2025-08-07T10:45:30.928031",
+    "batch_id": "batch_1754531125",
+    "stock_code": "019210",
+    "processed_at": "2025-08-07T10:45:30.928038"
+  },
+  {
+    "stock_name": "023410",
+    "chart_type": "주봉",
+    "analysis_score": 0,
+    "summary": "분석 실패: AI 분석 실패",
+    "detailed_analysis": "종목 023410 분석 중 오류가 발생했습니다. 오류: AI 분석 실패",
+    "timestamp": "2025-08-07T10:45:33.800991",
+    "batch_id": "batch_1754531125",
+    "stock_code": "023410",
+    "processed_at": "2025-08-07T10:45:33.801025"
+  },
+  {
+    "stock_name": "145720",
+    "chart_type": "주봉",
+    "analysis_score": 0,
+    "summary": "분석 실패: AI 분석 실패",
+    "detailed_analysis": "종목 145720 분석 중 오류가 발생했습니다. 오류: AI 분석 실패",
+    "timestamp": "2025-08-07T10:45:35.938062",
+    "batch_id": "batch_1754531125",
+    "stock_code": "145720",
+    "processed_at": "2025-08-07T10:45:35.938070"
+  },
+  {
+    "stock_name": "005930",
+    "chart_type": "주봉",
+    "analysis_score": 0,
+    "summary": "분석 실패: AI 분석 실패",
+    "detailed_analysis": "종목 005930 분석 중 오류가 발생했습니다. 오류: AI 분석 실패",
+    "timestamp": "2025-08-07T10:45:38.015325",
+    "batch_id": "batch_1754531125",
+    "stock_code": "005930",
+    "processed_at": "2025-08-07T10:45:38.015331"
+  },
+  {
+    "stock_name": "014280",
+    "chart_type": "주봉",
+    "analysis_score": 0,
+    "summary": "분석 실패: AI 분석 실패",
+    "detailed_analysis": "종목 014280 분석 중 오류가 발생했습니다. 오류: AI 분석 실패",
+    "timestamp": "2025-08-07T10:45:40.276071",
+    "batch_id": "batch_1754531125",
+    "stock_code": "014280",
+    "processed_at": "2025-08-07T10:45:40.276077"
+  }
+]

@@ -54,16 +54,10 @@ class BatchAnalyzer:
                 'chart_type': chart_type
             }
             
-            # 백그라운드에서 분석 실행
-            thread = threading.Thread(
-                target=self._run_batch_analysis,
-                args=(stock_list_path, chart_type, batch_id)
-            )
-            thread.daemon = True
-            thread.start()
+            # 동기적으로 분석 실행 (스레드 문제 해결)
+            self._run_batch_analysis(stock_list_path, chart_type, batch_id)
             
-            self.batch_threads[batch_id] = thread
-            logger.info(f"대량 분석 스레드 시작: batch_id={batch_id}")
+            logger.info(f"대량 분석 완료: batch_id={batch_id}")
             
         except Exception as e:
             logger.error(f"대량 분석 시작 오류: {e}")
@@ -104,22 +98,93 @@ class BatchAnalyzer:
                     }
                     chart_type_en = chart_type_mapping.get(chart_type, "daily")
                     
+                    logger.info(f"배치 분석 시작: {stock_code}, 차트타입={chart_type}, 차트타입_en={chart_type_en}")
+                    
                     batch_result = analyze_single_stock_fast(
                         stock_code, chart_type, chart_type_en, None
                     )
                     
+                    logger.info(f"배치 분석 결과: {batch_result}")
+                    logger.info(f"배치 분석 결과 타입: {type(batch_result)}")
+                    logger.info(f"배치 분석 success 값: {batch_result.get('success', 'NOT_FOUND')}")
+                    logger.info(f"배치 분석 error 값: {batch_result.get('error', 'NOT_FOUND')}")
+                    
                     # 배치 결과를 AI 분석 결과 형식으로 변환
                     if batch_result.get('success', False):
-                        # 성공한 경우 기본 결과 생성
-                        result = {
-                            'stock_name': stock_code,
-                            'chart_type': chart_type,
-                            'analysis_score': 75,  # 기본 점수
-                            'summary': f'{stock_code} 종목 분석이 완료되었습니다.',
-                            'detailed_analysis': f'{stock_code} 종목의 {chart_type} 차트 분석이 성공적으로 완료되었습니다.',
-                            'timestamp': datetime.now().isoformat()
-                        }
+                        logger.info(f"종목 {stock_code} 분석 성공")
+                        # 성공한 경우 실제 AI 분석 결과 파일 찾기
+                        ai_results_dir = "ai_analysis_results"
+                        if os.path.exists(ai_results_dir):
+                            # 해당 종목의 최신 분석 결과 파일 찾기
+                            pattern = f"analysis_{chart_type_en}_{stock_code}_*.json"
+                            json_files = []
+                            for file in os.listdir(ai_results_dir):
+                                if file.startswith(f"analysis_{chart_type_en}_{stock_code}_") and file.endswith('.json'):
+                                    json_files.append(file)
+                            
+                            logger.info(f"찾은 JSON 파일들: {json_files}")
+                            
+                            if json_files:
+                                # 가장 최근 JSON 파일 로드
+                                latest_json = sorted(json_files)[-1]
+                                json_path = os.path.join(ai_results_dir, latest_json)
+                                
+                                try:
+                                    with open(json_path, 'r', encoding='utf-8') as f:
+                                        ai_analysis_result = json.load(f)
+                                    
+                                    # AI 분석 결과에서 정보 추출
+                                    stock_info = ai_analysis_result.get("종목정보", {})
+                                    analysis_score = ai_analysis_result.get("종합분석점수", {})
+                                    
+                                    result = {
+                                        'stock_name': stock_info.get('종목명', stock_code),
+                                        'stock_code': stock_code,
+                                        'chart_type': chart_type,
+                                        'analysis_score': analysis_score.get('점수', 75),
+                                        'summary': analysis_score.get('요약', f'{stock_code} 종목 분석이 완료되었습니다.'),
+                                        'detailed_analysis': f'{stock_code} 종목의 {chart_type} 차트 분석이 성공적으로 완료되었습니다.',
+                                        'timestamp': datetime.now().isoformat(),
+                                        'ai_analysis_file': latest_json,
+                                        'ai_analysis_data': ai_analysis_result
+                                    }
+                                    logger.info(f"AI 분석 결과 로드 성공: {latest_json}")
+                                except Exception as e:
+                                    logger.warning(f"AI 분석 결과 파일 로드 실패: {e}")
+                                    # 기본 결과 생성
+                                    result = {
+                                        'stock_name': stock_code,
+                                        'chart_type': chart_type,
+                                        'analysis_score': 75,
+                                        'summary': f'{stock_code} 종목 분석이 완료되었습니다.',
+                                        'detailed_analysis': f'{stock_code} 종목의 {chart_type} 차트 분석이 성공적으로 완료되었습니다.',
+                                        'timestamp': datetime.now().isoformat()
+                                    }
+                            else:
+                                logger.warning(f"종목 {stock_code}의 AI 분석 결과 파일을 찾을 수 없습니다")
+                                # AI 분석 결과 파일이 없는 경우 기본 결과 생성
+                                result = {
+                                    'stock_name': stock_code,
+                                    'chart_type': chart_type,
+                                    'analysis_score': 75,
+                                    'summary': f'{stock_code} 종목 분석이 완료되었습니다.',
+                                    'detailed_analysis': f'{stock_code} 종목의 {chart_type} 차트 분석이 성공적으로 완료되었습니다.',
+                                    'timestamp': datetime.now().isoformat()
+                                }
+                        else:
+                            logger.warning(f"AI 분석 결과 폴더가 존재하지 않습니다: {ai_results_dir}")
+                            # AI 분석 결과 폴더가 없는 경우 기본 결과 생성
+                            result = {
+                                'stock_name': stock_code,
+                                'chart_type': chart_type,
+                                'analysis_score': 75,
+                                'summary': f'{stock_code} 종목 분석이 완료되었습니다.',
+                                'detailed_analysis': f'{stock_code} 종목의 {chart_type} 차트 분석이 성공적으로 완료되었습니다.',
+                                'timestamp': datetime.now().isoformat()
+                            }
                     else:
+                        logger.error(f"종목 {stock_code} 분석 실패: {batch_result.get('error', '알 수 없는 오류')}")
+                        logger.error(f"배치 결과 상세: {batch_result}")
                         # 실패한 경우 에러 결과 생성
                         result = {
                             'stock_name': stock_code,
@@ -166,13 +231,24 @@ class BatchAnalyzer:
             self.batch_status[batch_id]['status'] = 'completed'
             self.batch_status[batch_id]['end_time'] = datetime.now().isoformat()
             
+            logger.info(f"배치 분석 완료: batch_id={batch_id}, 총 {len(self.batch_results[batch_id])}개 결과")
+            
             # 결과 저장
-            self._save_batch_results(batch_id)
+            try:
+                logger.info(f"배치 결과 저장 시작: batch_id={batch_id}")
+                self._save_batch_results(batch_id)
+                logger.info(f"배치 결과 저장 완료: batch_id={batch_id}")
+            except Exception as e:
+                logger.error(f"배치 결과 저장 실패: batch_id={batch_id}, 오류: {e}")
+                self.batch_status[batch_id]['status'] = 'failed'
+                self.batch_status[batch_id]['error'] = f"결과 저장 실패: {str(e)}"
             
             logger.info(f"대량 분석 완료: batch_id={batch_id}")
             
         except Exception as e:
             logger.error(f"대량 분석 실행 오류: {e}")
+            import traceback
+            logger.error(f"상세 오류: {traceback.format_exc()}")
             self.batch_status[batch_id]['status'] = 'failed'
             self.batch_status[batch_id]['error'] = str(e)
             self.batch_status[batch_id]['end_time'] = datetime.now().isoformat()
@@ -199,29 +275,52 @@ class BatchAnalyzer:
     def _save_batch_results(self, batch_id: str):
         """배치 결과를 파일로 저장"""
         try:
+            logger.info(f"배치 결과 저장 시작: {batch_id}")
+            
+            # results 폴더 생성
+            results_dir = "results"
+            if not os.path.exists(results_dir):
+                os.makedirs(results_dir)
+                logger.info(f"results 폴더 생성: {results_dir}")
+            
             # JSON 결과 저장
             results_file = f"results/{batch_id}_results.json"
+            logger.info(f"JSON 파일 저장: {results_file}")
+            
             with open(results_file, 'w', encoding='utf-8') as f:
                 json.dump(self.batch_results[batch_id], f, ensure_ascii=False, indent=2)
             
+            logger.info(f"JSON 파일 저장 완료: {results_file}")
+            
             # ZIP 파일 생성 (결과 다운로드용)
             zip_file = f"results/{batch_id}_results.zip"
+            logger.info(f"ZIP 파일 생성: {zip_file}")
+            
             with zipfile.ZipFile(zip_file, 'w', zipfile.ZIP_DEFLATED) as zipf:
                 # JSON 파일 추가
                 zipf.write(results_file, os.path.basename(results_file))
+                logger.info(f"ZIP에 JSON 파일 추가: {os.path.basename(results_file)}")
                 
                 # 요약 파일 생성 및 추가
                 summary_file = f"results/{batch_id}_summary.txt"
+                logger.info(f"요약 파일 생성: {summary_file}")
                 self._create_summary_file(batch_id, summary_file)
                 zipf.write(summary_file, os.path.basename(summary_file))
+                logger.info(f"ZIP에 요약 파일 추가: {os.path.basename(summary_file)}")
                 
                 # ai_analysis_results 폴더의 개별 종목별 분석 결과 파일들 추가
+                logger.info(f"AI 분석 결과 파일들 ZIP에 추가 시작")
                 self._add_analysis_files_to_zip(zipf, batch_id)
+                logger.info(f"AI 분석 결과 파일들 ZIP에 추가 완료")
             
+            logger.info(f"ZIP 파일 생성 완료: {zip_file}")
             logger.info(f"배치 결과 저장 완료: {batch_id}")
             
         except Exception as e:
             logger.error(f"배치 결과 저장 오류: {e}")
+            import traceback
+            logger.error(f"상세 오류: {traceback.format_exc()}")
+            raise
     
     def _add_analysis_files_to_zip(self, zipf, batch_id: str):
         """ai_analysis_results 폴더의 분석 결과 파일들을 ZIP에 추가"""
@@ -252,33 +351,56 @@ class BatchAnalyzer:
                 if not stock_code:
                     continue
                 
-                # 해당 종목의 분석 결과 파일들 찾기
-                pattern = f"analysis_{chart_type_en}_{stock_code}_*.json"
-                json_files = []
-                for file in os.listdir(ai_results_dir):
-                    if file.startswith(f"analysis_{chart_type_en}_{stock_code}_") and file.endswith('.json'):
-                        json_files.append(file)
+                # 배치 결과에서 AI 분석 파일 정보 확인
+                ai_analysis_file = result.get('ai_analysis_file')
                 
-                # 가장 최근 파일 선택 (타임스탬프가 가장 큰 파일)
-                if json_files:
-                    latest_json = sorted(json_files)[-1]
-                    json_path = os.path.join(ai_results_dir, latest_json)
-                    
-                    # ZIP에 JSON 파일 추가
-                    zip_path = f"analysis_results/{latest_json}"
-                    zipf.write(json_path, zip_path)
-                    
-                    # 해당하는 DOCX 파일도 찾아서 추가
-                    docx_file = latest_json.replace('.json', '.docx')
-                    docx_path = os.path.join(ai_results_dir, docx_file)
-                    if os.path.exists(docx_path):
-                        docx_zip_path = f"analysis_results/{docx_file}"
-                        zipf.write(docx_path, docx_zip_path)
-                        logger.info(f"분석 결과 파일 추가: {stock_code} - {latest_json}, {docx_file}")
+                if ai_analysis_file:
+                    # 배치 결과에 AI 분석 파일 정보가 있는 경우
+                    json_path = os.path.join(ai_results_dir, ai_analysis_file)
+                    if os.path.exists(json_path):
+                        # JSON 파일 추가
+                        zip_path = f"analysis_results/{ai_analysis_file}"
+                        zipf.write(json_path, zip_path)
+                        
+                        # 해당하는 DOCX 파일 찾기
+                        docx_file = ai_analysis_file.replace('.json', '.docx')
+                        docx_path = os.path.join(ai_results_dir, docx_file)
+                        if os.path.exists(docx_path):
+                            docx_zip_path = f"analysis_results/{docx_file}"
+                            zipf.write(docx_path, docx_zip_path)
+                            logger.info(f"분석 결과 파일 추가: {stock_code} - {ai_analysis_file}, {docx_file}")
+                        else:
+                            logger.info(f"분석 결과 파일 추가: {stock_code} - {ai_analysis_file} (DOCX 없음)")
                     else:
-                        logger.info(f"분석 결과 파일 추가: {stock_code} - {latest_json}")
+                        logger.warning(f"AI 분석 JSON 파일을 찾을 수 없습니다: {json_path}")
                 else:
-                    logger.warning(f"종목 {stock_code}의 분석 결과 파일을 찾을 수 없습니다")
+                    # 기존 방식으로 파일 찾기 (하위 호환성)
+                    pattern = f"analysis_{chart_type_en}_{stock_code}_*.json"
+                    json_files = []
+                    for file in os.listdir(ai_results_dir):
+                        if file.startswith(f"analysis_{chart_type_en}_{stock_code}_") and file.endswith('.json'):
+                            json_files.append(file)
+                    
+                    # 가장 최근 파일 선택 (타임스탬프가 가장 큰 파일)
+                    if json_files:
+                        latest_json = sorted(json_files)[-1]
+                        json_path = os.path.join(ai_results_dir, latest_json)
+                        
+                        # ZIP에 JSON 파일 추가
+                        zip_path = f"analysis_results/{latest_json}"
+                        zipf.write(json_path, zip_path)
+                        
+                        # 해당하는 DOCX 파일도 찾아서 추가
+                        docx_file = latest_json.replace('.json', '.docx')
+                        docx_path = os.path.join(ai_results_dir, docx_file)
+                        if os.path.exists(docx_path):
+                            docx_zip_path = f"analysis_results/{docx_file}"
+                            zipf.write(docx_path, docx_zip_path)
+                            logger.info(f"분석 결과 파일 추가: {stock_code} - {latest_json}, {docx_file}")
+                        else:
+                            logger.info(f"분석 결과 파일 추가: {stock_code} - {latest_json} (DOCX 없음)")
+                    else:
+                        logger.warning(f"종목 {stock_code}의 분석 결과 파일을 찾을 수 없습니다")
             
         except Exception as e:
             logger.error(f"분석 결과 파일 ZIP 추가 오류: {e}")

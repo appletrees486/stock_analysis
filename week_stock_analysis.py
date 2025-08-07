@@ -17,7 +17,11 @@ import matplotlib.font_manager as fm
 import mplfinance as mpf
 import platform
 import os
-# openpyxl 관련 import 제거됨 (검토용)
+# openpyxl import 추가
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils.dataframe import dataframe_to_rows
+import json
 
 # 운영체제별 한글 폰트 설정
 system = platform.system()
@@ -454,9 +458,9 @@ def analyze_weekly_stock_data(hist, stock_code):
         print("   스토캐스틱 신호: 중립 구간")
 
 def create_weekly_stock_chart(hist, stock_code):
-    """주식 주봉 차트 생성 (캔들차트 + 보조지표)"""
+    """주식 주봉 차트 생성 (캔들차트 + 보조지표) - 차트 데이터 반환 추가"""
     if hist is None or hist.empty:
-        return None
+        return None, None
     
     print(f"\n📈 주봉 캔들차트를 생성합니다...")
     
@@ -606,60 +610,8 @@ def create_weekly_stock_chart(hist, stock_code):
     # 차트 뷰어를 띄우지 않고 차트 닫기
     plt.close()
     
-    return filepath
-    
-    # 이동평균 신호 분석
-    current_price = hist['Close'].iloc[-1]
-    print(f"\n📈 이동평균 신호 분석:")
-    print("-" * 50)
-    
-    if 'MA5' in df.columns and 'MA20' in df.columns:
-        ma5 = df['MA5'].iloc[-1]
-        ma20 = df['MA20'].iloc[-1]
-        ma60 = df['MA60'].iloc[-1]
-        
-        if current_price > ma5 and ma5 > ma20 and ma20 > ma60:
-            print("✅ 강한 상승 추세: 현재가 > 5주선 > 20주선 > 60주선")
-        elif current_price > ma5 and ma5 > ma20:
-            print("📈 상승 추세: 현재가 > 5주선 > 20주선")
-        elif current_price < ma5 and ma5 < ma20 and ma20 < ma60:
-            print("🔻 강한 하락 추세: 현재가 < 5주선 < 20주선 < 60주선")
-        elif current_price < ma5 and ma5 < ma20:
-            print("📉 하락 추세: 현재가 < 5주선 < 20주선")
-        else:
-            print("🔄 혼조세: 이동평균선이 교차하는 구간")
-    
-    # 주봉 캔들차트 패턴 분석
-    print(f"\n🕯️ 주봉 캔들차트 패턴 분석:")
-    print("-" * 50)
-    
-    # 최근 3주간의 주봉 캔들 패턴 분석
-    recent_data = hist.tail(3)
-    for i, (date, row) in enumerate(recent_data.iterrows()):
-        body_size = abs(row['Close'] - row['Open'])
-        total_range = row['High'] - row['Low']
-        body_ratio = body_size / total_range if total_range > 0 else 0
-        
-        if row['Close'] > row['Open']:
-            candle_type = "양봉"
-            if body_ratio > 0.7:
-                pattern = "강한 상승"
-            elif body_ratio > 0.4:
-                pattern = "일반 상승"
-            else:
-                pattern = "약한 상승"
-        else:
-            candle_type = "음봉"
-            if body_ratio > 0.7:
-                pattern = "강한 하락"
-            elif body_ratio > 0.4:
-                pattern = "일반 하락"
-            else:
-                pattern = "약한 하락"
-        
-        print(f"{date.strftime('%Y-%m-%d')}: {candle_type} ({pattern}) - 시가: {row['Open']:,.0f}, 종가: {row['Close']:,.0f}")
-
-# 버전 번호 생성 함수 제거됨 (검토용)
+    # 차트 데이터 반환 (보조지표 포함)
+    return filepath, df
 
 def get_stock_name(stock_code):
     """종목코드로 종목명을 가져오는 함수"""
@@ -689,7 +641,396 @@ def get_stock_name(stock_code):
     except:
         return stock_code
 
-# 엑셀 저장 기능 제거됨 (검토용)
+def save_chart_data_to_json(chart_data, stock_code, stock_name):
+    """차트 데이터를 JSON으로 저장 - Gemini AI 최적화"""
+    if chart_data is None or chart_data.empty:
+        print("❌ 저장할 차트 데이터가 없습니다.")
+        return None
+    
+    try:
+        print(f"\n📊 차트 데이터를 JSON으로 저장합니다...")
+        
+        # 시간대 정보 제거
+        chart_data_clean = chart_data.copy()
+        if chart_data_clean.index.tz is not None:
+            chart_data_clean.index = chart_data_clean.index.tz_localize(None)
+            print("   🔧 시간대 정보를 제거했습니다.")
+        
+        # JSON 저장 디렉토리 생성
+        json_dir = "chart_data_json"
+        if not os.path.exists(json_dir):
+            os.makedirs(json_dir)
+            print(f"📁 {json_dir} 폴더를 생성했습니다.")
+        
+        # 파일명 생성
+        current_date = datetime.now().strftime("%Y%m%d")
+        filename = f"weekly_{stock_name}_{stock_code}_{current_date}.json"
+        filename = filename.replace(" ", "_").replace("/", "_").replace("\\", "_").replace(":", "_")
+        filepath = os.path.join(json_dir, filename)
+        
+        # 중복 확인
+        version = 1
+        while os.path.exists(filepath):
+            name_without_ext = filename.rsplit('.', 1)[0]
+            ext = filename.rsplit('.', 1)[1]
+            filename = f"{name_without_ext}_v{version}.{ext}"
+            filepath = os.path.join(json_dir, filename)
+            version += 1
+        
+        # JSON 데이터 구조화
+        json_data = {
+            "metadata": {
+                "stock_name": stock_name,
+                "stock_code": stock_code,
+                "created_at": datetime.now().isoformat(),
+                "data_period": {
+                    "start": chart_data_clean.index[0].strftime('%Y-%m-%d'),
+                    "end": chart_data_clean.index[-1].strftime('%Y-%m-%d')
+                },
+                "total_records": len(chart_data_clean),
+                "chart_type": "weekly"
+            },
+            "summary": {
+                "latest_close": float(chart_data_clean['Close'].iloc[-1]),
+                "latest_volume": int(chart_data_clean['Volume'].iloc[-1]),
+                "price_change": float(chart_data_clean['Close'].iloc[-1] - chart_data_clean['Open'].iloc[0]),
+                "price_change_pct": float(((chart_data_clean['Close'].iloc[-1] / chart_data_clean['Open'].iloc[0]) - 1) * 100),
+                "highest_price": float(chart_data_clean['High'].max()),
+                "lowest_price": float(chart_data_clean['Low'].min()),
+                "avg_volume": float(chart_data_clean['Volume'].mean())
+            },
+            "technical_indicators": {
+                "latest_values": {
+                    "ma5": float(chart_data_clean['MA5'].iloc[-1]) if 'MA5' in chart_data_clean else None,
+                    "ma20": float(chart_data_clean['MA20'].iloc[-1]) if 'MA20' in chart_data_clean else None,
+                    "ma60": float(chart_data_clean['MA60'].iloc[-1]) if 'MA60' in chart_data_clean else None,
+                    "stoch_k": float(chart_data_clean['Stoch_K'].iloc[-1]) if 'Stoch_K' in chart_data_clean else None,
+                    "stoch_d": float(chart_data_clean['Stoch_D'].iloc[-1]) if 'Stoch_D' in chart_data_clean else None,
+                    "bb_upper": float(chart_data_clean['BB_Upper'].iloc[-1]) if 'BB_Upper' in chart_data_clean else None,
+                    "bb_lower": float(chart_data_clean['BB_Lower'].iloc[-1]) if 'BB_Lower' in chart_data_clean else None,
+                    "bb_middle": float(chart_data_clean['BB_Middle'].iloc[-1]) if 'BB_Middle' in chart_data_clean else None
+                }
+            },
+            "chart_data": []
+        }
+        
+        # 차트 데이터 추가 (최근 30개 데이터만 - AI 분석에 충분)
+        recent_data = chart_data_clean.tail(30)
+        for date, row in recent_data.iterrows():
+            data_point = {
+                "date": date.strftime('%Y-%m-%d'),
+                "open": float(row['Open']),
+                "high": float(row['High']),
+                "low": float(row['Low']),
+                "close": float(row['Close']),
+                "volume": int(row['Volume'])
+            }
+            
+            # 기술적 지표 추가
+            if 'MA5' in row:
+                data_point["ma5"] = float(row['MA5'])
+            if 'MA20' in row:
+                data_point["ma20"] = float(row['MA20'])
+            if 'MA60' in row:
+                data_point["ma60"] = float(row['MA60'])
+            if 'Stoch_K' in row:
+                data_point["stoch_k"] = float(row['Stoch_K'])
+            if 'Stoch_D' in row:
+                data_point["stoch_d"] = float(row['Stoch_D'])
+            if 'BB_Upper' in row:
+                data_point["bb_upper"] = float(row['BB_Upper'])
+            if 'BB_Lower' in row:
+                data_point["bb_lower"] = float(row['BB_Lower'])
+            if 'BB_Middle' in row:
+                data_point["bb_middle"] = float(row['BB_Middle'])
+            
+            json_data["chart_data"].append(data_point)
+        
+        # JSON 파일 저장
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(json_data, f, ensure_ascii=False, indent=2)
+        
+        print(f"💾 JSON 파일이 저장되었습니다: {filepath}")
+        print(f"📊 데이터 구조:")
+        print(f"   - 메타데이터: 종목 정보, 생성일시, 데이터 기간")
+        print(f"   - 요약 정보: 최근 가격, 변동률, 거래량 통계")
+        print(f"   - 기술적 지표: 최신 보조지표 값들")
+        print(f"   - 차트 데이터: 최근 30개 거래주 OHLCV + 지표")
+        
+        return filepath
+        
+    except Exception as e:
+        print(f"❌ JSON 파일 저장 중 오류: {e}")
+        return None
+
+def save_chart_data_to_csv(chart_data, stock_code, stock_name):
+    """차트 데이터를 CSV로 저장 - 간단하고 읽기 쉬움"""
+    if chart_data is None or chart_data.empty:
+        print("❌ 저장할 차트 데이터가 없습니다.")
+        return None
+    
+    try:
+        print(f"\n📊 차트 데이터를 CSV로 저장합니다...")
+        
+        # 시간대 정보 제거
+        chart_data_clean = chart_data.copy()
+        if chart_data_clean.index.tz is not None:
+            chart_data_clean.index = chart_data_clean.index.tz_localize(None)
+            print("   🔧 시간대 정보를 제거했습니다.")
+        
+        # CSV 저장 디렉토리 생성
+        csv_dir = "chart_data_csv"
+        if not os.path.exists(csv_dir):
+            os.makedirs(csv_dir)
+            print(f"📁 {csv_dir} 폴더를 생성했습니다.")
+        
+        # 파일명 생성
+        current_date = datetime.now().strftime("%Y%m%d")
+        filename = f"weekly_{stock_name}_{stock_code}_{current_date}.csv"
+        filename = filename.replace(" ", "_").replace("/", "_").replace("\\", "_").replace(":", "_")
+        filepath = os.path.join(csv_dir, filename)
+        
+        # 중복 확인
+        version = 1
+        while os.path.exists(filepath):
+            name_without_ext = filename.rsplit('.', 1)[0]
+            ext = filename.rsplit('.', 1)[1]
+            filename = f"{name_without_ext}_v{version}.{ext}"
+            filepath = os.path.join(csv_dir, filename)
+            version += 1
+        
+        # CSV 저장 (최근 50개 데이터만)
+        recent_data = chart_data_clean.tail(50)
+        recent_data.to_csv(filepath, encoding='utf-8-sig')
+        
+        print(f"💾 CSV 파일이 저장되었습니다: {filepath}")
+        print(f"📊 데이터: 최근 50개 거래주 OHLCV + 기술적 지표")
+        
+        return filepath
+        
+    except Exception as e:
+        print(f"❌ CSV 파일 저장 중 오류: {e}")
+        return None
+
+def save_chart_summary_to_text(chart_data, stock_code, stock_name):
+    """차트 데이터 요약을 텍스트로 저장 - AI 분석 최적화"""
+    if chart_data is None or chart_data.empty:
+        print("❌ 저장할 차트 데이터가 없습니다.")
+        return None
+    
+    try:
+        print(f"\n📊 차트 데이터 요약을 텍스트로 저장합니다...")
+        
+        # 텍스트 저장 디렉토리 생성
+        text_dir = "chart_data_text"
+        if not os.path.exists(text_dir):
+            os.makedirs(text_dir)
+            print(f"📁 {text_dir} 폴더를 생성했습니다.")
+        
+        # 파일명 생성
+        current_date = datetime.now().strftime("%Y%m%d")
+        filename = f"weekly_{stock_name}_{stock_code}_{current_date}_summary.txt"
+        filename = filename.replace(" ", "_").replace("/", "_").replace("\\", "_").replace(":", "_")
+        filepath = os.path.join(text_dir, filename)
+        
+        # 중복 확인
+        version = 1
+        while os.path.exists(filepath):
+            name_without_ext = filename.rsplit('.', 1)[0]
+            ext = filename.rsplit('.', 1)[1]
+            filename = f"{name_without_ext}_v{version}.{ext}"
+            filepath = os.path.join(text_dir, filename)
+            version += 1
+        
+        # 요약 텍스트 생성
+        summary_text = f"""주식 주봉 차트 데이터 요약
+========================
+
+종목 정보:
+- 종목명: {stock_name}
+- 종목코드: {stock_code}
+- 생성일시: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+- 데이터 기간: {chart_data.index[0].strftime('%Y-%m-%d')} ~ {chart_data.index[-1].strftime('%Y-%m-%d')}
+- 총 데이터 수: {len(chart_data)}주
+
+가격 정보:
+- 시작가: {chart_data['Open'].iloc[0]:,.0f}원
+- 최근 종가: {chart_data['Close'].iloc[-1]:,.0f}원
+- 최고가: {chart_data['High'].max():,.0f}원
+- 최저가: {chart_data['Low'].min():,.0f}원
+- 가격 변동: {chart_data['Close'].iloc[-1] - chart_data['Open'].iloc[0]:+,.0f}원
+- 변동률: {((chart_data['Close'].iloc[-1] / chart_data['Open'].iloc[0]) - 1) * 100:+.2f}%
+
+거래량 정보:
+- 평균 거래량: {chart_data['Volume'].mean():,.0f}주
+- 최대 거래량: {chart_data['Volume'].max():,.0f}주
+- 최근 거래량: {chart_data['Volume'].iloc[-1]:,.0f}주
+
+기술적 지표 (최근값):
+"""
+        
+        # 기술적 지표 추가
+        if 'MA5' in chart_data:
+            summary_text += f"- 5주 이동평균: {chart_data['MA5'].iloc[-1]:,.0f}원\n"
+        if 'MA20' in chart_data:
+            summary_text += f"- 20주 이동평균: {chart_data['MA20'].iloc[-1]:,.0f}원\n"
+        if 'MA60' in chart_data:
+            summary_text += f"- 60주 이동평균: {chart_data['MA60'].iloc[-1]:,.0f}원\n"
+        if 'Stoch_K' in chart_data:
+            summary_text += f"- 스토캐스틱 %K: {chart_data['Stoch_K'].iloc[-1]:.1f}\n"
+        if 'Stoch_D' in chart_data:
+            summary_text += f"- 스토캐스틱 %D: {chart_data['Stoch_D'].iloc[-1]:.1f}\n"
+        if 'BB_Upper' in chart_data:
+            summary_text += f"- 볼린저 밴드 상단: {chart_data['BB_Upper'].iloc[-1]:,.0f}원\n"
+        if 'BB_Lower' in chart_data:
+            summary_text += f"- 볼린저 밴드 하단: {chart_data['BB_Lower'].iloc[-1]:,.0f}원\n"
+        if 'BB_Middle' in chart_data:
+            summary_text += f"- 볼린저 밴드 중간: {chart_data['BB_Middle'].iloc[-1]:,.0f}원\n"
+        
+        summary_text += f"""
+최근 10개 거래주 데이터:
+"""
+        
+        # 최근 10개 데이터 추가
+        recent_data = chart_data.tail(10)
+        for date, row in recent_data.iterrows():
+            summary_text += f"{date.strftime('%Y-%m-%d')}: {row['Open']:,.0f} → {row['Close']:,.0f} (거래량: {row['Volume']:,.0f})\n"
+        
+        # 텍스트 파일 저장
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(summary_text)
+        
+        print(f"💾 텍스트 요약 파일이 저장되었습니다: {filepath}")
+        
+        return filepath
+        
+    except Exception as e:
+        print(f"❌ 텍스트 파일 저장 중 오류: {e}")
+        return None
+
+# 엑셀 저장 기능 주석 처리 (나중에 검토용으로 사용)
+'''
+def save_chart_data_to_excel(chart_data, stock_code, stock_name):
+    """차트 데이터를 엑셀로 저장 (보조지표 포함)"""
+    if chart_data is None or chart_data.empty:
+        print("❌ 저장할 차트 데이터가 없습니다.")
+        return None
+    
+    try:
+        print(f"\n📊 차트 데이터를 엑셀로 저장합니다...")
+        
+        # 시간대 정보 제거 (Excel 호환성을 위해)
+        chart_data_clean = chart_data.copy()
+        if chart_data_clean.index.tz is not None:
+            chart_data_clean.index = chart_data_clean.index.tz_localize(None)
+            print("   🔧 시간대 정보를 제거했습니다.")
+        
+        # 엑셀 파일 저장 디렉토리 생성
+        excel_dir = "chart_data_excel"
+        if not os.path.exists(excel_dir):
+            os.makedirs(excel_dir)
+            print(f"📁 {excel_dir} 폴더를 생성했습니다.")
+        
+        # 파일명 생성
+        current_date = datetime.now().strftime("%Y%m%d")
+        base_filename = f"weekly_chart_data_{stock_name}_{stock_code}_{current_date}.xlsx"
+        base_filename = base_filename.replace(" ", "_").replace("/", "_").replace("\\", "_").replace(":", "_")
+        
+        # 파일 중복 확인 및 버전 추가
+        version = 1
+        filename = base_filename
+        filepath = os.path.join(excel_dir, filename)
+        
+        while os.path.exists(filepath):
+            name_without_ext = base_filename.rsplit('.', 1)[0]
+            ext = base_filename.rsplit('.', 1)[1]
+            filename = f"{name_without_ext}_v{version}.{ext}"
+            filepath = os.path.join(excel_dir, filename)
+            version += 1
+        
+        # 워크북 생성
+        wb = openpyxl.Workbook()
+        
+        # 기본 시트 제거
+        wb.remove(wb.active)
+        
+        # 1. 종합 데이터 시트 (모든 지표 포함)
+        ws_summary = wb.create_sheet("종합데이터")
+        
+        # 모든 컬럼 선택
+        summary_data = chart_data_clean.copy()
+        summary_data.index.name = 'Date'
+        summary_data.insert(0, 'Date', summary_data.index.strftime('%Y-%m-%d'))
+        
+        for r in dataframe_to_rows(summary_data, index=False, header=True):
+            ws_summary.append(r)
+        
+        # 헤더 스타일링
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        header_alignment = Alignment(horizontal="center", vertical="center")
+        
+        for cell in ws_summary[1]:
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_alignment
+        
+        # 컬럼 너비 조정
+        for col in ws_summary.columns:
+            ws_summary.column_dimensions[col[0].column_letter].width = 12
+        
+        # 2. 요약 정보 시트
+        ws_info = wb.create_sheet("요약정보")
+        
+        # 기본 정보
+        info_data = [
+            ["종목명", stock_name],
+            ["종목코드", stock_code],
+            ["생성일시", datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
+            ["데이터 기간", f"{chart_data_clean.index[0].strftime('%Y-%m-%d')} ~ {chart_data_clean.index[-1].strftime('%Y-%m-%d')}"],
+            ["총 데이터 수", len(chart_data_clean)],
+            ["", ""],
+            ["최근 데이터 요약", ""],
+            ["최근 종가", f"{chart_data_clean['Close'].iloc[-1]:,.0f}원"],
+            ["최근 스토캐스틱 %K", f"{chart_data_clean['Stoch_K'].iloc[-1]:.1f}"],
+            ["최근 스토캐스틱 %D", f"{chart_data_clean['Stoch_D'].iloc[-1]:.1f}"],
+            ["5주 이동평균", f"{chart_data_clean['MA5'].iloc[-1]:,.0f}원"],
+            ["20주 이동평균", f"{chart_data_clean['MA20'].iloc[-1]:,.0f}원"],
+            ["60주 이동평균", f"{chart_data_clean['MA60'].iloc[-1]:,.0f}원"],
+            ["볼린저 밴드 상단", f"{chart_data_clean['BB_Upper'].iloc[-1]:,.0f}원"],
+            ["볼린저 밴드 하단", f"{chart_data_clean['BB_Lower'].iloc[-1]:,.0f}원"],
+        ]
+        
+        for row in info_data:
+            ws_info.append(row)
+        
+        # 헤더 스타일링
+        for row in ws_info.iter_rows(min_row=1, max_row=len(info_data)):
+            for cell in row:
+                if cell.value and cell.value in ["종목명", "종목코드", "생성일시", "데이터 기간", "총 데이터 수", "최근 데이터 요약"]:
+                    cell.font = Font(bold=True, color="FFFFFF")
+                    cell.fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+                    cell.alignment = Alignment(horizontal="center", vertical="center")
+        
+        # 컬럼 너비 조정
+        ws_info.column_dimensions['A'].width = 20
+        ws_info.column_dimensions['B'].width = 30
+        
+        # 파일 저장
+        wb.save(filepath)
+        print(f"💾 엑셀 파일이 저장되었습니다: {filepath}")
+        
+        # 시트 정보 출력
+        print(f"📊 생성된 시트:")
+        print(f"   - 종합데이터: 모든 지표 통합 (OHLCV + 기술적 지표)")
+        print(f"   - 요약정보: 종목 및 데이터 요약")
+        
+        return filepath
+        
+    except Exception as e:
+        print(f"❌ 엑셀 파일 저장 중 오류: {e}")
+        return None
+'''
 
 def main():
     """메인 함수"""
@@ -711,15 +1052,37 @@ def main():
         # 주봉 데이터 분석
         analyze_weekly_stock_data(hist, stock_code)
         
-        # 주봉 차트 생성
-        create_weekly_stock_chart(hist, stock_code)
+        # 주봉 차트 생성 (차트 데이터 반환)
+        chart_path, chart_data = create_weekly_stock_chart(hist, stock_code)
         
-        # 종목명 가져오기
-        stock_name = get_stock_name(stock_code)
-        
-        # 엑셀 저장 기능 제거됨 (검토용)
-        
-        print("\n✅ 주봉 분석이 완료되었습니다!")
+        if chart_path and chart_data is not None:
+            # 종목명 가져오기
+            stock_name = get_stock_name(stock_code)
+            
+            # JSON 저장 (추천)
+            json_path = save_chart_data_to_json(chart_data, stock_code, stock_name)
+            
+            # CSV 저장 (보조)
+            csv_path = save_chart_data_to_csv(chart_data, stock_code, stock_name)
+            
+            # 텍스트 요약 저장 (보조)
+            text_path = save_chart_summary_to_text(chart_data, stock_code, stock_name)
+            
+            if json_path:
+                print(f"\n✅ 주봉 분석이 완료되었습니다!")
+                print(f"📈 차트 이미지: {chart_path}")
+                print(f"📊 JSON 데이터: {json_path}")
+                if csv_path:
+                    print(f"📋 CSV 데이터: {csv_path}")
+                if text_path:
+                    print(f"📝 텍스트 요약: {text_path}")
+                print(f"\n💡 이제 AI 분석에 차트 이미지와 JSON 데이터를 함께 전달할 수 있습니다!")
+            else:
+                print(f"\n✅ 주봉 분석이 완료되었습니다!")
+                print(f"📈 차트 이미지: {chart_path}")
+                print(f"❌ 데이터 파일 저장에 실패했습니다.")
+        else:
+            print(f"\n❌ 차트 생성에 실패했습니다.")
     else:
         print("\n❌ 주봉 데이터 조회에 실패했습니다.")
 

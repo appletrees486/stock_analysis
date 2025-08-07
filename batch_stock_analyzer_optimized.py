@@ -251,15 +251,22 @@ def run_ai_analysis_fast(stock_name: str, stock_code: str, chart_type: str, char
     """고속 AI 분석"""
     try:
         charts_dir = f"{chart_type_en}_charts"
+        print(f"🔍 차트 폴더 확인: {charts_dir}")
+        
         if not os.path.exists(charts_dir):
+            print(f"❌ 차트 폴더가 존재하지 않습니다: {charts_dir}")
             return False
         
         # 차트 파일 찾기 (최적화)
         chart_files = [f for f in os.listdir(charts_dir) if f.endswith('.png') and stock_code in f]
+        print(f"📁 찾은 차트 파일들: {chart_files}")
+        
         if not chart_files:
+            print(f"❌ 종목 {stock_code}의 차트 파일을 찾을 수 없습니다")
             return False
         
         selected_file = sorted(chart_files)[-1]
+        print(f"📊 선택된 차트 파일: {selected_file}")
         
         # AI 분석 실행
         import ai_chart_analysis
@@ -267,32 +274,58 @@ def run_ai_analysis_fast(stock_name: str, stock_code: str, chart_type: str, char
         
         api_key = config.get_api_key()
         if not api_key:
+            print("❌ API 키를 가져올 수 없습니다")
             return False
+        
+        print(f"✅ API 키 확인 완료")
         
         analyzer = ai_chart_analysis.AIChartAnalyzer(api_key)
         image_path = os.path.join(charts_dir, selected_file)
         
+        print(f"🤖 AI 분석 시작: {stock_name} ({stock_code})")
+        print(f"📁 이미지 경로: {image_path}")
+        print(f"📊 차트 유형: {chart_type}")
+        
         # 차트 데이터가 있는 경우 AI 분석에 전달
         if chart_data is not None:
+            print(f"📊 차트 데이터 포함하여 분석")
             result = analyzer.analyze_chart_image(image_path, "", chart_type, chart_data)
         else:
+            print(f"📊 차트 데이터 없이 분석")
             result = analyzer.analyze_chart_image(image_path, "", chart_type)
         
         if result:
+            print(f"✅ AI 분석 성공")
             # 결과 저장 (간소화)
             output_dir = "ai_analysis_results"
+            if not os.path.exists(output_dir):
+                os.makedirs(output_dir)
+                print(f"📁 {output_dir} 폴더 생성")
+            
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             
             json_path = os.path.join(output_dir, f"analysis_{chart_type_en}_{stock_name}_{timestamp}.json")
             doc_path = os.path.join(output_dir, f"analysis_{chart_type_en}_{stock_name}_{timestamp}.docx")
             
+            print(f"💾 JSON 파일 저장: {json_path}")
             json_success = analyzer.save_analysis_result(result, json_path)
+            
+            print(f"💾 DOCX 파일 생성: {doc_path}")
             doc_success = analyzer.create_word_document(result, image_path, doc_path, chart_type)
             
-            return json_success and doc_success
-        
-        return False
-    except:
+            if json_success and doc_success:
+                print(f"✅ 파일 저장 완료")
+                return True
+            else:
+                print(f"❌ 파일 저장 실패 - JSON: {json_success}, DOCX: {doc_success}")
+                return False
+        else:
+            print(f"❌ AI 분석 결과가 없습니다")
+            return False
+    except Exception as e:
+        print(f"❌ AI 분석 중 오류: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def analyze_single_stock_fast(stock_input: str, chart_type: str, chart_type_en: str, tracker: FastProgressTracker) -> Dict:

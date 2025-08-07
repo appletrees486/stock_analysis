@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Yahoo Finance와 공공데이터 API 비교 테스트 스크립트
+Yahoo Finance 주식 분석 테스트 스크립트
 """
 
 # matplotlib 백엔드를 Agg로 설정 (tkinter 에러 방지)
@@ -307,9 +307,9 @@ def create_stock_chart(hist, stock_code, source_name):
     
     return filepath
 
-def compare_data_sources(stock_code):
-    """데이터 소스 비교 분석"""
-    print(f"\n🔍 {stock_code} 데이터 소스 비교 분석")
+def analyze_stock_data_source(stock_code):
+    """Yahoo Finance 데이터 분석"""
+    print(f"\n🔍 {stock_code} Yahoo Finance 데이터 분석")
     print("="*60)
     
     # Yahoo Finance 결과
@@ -323,23 +323,14 @@ def compare_data_sources(stock_code):
     else:
         print("❌ Yahoo Finance 데이터 조회 실패")
     
-    # 공공데이터 API 결과 (현재 SSL 문제로 실패)
-    print("\n📊 공공데이터 API 결과:")
-    print("⚠️ 현재 SSL 인증서 문제로 공공데이터 API 연결이 실패하고 있습니다.")
-    print("💡 공공데이터 API는 다음과 같은 이유로 연결이 어려울 수 있습니다:")
-    print("   - SSL 인증서 설정 문제")
-    print("   - 네트워크 방화벽 설정")
-    print("   - API 서비스 일시 중단")
-    print("   - 엔드포인트 변경")
-    
     print("\n" + "="*60)
-    print("💡 비교 분석 완료!")
-    print("📁 생성된 차트 파일들을 확인하여 데이터 품질을 비교해보세요.")
-    print("   - comparison_charts/: 비교 분석 차트")
+    print("💡 분석 완료!")
+    print("📁 생성된 차트 파일들을 확인해보세요.")
+    print("   - comparison_charts/: 분석 차트")
     print("   - daily_charts/: 기존 Yahoo Finance 방식")
     
     if yahoo_data is not None:
-        print(f"\n📊 데이터 품질 비교:")
+        print(f"\n📊 데이터 요약:")
         print(f"   📅 데이터 기간: {yahoo_data.index[0].strftime('%Y-%m-%d')} ~ {yahoo_data.index[-1].strftime('%Y-%m-%d')}")
         print(f"   📈 데이터 수: {len(yahoo_data)}일")
         print(f"   💰 최신 종가: {yahoo_data['Close'].iloc[-1]:,.0f}원")
@@ -347,7 +338,7 @@ def compare_data_sources(stock_code):
 
 def main():
     """메인 함수"""
-    print("🚀 Yahoo Finance와 공공데이터 API 비교 테스트 프로그램")
+    print("🚀 Yahoo Finance 주식 분석 테스트 프로그램")
     print("="*60)
     
     # 종목코드 입력
@@ -358,8 +349,8 @@ def main():
         else:
             print("❌ 올바른 종목코드를 입력해주세요 (6자리 숫자)")
     
-    # 비교 분석 실행
-    compare_data_sources(stock_code)
+    # 분석 실행
+    analyze_stock_data_source(stock_code)
 
 if __name__ == "__main__":
     main() 
