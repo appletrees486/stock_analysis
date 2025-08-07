@@ -22,36 +22,43 @@ import pandas as pd
 class StockNameMapper:
     """종목번호와 종목명 매핑 클래스"""
     
-    def __init__(self, stock_list_file: str = "sotck_list.txt"):
+    def __init__(self, stock_mapping_file: str = "stock_mapping.json"):
         """
         종목명 매퍼 초기화
         
         Args:
-            stock_list_file (str): 종목 리스트 파일 경로
+            stock_mapping_file (str): 종목 매핑 JSON 파일 경로
         """
-        self.stock_list_file = stock_list_file
+        self.stock_mapping_file = stock_mapping_file
         self.stock_mapping = {}
         self.load_stock_mapping()
     
     def load_stock_mapping(self):
-        """종목 리스트 파일에서 종목번호와 종목명 매핑 로드"""
+        """JSON 파일에서 종목번호와 종목명 매핑 로드"""
         try:
-            if os.path.exists(self.stock_list_file):
-                with open(self.stock_list_file, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        line = line.strip()
-                        if line and '\t' in line:
-                            parts = line.split('\t')
-                            if len(parts) >= 2:
-                                stock_code = parts[0].strip()
-                                stock_name = parts[1].strip()
-                                self.stock_mapping[stock_code] = stock_name
-                
+            if os.path.exists(self.stock_mapping_file):
+                with open(self.stock_mapping_file, 'r', encoding='utf-8') as f:
+                    self.stock_mapping = json.load(f)
                 print(f"✅ 종목 매핑 로드 완료: {len(self.stock_mapping)}개 종목")
             else:
-                print(f"⚠️ 종목 리스트 파일을 찾을 수 없습니다: {self.stock_list_file}")
+                print(f"⚠️ 종목 매핑 파일을 찾을 수 없습니다: {self.stock_mapping_file}")
+                # 기본 매핑 데이터 생성
+                self.create_default_mapping()
         except Exception as e:
             print(f"❌ 종목 매핑 로드 중 오류: {e}")
+            # 기본 매핑 데이터 생성
+            self.create_default_mapping()
+    
+    def create_default_mapping(self):
+        """기본 종목 매핑 데이터 생성"""
+        self.stock_mapping = {
+            "019210": "YG-1",
+            "023410": "유진기업", 
+            "145720": "덴티움",
+            "005930": "삼성전자",
+            "014280": "금강철강"
+        }
+        print(f"✅ 기본 종목 매핑 생성: {len(self.stock_mapping)}개 종목")
     
     def get_stock_name(self, stock_code: str) -> str:
         """
@@ -137,6 +144,15 @@ class StockNameMapper:
                     # 파일명 그대로 사용
                     stock_name = name_without_ext
                     stock_code = "000000"
+            
+            # 종목번호가 있지만 종목명이 매핑되지 않은 경우, 매핑에서 조회
+            if stock_code and stock_code != "000000":
+                mapped_name = self.get_stock_name(stock_code)
+                if mapped_name != stock_code:  # 매핑에서 찾은 경우
+                    stock_name = mapped_name
+                elif not stock_name or stock_name == stock_code or stock_name.endswith(stock_code):
+                    # 종목명이 종목코드와 같거나 종목코드로 끝나는 경우, 매핑된 이름 사용
+                    stock_name = mapped_name
             
             return stock_name, stock_code
             
@@ -555,13 +571,13 @@ JSON 형태로 응답해주세요. 월봉 차트에 필요한 지표만 포함�
             return ChartAnalysisPrompts.get_daily_prompt()
 
 class AIChartAnalyzer:
-    def __init__(self, api_key: str, stock_list_file: str = "sotck_list.txt"):
+    def __init__(self, api_key: str, stock_mapping_file: str = "stock_mapping.json"):
         """
         AI 차트 분석기 초기화
         
         Args:
             api_key (str): Google AI API 키
-            stock_list_file (str): 종목 리스트 파일 경로
+            stock_mapping_file (str): 종목 매핑 JSON 파일 경로
         """
         self.api_key = api_key
         genai.configure(api_key=api_key)
@@ -570,7 +586,7 @@ class AIChartAnalyzer:
         self.model = genai.GenerativeModel('gemini-1.5-flash')
         
         # 종목명 매퍼 초기화
-        self.stock_mapper = StockNameMapper(stock_list_file)
+        self.stock_mapper = StockNameMapper(stock_mapping_file)
 
     def encode_image_to_base64(self, image_path: str) -> str:
         """
@@ -619,7 +635,16 @@ class AIChartAnalyzer:
                 stock_name = extracted_stock_name
                 # 종목번호로 정확한 종목명 조회
                 if extracted_stock_code and extracted_stock_code != "000000":
-                    stock_name = self.stock_mapper.get_stock_name(extracted_stock_code)
+                    mapped_name = self.stock_mapper.get_stock_name(extracted_stock_code)
+                    if mapped_name != extracted_stock_code:  # 매핑에서 찾은 경우
+                        stock_name = mapped_name
+            
+            # 종목명이 여전히 "알 수 없음"이거나 종목코드와 같은 경우, 매핑에서 다시 조회
+            if stock_name == "알 수 없음" or stock_name == extracted_stock_code:
+                if extracted_stock_code and extracted_stock_code != "000000":
+                    mapped_name = self.stock_mapper.get_stock_name(extracted_stock_code)
+                    if mapped_name != extracted_stock_code:
+                        stock_name = mapped_name
             
             print(f"📈 종목명: {stock_name}")
             print(f"📈 종목번호: {extracted_stock_code}")
@@ -906,6 +931,13 @@ class AIChartAnalyzer:
     
     def _create_fallback_result(self, stock_name: str, chart_type: str, ai_response: str, error_type: str, stock_code: str = "000000") -> Dict[str, Any]:
         """JSON 파싱 실패 시 대체 결과 생성"""
+        # 종목명이 "알 수 없음"이거나 종목코드와 같은 경우, 매핑에서 조회
+        if stock_name == "알 수 없음" or stock_name == stock_code:
+            if stock_code and stock_code != "000000":
+                mapped_name = self.stock_mapper.get_stock_name(stock_code)
+                if mapped_name != stock_code:
+                    stock_name = mapped_name
+        
         return {
             "종목정보": {
                 "종목명": stock_name,
