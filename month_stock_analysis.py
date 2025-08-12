@@ -287,6 +287,12 @@ def calculate_technical_indicators(df):
     df['MA20'] = df['Close'].rolling(window=20).mean()
     df['MA60'] = df['Close'].rolling(window=60).mean()
     
+    # 볼린저 밴드 계산 (20개월 기준)
+    df['BB_Middle'] = df['Close'].rolling(window=20).mean()
+    bb_std = df['Close'].rolling(window=20).std()
+    df['BB_Upper'] = df['BB_Middle'] + (bb_std * 2)
+    df['BB_Lower'] = df['BB_Middle'] - (bb_std * 2)
+    
     # CCI (Commodity Channel Index) 계산
     # CCI = (Typical Price - SMA of Typical Price) / (0.015 * Mean Deviation)
     # Typical Price = (High + Low + Close) / 3
@@ -452,7 +458,7 @@ def analyze_monthly_stock_data(hist, stock_code):
             print("   ADX 신호: 약한 추세 (추세 없음)")
 
 def create_monthly_stock_chart(hist, stock_code):
-    """주식 월봉 차트 생성 (캔들차트 + 보조지표) - 차트 데이터 반환 추가"""
+    """주식 월봉 차트 생성 (캔들차트 + 보조지표) - test_overlay_chart.py 스타일 적용"""
     if hist is None or hist.empty:
         return None, None
     
@@ -462,90 +468,115 @@ def create_monthly_stock_chart(hist, stock_code):
     df = calculate_technical_indicators(hist.copy())
     df.index.name = 'Date'
     
-    # 하나의 큰 차트에 모든 지표 포함
-    fig, axes = plt.subplots(5, 1, figsize=(15, 20), height_ratios=[6, 2, 2, 2, 2])
-    fig.suptitle(f'{stock_code} Monthly Stock Chart (10 Years) - Technical Indicators', fontsize=16, fontweight='bold')
+    # 차트 생성 (4개 패널: 메인차트, 거래량, CCI, ADX)
+    fig, axes = plt.subplots(4, 1, figsize=(15, 16), height_ratios=[8, 2, 2, 2])
+    fig.suptitle(f'{stock_code} Monthly Stock Chart (10 Years) - Image Reference Style', fontsize=16, fontweight='bold')
     
-    # 1. 캔들차트 (첫 번째 패널)
+    # 1. 메인 차트 (캔들차트 + 보조지표 오버레이)
     ax1 = axes[0]
     
-    # 캔들차트 그리기
+    # 볼린저 밴드 영역 채우기 (이미지 참고 - 오렌지/베이지 스타일)
+    ax1.fill_between(range(len(df)), df['BB_Upper'], df['BB_Lower'], 
+                     alpha=0.15, color='#FFE4B5', label='Bollinger Bands')
+    
+    # 볼린저 밴드 상단과 하단을 오렌지/베이지 색으로 표시 (범례에 표시하지 않음)
+    ax1.plot(range(len(df)), df['BB_Upper'], color='#FFCE89', alpha=0.8, linewidth=1.5, label='_nolegend_')
+    ax1.plot(range(len(df)), df['BB_Lower'], color='#FFCE89', alpha=0.8, linewidth=1.5, label='_nolegend_')
+    
+    # 캔들차트 그리기 (이미지 참고 - 빨간색/파란색)
     for i, (date, row) in enumerate(df.iterrows()):
-        color = 'red' if row['Close'] >= row['Open'] else 'blue'
-        ax1.plot([i, i], [row['Low'], row['High']], color=color, linewidth=1)
-        ax1.plot([i, i], [row['Open'], row['Close']], color=color, linewidth=3)
+        if row['Close'] >= row['Open']:  # 상승
+            color = '#FF4444'  # 빨간색
+        else:  # 하락
+            color = '#4444FF'  # 파란색
+        
+        ax1.plot([i, i], [row['Low'], row['High']], color=color, linewidth=1.0)
+        ax1.plot([i, i], [row['Open'], row['Close']], color=color, linewidth=3.0)
     
-    # 이동평균선 추가
-    ax1.plot(range(len(df)), df['MA5'], color='red', linewidth=1, alpha=0.7, label='MA5')
-    ax1.plot(range(len(df)), df['MA10'], color='orange', linewidth=1, alpha=0.7, label='MA10')
-    ax1.plot(range(len(df)), df['MA20'], color='green', linewidth=1, alpha=0.7, label='MA20')
-    ax1.plot(range(len(df)), df['MA60'], color='purple', linewidth=1, alpha=0.7, label='MA60')
+    # 이동평균선 추가 (웹 트레이딩 스타일 유지)
+    ax1.plot(range(len(df)), df['MA5'], color='#F59E0B', linewidth=2.0, alpha=0.9, label='MA5')
+    ax1.plot(range(len(df)), df['MA20'], color='#8B5CF6', linewidth=2.0, alpha=0.9, label='MA20')
+    ax1.plot(range(len(df)), df['MA60'], color='#06B6D4', linewidth=2.0, alpha=0.9, label='MA60')
     
-    ax1.set_title('Price Chart with Moving Averages')
-    ax1.set_ylabel('Price (KRW)')
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
+    # 메인 차트 설정
+    ax1.set_title('Price Chart with Moving Averages', fontsize=14, fontweight='bold')
+    ax1.set_ylabel('Price (KRW)', fontsize=12, fontweight='bold')
+    ax1.legend(loc='upper left', fontsize=10, framealpha=0.9)
+    ax1.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
     
-    # 2. 월봉 거래량 차트 (두 번째 패널)
+    # Y축을 오른쪽으로 이동
+    ax1.yaxis.set_label_position('right')
+    ax1.yaxis.tick_right()
+    
+    # 2. 거래량 차트 (두 번째 패널) - 웹 트레이딩 스타일 유지
     ax2 = axes[1]
-    ax2.bar(range(len(df)), df['Volume'], color='green', alpha=0.7)
-    ax2.set_title('Monthly Volume')
-    ax2.set_ylabel('Volume')
-    ax2.grid(True, alpha=0.3)
     
-    # 3. CCI 차트 (세 번째 패널)
+    # 상승/하락에 따른 거래량 색상 (이미지 참고 - 빨간색/파란색)
+    colors = ['#FF4444' if close >= open else '#4444FF' 
+              for close, open in zip(df['Close'], df['Open'])]
+    
+    ax2.bar(range(len(df)), df['Volume'], color=colors, alpha=0.7, width=0.8)
+    ax2.set_title('Volume', fontsize=12, fontweight='bold')
+    ax2.set_ylabel('Volume', fontsize=10, fontweight='bold')
+    ax2.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+    
+    # Y축을 오른쪽으로 이동
+    ax2.yaxis.set_label_position('right')
+    ax2.yaxis.tick_right()
+    
+    # 3. CCI 차트 (세 번째 패널) - 웹 트레이딩 스타일 유지
     ax3 = axes[2]
-    ax3.plot(range(len(df)), df['CCI'], color='blue', linewidth=1, label='CCI')
-    ax3.axhline(y=100, color='red', linestyle='--', alpha=0.5, label='Overbought')
-    ax3.axhline(y=-100, color='green', linestyle='--', alpha=0.5, label='Oversold')
-    ax3.axhline(y=0, color='black', linestyle='-', alpha=0.3)
-    ax3.set_title('CCI (Commodity Channel Index)')
-    ax3.set_ylabel('CCI')
-    ax3.legend()
-    ax3.grid(True, alpha=0.3)
+    ax3.plot(range(len(df)), df['CCI'], color='#3B82F6', linewidth=2.0, label='CCI')
+    ax3.axhline(y=100, color='#EF4444', linestyle='--', alpha=0.8, linewidth=1.5, label='Overbought')
+    ax3.axhline(y=-100, color='#10B981', linestyle='--', alpha=0.8, linewidth=1.5, label='Oversold')
+    ax3.axhline(y=0, color='#6B7280', linestyle='-', alpha=0.6, linewidth=1.0, label='Neutral')
+    ax3.set_title('CCI (Commodity Channel Index)', fontsize=12, fontweight='bold')
+    ax3.set_ylabel('CCI', fontsize=10, fontweight='bold')
+    ax3.legend(fontsize=10, framealpha=0.9)
+    ax3.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
     
-    # 4. ADX 차트 (네 번째 패널)
+    # Y축을 오른쪽으로 이동
+    ax3.yaxis.set_label_position('right')
+    ax3.yaxis.tick_right()
+    
+    # 4. ADX 차트 (네 번째 패널) - 웹 트레이딩 스타일 유지
     ax4 = axes[3]
     
     # ADX 값이 유효한지 확인하고 플롯
     if not df['ADX'].isna().all() and not df['Plus_DI'].isna().all() and not df['Minus_DI'].isna().all():
-        ax4.plot(range(len(df)), df['ADX'], color='purple', linewidth=2, label='ADX')
-        ax4.plot(range(len(df)), df['Plus_DI'], color='green', linewidth=1, alpha=0.7, label='+DI')
-        ax4.plot(range(len(df)), df['Minus_DI'], color='red', linewidth=1, alpha=0.7, label='-DI')
-        ax4.axhline(y=25, color='gray', linestyle='--', alpha=0.5, label='Trend Threshold')
-        ax4.set_title('ADX (Average Directional Index)')
-        ax4.set_ylabel('ADX/+DI/-DI')
-        ax4.legend()
-        ax4.grid(True, alpha=0.3)
+        ax4.plot(range(len(df)), df['ADX'], color='#8B5CF6', linewidth=2.5, label='ADX')
+        ax4.plot(range(len(df)), df['Plus_DI'], color='#10B981', linewidth=2.0, alpha=0.8, label='+DI')
+        ax4.plot(range(len(df)), df['Minus_DI'], color='#EF4444', linewidth=2.0, alpha=0.8, label='-DI')
+        ax4.axhline(y=25, color='#6B7280', linestyle='--', alpha=0.8, linewidth=1.5, label='Trend Threshold')
+        ax4.set_title('ADX (Average Directional Index)', fontsize=12, fontweight='bold')
+        ax4.set_ylabel('ADX/+DI/-DI', fontsize=10, fontweight='bold')
+        ax4.legend(fontsize=10, framealpha=0.9)
+        ax4.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
     else:
         # ADX 데이터가 유효하지 않은 경우 메시지 표시
         ax4.text(0.5, 0.5, 'ADX 데이터를 계산할 수 없습니다\n(데이터가 부족하거나 오류가 발생했습니다)', 
                 transform=ax4.transAxes, ha='center', va='center', fontsize=12)
-        ax4.set_title('ADX (Average Directional Index) - 데이터 오류')
-        ax4.set_ylabel('ADX/+DI/-DI')
-        ax4.grid(True, alpha=0.3)
+        ax4.set_title('ADX (Average Directional Index) - 데이터 오류', fontsize=12, fontweight='bold')
+        ax4.set_ylabel('ADX/+DI/-DI', fontsize=10, fontweight='bold')
+        ax4.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
     
-    # 5. 이동평균 비교 차트 (다섯 번째 패널)
-    ax5 = axes[4]
-    ax5.plot(range(len(df)), df['MA5'], color='red', linewidth=1, label='MA5')
-    ax5.plot(range(len(df)), df['MA10'], color='orange', linewidth=1, label='MA10')
-    ax5.plot(range(len(df)), df['MA20'], color='green', linewidth=1, label='MA20')
-    ax5.plot(range(len(df)), df['MA60'], color='purple', linewidth=1, label='MA60')
-    ax5.set_title('Moving Averages Comparison')
-    ax5.set_ylabel('Price (KRW)')
-    ax5.legend()
-    ax5.grid(True, alpha=0.3)
+    # Y축을 오른쪽으로 이동
+    ax4.yaxis.set_label_position('right')
+    ax4.yaxis.tick_right()
     
-    # 모든 패널의 x축 날짜 설정
-    for ax in axes:
-        ax.set_xticks([0, len(df)//4, len(df)//2, 3*len(df)//4, len(df)-1])
-        ax.set_xticklabels([
-            df.index[0].strftime('%Y-%m'),
-            df.index[len(df)//4].strftime('%Y-%m'),
-            df.index[len(df)//2].strftime('%Y-%m'),
-            df.index[3*len(df)//4].strftime('%Y-%m'),
-            df.index[-1].strftime('%Y-%m')
-        ], rotation=45, ha='right')
+    # X축 날짜 설정 - 하단에만 표시
+    for i, ax in enumerate(axes):
+        if i == len(axes) - 1:  # 마지막 패널에만 날짜 표시
+            ax.set_xticks([0, len(df)//4, len(df)//2, 3*len(df)//4, len(df)-1])
+            ax.set_xticklabels([
+                df.index[0].strftime('%Y-%m'),
+                df.index[len(df)//4].strftime('%Y-%m'),
+                df.index[len(df)//2].strftime('%Y-%m'),
+                df.index[3*len(df)//4].strftime('%Y-%m'),
+                df.index[-1].strftime('%Y-%m')
+            ], rotation=45, ha='right', fontweight='bold')
+        else:
+            ax.set_xticks([])  # 다른 패널은 X축 눈금 숨김
     
     plt.tight_layout()
     

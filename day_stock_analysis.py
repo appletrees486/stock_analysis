@@ -146,6 +146,12 @@ def calculate_technical_indicators(df):
     df['MA60'] = df['Close'].rolling(window=60).mean()
     df['MA120'] = df['Close'].rolling(window=120).mean()
     
+    # 볼린저 밴드 계산 (20일 기준)
+    df['BB_Middle'] = df['Close'].rolling(window=20).mean()
+    bb_std = df['Close'].rolling(window=20).std()
+    df['BB_Upper'] = df['BB_Middle'] + (bb_std * 2)
+    df['BB_Lower'] = df['BB_Middle'] - (bb_std * 2)
+    
     # MACD 계산 (표준 공식)
     # MACD = 12일 EMA - 26일 EMA
     # Signal = MACD의 9일 EMA
@@ -245,7 +251,7 @@ def analyze_stock_data(hist, stock_code):
         print("   MACD 신호: 하락 추세")
 
 def create_stock_chart(hist, stock_code):
-    """주식 일봉 차트 생성 (캔들차트 + 보조지표) - 차트 데이터 반환 추가"""
+    """주식 일봉 차트 생성 (캔들차트 + 보조지표) - test_overlay_chart.py 스타일 적용"""
     if hist is None or hist.empty:
         return None, None
     
@@ -255,66 +261,104 @@ def create_stock_chart(hist, stock_code):
     df = calculate_technical_indicators(hist.copy())
     df.index.name = 'Date'
     
-    # 하나의 큰 차트에 모든 지표 포함
-    fig, axes = plt.subplots(4, 1, figsize=(15, 16), height_ratios=[6, 2, 2, 2])
-    fig.suptitle(f'{stock_code} Daily Stock Chart (240 Days) - Technical Indicators', fontsize=16, fontweight='bold')
+    # 차트 생성 (4개 패널: 메인차트, 거래량, RSI, MACD)
+    fig, axes = plt.subplots(4, 1, figsize=(15, 16), height_ratios=[8, 2, 2, 2])
+    fig.suptitle(f'{stock_code} Daily Stock Chart (240 Days) - Image Reference Style', fontsize=16, fontweight='bold')
     
-    # 1. 캔들차트 (첫 번째 패널)
+    # 1. 메인 차트 (캔들차트 + 보조지표 오버레이)
     ax1 = axes[0]
     
-    # 캔들차트 그리기
+    # 볼린저 밴드 영역 채우기 (이미지 참고 - 오렌지/베이지 스타일)
+    ax1.fill_between(df.index, df['BB_Upper'], df['BB_Lower'], 
+                     alpha=0.15, color='#FFE4B5', label='Bollinger Bands')
+    
+    # 볼린저 밴드 상단과 하단을 오렌지/베이지 색으로 표시 (범례에 표시하지 않음)
+    ax1.plot(df.index, df['BB_Upper'], color='#FFCE89', alpha=0.8, linewidth=1.5, label='_nolegend_')
+    ax1.plot(df.index, df['BB_Lower'], color='#FFCE89', alpha=0.8, linewidth=1.5, label='_nolegend_')
+    
+    # 캔들차트 그리기 (이미지 참고 - 빨간색/파란색)
     for date, row in df.iterrows():
-        color = 'red' if row['Close'] >= row['Open'] else 'blue'
-        ax1.plot([date, date], [row['Low'], row['High']], color=color, linewidth=1)
-        ax1.plot([date, date], [row['Open'], row['Close']], color=color, linewidth=3)
+        if row['Close'] >= row['Open']:  # 상승
+            color = '#FF4444'  # 빨간색
+        else:  # 하락
+            color = '#4444FF'  # 파란색
+        
+        ax1.plot([date, date], [row['Low'], row['High']], color=color, linewidth=1.0)
+        ax1.plot([date, date], [row['Open'], row['Close']], color=color, linewidth=3.0)
     
-    # 이동평균선 추가
-    ax1.plot(df.index, df['MA5'], color='red', linewidth=1, alpha=0.7, label='MA5')
-    ax1.plot(df.index, df['MA20'], color='green', linewidth=1, alpha=0.7, label='MA20')
-    ax1.plot(df.index, df['MA60'], color='orange', linewidth=1, alpha=0.7, label='MA60')
-    ax1.plot(df.index, df['MA120'], color='purple', linewidth=1, alpha=0.7, label='MA120')
+    # 이동평균선 추가 (웹 트레이딩 스타일 유지)
+    ax1.plot(df.index, df['MA5'], color='#F59E0B', linewidth=2.0, alpha=0.9, label='MA5')      # 주황색
+    ax1.plot(df.index, df['MA20'], color='#8B5CF6', linewidth=2.0, alpha=0.9, label='MA20')    # 보라색
+    ax1.plot(df.index, df['MA60'], color='#06B6D4', linewidth=2.0, alpha=0.9, label='MA60')    # 청록색
+    ax1.plot(df.index, df['MA120'], color='#84CC16', linewidth=2.0, alpha=0.9, label='MA120')  # 연두색
     
-    ax1.set_title('Price Chart with Moving Averages')
-    ax1.set_ylabel('Price (KRW)')
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
+    # 메인 차트 설정
+    ax1.set_title('Price Chart with Bollinger Bands and Moving Averages', fontsize=14, fontweight='bold')
+    ax1.set_ylabel('Price (KRW)', fontsize=12, fontweight='bold')
+    ax1.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+    ax1.legend(loc='upper left', fontsize=10, framealpha=0.9)
     
-    # 2. 일봉 거래량 차트 (두 번째 패널)
+    # Y축을 오른쪽으로 이동
+    ax1.yaxis.set_label_position('right')
+    ax1.yaxis.tick_right()
+    
+    # 2. 거래량 차트 (두 번째 패널) - 웹 트레이딩 스타일 유지
     ax2 = axes[1]
-    ax2.bar(df.index, df['Volume'], color='green', alpha=0.7)
-    ax2.set_title('Daily Volume')
-    ax2.set_ylabel('Volume')
-    ax2.grid(True, alpha=0.3)
     
-    # 3. MACD 차트 (세 번째 패널)
+    # 상승/하락에 따른 거래량 색상 (이미지 참고 - 빨간색/파란색)
+    colors = ['#FF4444' if close >= open else '#4444FF' 
+              for close, open in zip(df['Close'], df['Open'])]
+    
+    ax2.bar(df.index, df['Volume'], color=colors, alpha=0.7, width=0.8)
+    ax2.set_title('Volume', fontsize=12, fontweight='bold')
+    ax2.set_ylabel('Volume', fontsize=10, fontweight='bold')
+    ax2.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+    
+    # Y축을 오른쪽으로 이동
+    ax2.yaxis.set_label_position('right')
+    ax2.yaxis.tick_right()
+    
+    # 3. RSI 차트 (세 번째 패널) - 웹 트레이딩 스타일 유지
     ax3 = axes[2]
-    ax3.plot(df.index, df['MACD'], color='blue', linewidth=1, label='MACD')
-    ax3.plot(df.index, df['MACD_Signal'], color='red', linewidth=1, label='Signal')
-    ax3.bar(df.index, df['MACD_Histogram'], color='gray', alpha=0.5, width=0.8, label='Histogram')
-    ax3.axhline(y=0, color='black', linestyle='-', alpha=0.3)
-    ax3.set_title('MACD')
-    ax3.legend()
-    ax3.grid(True, alpha=0.3)
+    ax3.plot(df.index, df['RSI'], color='#8B5CF6', alpha=0.9, linewidth=2.0, label='RSI')
+    ax3.axhline(y=80, color='#EF4444', linestyle='--', alpha=0.8, linewidth=1.5, label='Overbought')
+    ax3.axhline(y=40, color='#10B981', linestyle='--', alpha=0.8, linewidth=1.5, label='Oversold')
+    ax3.axhline(y=60, color='#6B7280', linestyle='-', alpha=0.6, linewidth=1.0)
+    ax3.set_title('RSI (Relative Strength Index)', fontsize=12, fontweight='bold')
+    ax3.set_ylabel('RSI', fontsize=10, fontweight='bold')
+    ax3.set_ylim(0, 100)
+    ax3.legend(fontsize=10, framealpha=0.9)
+    ax3.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
     
-    # 4. RSI 차트 (네 번째 패널)
+    # Y축을 오른쪽으로 이동
+    ax3.yaxis.set_label_position('right')
+    ax3.yaxis.tick_right()
+    
+    # 4. MACD 차트 (네 번째 패널) - 웹 트레이딩 스타일 유지
     ax4 = axes[3]
-    ax4.plot(df.index, df['RSI'], color='purple', linewidth=1, label='RSI')
-    ax4.axhline(y=70, color='red', linestyle='--', alpha=0.5, label='Overbought')
-    ax4.axhline(y=30, color='green', linestyle='--', alpha=0.5, label='Oversold')
-    ax4.axhline(y=50, color='black', linestyle='-', alpha=0.3)
-    ax4.set_ylim(0, 100)
-    ax4.set_title('RSI')
-    ax4.legend()
-    ax4.grid(True, alpha=0.3)
+    ax4.plot(df.index, df['MACD'], color='#3B82F6', linewidth=2.0, label='MACD')
+    ax4.plot(df.index, df['MACD_Signal'], color='#F59E0B', linewidth=2.0, label='Signal')
+    ax4.bar(df.index, df['MACD_Histogram'], color='#6B7280', alpha=0.6, width=0.8, label='Histogram')
+    ax4.axhline(y=0, color='#374151', linestyle='-', alpha=0.7, linewidth=1.0)
+    ax4.set_title('MACD (12,26,9)', fontsize=12, fontweight='bold')
+    ax4.legend(fontsize=10, framealpha=0.9)
+    ax4.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
     
-    # 모든 패널의 x축 날짜 설정
-    for ax in axes:
-        # 날짜 인덱스에서 적절한 간격으로 날짜 선택
-        date_indices = [df.index[0], df.index[len(df)//4], df.index[len(df)//2], 
-                       df.index[3*len(df)//4], df.index[-1]]
-        ax.set_xticks(date_indices)
-        ax.set_xticklabels([date.strftime('%Y-%m-%d') for date in date_indices], 
-                          rotation=45, ha='right')
+    # Y축을 오른쪽으로 이동
+    ax4.yaxis.set_label_position('right')
+    ax4.yaxis.tick_right()
+    
+    # X축 날짜 설정 - 하단에만 표시
+    for i, ax in enumerate(axes):
+        if i == len(axes) - 1:  # 마지막 패널에만 날짜 표시
+            # 날짜 인덱스에서 적절한 간격으로 날짜 선택
+            date_indices = [df.index[0], df.index[len(df)//4], df.index[len(df)//2], 
+                           df.index[3*len(df)//4], df.index[-1]]
+            ax.set_xticks(date_indices)
+            ax.set_xticklabels([date.strftime('%Y-%m') for date in date_indices], 
+                              rotation=45, ha='right', fontweight='bold')
+        else:
+            ax.set_xticks([])  # 다른 패널은 X축 눈금 숨김
     
     plt.tight_layout()
     
@@ -431,6 +475,9 @@ def save_chart_data_to_json(chart_data, stock_code, stock_name):
                     "ma20": float(chart_data_clean['MA20'].iloc[-1]) if 'MA20' in chart_data_clean else None,
                     "ma60": float(chart_data_clean['MA60'].iloc[-1]) if 'MA60' in chart_data_clean else None,
                     "ma120": float(chart_data_clean['MA120'].iloc[-1]) if 'MA120' in chart_data_clean else None,
+                    "bb_upper": float(chart_data_clean['BB_Upper'].iloc[-1]) if 'BB_Upper' in chart_data_clean else None,
+                    "bb_middle": float(chart_data_clean['BB_Middle'].iloc[-1]) if 'BB_Middle' in chart_data_clean else None,
+                    "bb_lower": float(chart_data_clean['BB_Lower'].iloc[-1]) if 'BB_Lower' in chart_data_clean else None,
                     "rsi": float(chart_data_clean['RSI'].iloc[-1]) if 'RSI' in chart_data_clean else None,
                     "macd": float(chart_data_clean['MACD'].iloc[-1]) if 'MACD' in chart_data_clean else None,
                     "macd_signal": float(chart_data_clean['MACD_Signal'].iloc[-1]) if 'MACD_Signal' in chart_data_clean else None,
@@ -461,6 +508,12 @@ def save_chart_data_to_json(chart_data, stock_code, stock_name):
                 data_point["ma60"] = float(row['MA60'])
             if 'MA120' in row:
                 data_point["ma120"] = float(row['MA120'])
+            if 'BB_Upper' in row:
+                data_point["bb_upper"] = float(row['BB_Upper'])
+            if 'BB_Middle' in row:
+                data_point["bb_middle"] = float(row['BB_Middle'])
+            if 'BB_Lower' in row:
+                data_point["bb_lower"] = float(row['BB_Lower'])
             if 'RSI' in row:
                 data_point["rsi"] = float(row['RSI'])
             if 'MACD' in row:

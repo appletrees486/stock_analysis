@@ -458,7 +458,7 @@ def analyze_weekly_stock_data(hist, stock_code):
         print("   스토캐스틱 신호: 중립 구간")
 
 def create_weekly_stock_chart(hist, stock_code):
-    """주식 주봉 차트 생성 (캔들차트 + 보조지표) - 차트 데이터 반환 추가"""
+    """주식 주봉 차트 생성 (캔들차트 + 보조지표) - test_overlay_chart.py 스타일 적용"""
     if hist is None or hist.empty:
         return None, None
     
@@ -468,86 +468,89 @@ def create_weekly_stock_chart(hist, stock_code):
     df = calculate_technical_indicators(hist.copy())
     df.index.name = 'Date'
     
-    # 하나의 큰 차트에 모든 지표 포함
-    fig, axes = plt.subplots(5, 1, figsize=(15, 20), height_ratios=[6, 2, 2, 2, 2])
-    fig.suptitle(f'{stock_code} Weekly Stock Chart (5 Years) - Technical Indicators', fontsize=16, fontweight='bold')
+    # 차트 생성 (3개 패널: 메인차트, 거래량, 스토캐스틱)
+    fig, axes = plt.subplots(3, 1, figsize=(15, 12), height_ratios=[8, 2, 2])
+    fig.suptitle(f'{stock_code} Weekly Stock Chart (5 Years) - Image Reference Style', fontsize=16, fontweight='bold')
     
-    # 1. 캔들차트 (첫 번째 패널)
+    # 1. 메인 차트 (캔들차트 + 보조지표 오버레이)
     ax1 = axes[0]
     
-    # 캔들차트 그리기
+    # 볼린저 밴드 영역 채우기 (이미지 참고 - 오렌지/베이지 스타일)
+    ax1.fill_between(df.index, df['BB_Upper'], df['BB_Lower'], 
+                     alpha=0.15, color='#FFE4B5', label='Bollinger Bands')
+    
+    # 볼린저 밴드 상단과 하단을 오렌지/베이지 색으로 표시 (범례에 표시하지 않음)
+    ax1.plot(df.index, df['BB_Upper'], color='#FFCE89', alpha=0.8, linewidth=1.5, label='_nolegend_')
+    ax1.plot(df.index, df['BB_Lower'], color='#FFCE89', alpha=0.8, linewidth=1.5, label='_nolegend_')
+    
+    # 캔들차트 그리기 (이미지 참고 - 빨간색/파란색)
     for i, (date, row) in enumerate(df.iterrows()):
-        color = 'red' if row['Close'] >= row['Open'] else 'blue'
-        ax1.plot([i, i], [row['Low'], row['High']], color=color, linewidth=1)
-        ax1.plot([i, i], [row['Open'], row['Close']], color=color, linewidth=3)
+        if row['Close'] >= row['Open']:  # 상승
+            color = '#FF4444'  # 빨간색
+        else:  # 하락
+            color = '#4444FF'  # 파란색
+        
+        ax1.plot([date, date], [row['Low'], row['High']], color=color, linewidth=1.0)
+        ax1.plot([date, date], [row['Open'], row['Close']], color=color, linewidth=3.0)
     
-    # 이동평균선 추가
-    ax1.plot(range(len(df)), df['MA5'], color='red', linewidth=1, alpha=0.7, label='MA5')
-    ax1.plot(range(len(df)), df['MA20'], color='green', linewidth=1, alpha=0.7, label='MA20')
-    ax1.plot(range(len(df)), df['MA60'], color='orange', linewidth=1, alpha=0.7, label='MA60')
+    # 이동평균선 추가 (웹 트레이딩 스타일 유지)
+    ax1.plot(df.index, df['MA5'], color='#F59E0B', linewidth=2.0, alpha=0.9, label='MA5')
+    ax1.plot(df.index, df['MA20'], color='#8B5CF6', linewidth=2.0, alpha=0.9, label='MA20')
+    ax1.plot(df.index, df['MA60'], color='#06B6D4', linewidth=2.0, alpha=0.9, label='MA60')
     
-    # 볼린저 밴드 추가
-    ax1.plot(range(len(df)), df['BB_Upper'], color='gray', linewidth=1, alpha=0.5, label='BB Upper')
-    ax1.plot(range(len(df)), df['BB_Middle'], color='gray', linewidth=1, alpha=0.5, label='BB Middle')
-    ax1.plot(range(len(df)), df['BB_Lower'], color='gray', linewidth=1, alpha=0.5, label='BB Lower')
+    # 메인 차트 설정
+    ax1.set_title('Price Chart with Bollinger Bands and Moving Averages', fontsize=14, fontweight='bold')
+    ax1.set_ylabel('Price (KRW)', fontsize=12, fontweight='bold')
+    ax1.legend(loc='upper left', fontsize=10, framealpha=0.9)
+    ax1.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
     
-    ax1.set_title('Price Chart with Moving Averages and Bollinger Bands')
-    ax1.set_ylabel('Price (KRW)')
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
+    # Y축을 오른쪽으로 이동
+    ax1.yaxis.set_label_position('right')
+    ax1.yaxis.tick_right()
     
-    # 2. 주봉 거래량 차트 (두 번째 패널)
+    # 2. 거래량 차트 (두 번째 패널) - 웹 트레이딩 스타일 유지
     ax2 = axes[1]
-    ax2.bar(range(len(df)), df['Volume'], color='green', alpha=0.7)
-    ax2.set_title('Weekly Volume')
-    ax2.set_ylabel('Volume')
-    ax2.grid(True, alpha=0.3)
     
-    # 3. 볼린저 밴드 %B 차트 (세 번째 패널)
+    # 상승/하락에 따른 거래량 색상 (이미지 참고 - 빨간색/파란색)
+    colors = ['#FF4444' if close >= open else '#4444FF' 
+              for close, open in zip(df['Close'], df['Open'])]
+    
+    ax2.bar(df.index, df['Volume'], color=colors, alpha=0.7, width=0.8)
+    ax2.set_title('Volume', fontsize=12, fontweight='bold')
+    ax2.set_ylabel('Volume', fontsize=10, fontweight='bold')
+    ax2.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+    
+    # Y축을 오른쪽으로 이동
+    ax2.yaxis.set_label_position('right')
+    ax2.yaxis.tick_right()
+    
+    # 3. 스토캐스틱 차트 (세 번째 패널) - 웹 트레이딩 스타일 유지
     ax3 = axes[2]
-    # %B = (현재가 - 볼린저 하단) / (볼린저 상단 - 볼린저 하단)
-    bb_width = df['BB_Upper'] - df['BB_Lower']
-    bb_percent_b = (df['Close'] - df['BB_Lower']) / bb_width
-    ax3.plot(range(len(df)), bb_percent_b, color='purple', linewidth=1, label='%B')
-    ax3.axhline(y=1, color='red', linestyle='--', alpha=0.5, label='Upper Band')
-    ax3.axhline(y=0, color='green', linestyle='--', alpha=0.5, label='Lower Band')
-    ax3.axhline(y=0.5, color='gray', linestyle='-', alpha=0.3, label='Middle')
-    ax3.set_title('Bollinger Band %B')
-    ax3.set_ylabel('%B')
-    ax3.legend()
-    ax3.grid(True, alpha=0.3)
+    ax3.plot(df.index, df['Stoch_K'], color='#3B82F6', linewidth=2.0, label='%K')
+    ax3.plot(df.index, df['Stoch_D'], color='#F59E0B', linewidth=2.0, label='%D')
+    ax3.axhline(y=80, color='#EF4444', linestyle='--', alpha=0.8, linewidth=1.5, label='Overbought')
+    ax3.axhline(y=20, color='#10B981', linestyle='--', alpha=0.8, linewidth=1.5, label='Oversold')
+    ax3.set_ylim(0, 100)
+    ax3.set_title('Stochastic Slow', fontsize=12, fontweight='bold')
+    ax3.set_ylabel('%K/%D', fontsize=10, fontweight='bold')
+    ax3.legend(fontsize=10, framealpha=0.9)
+    ax3.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
     
-    # 4. 스토캐스틱 %K 차트 (네 번째 패널)
-    ax4 = axes[3]
-    ax4.plot(range(len(df)), df['Stoch_K'], color='blue', linewidth=1, label='%K')
-    ax4.plot(range(len(df)), df['Stoch_D'], color='red', linewidth=1, label='%D')
-    ax4.axhline(y=80, color='red', linestyle='--', alpha=0.5, label='Overbought')
-    ax4.axhline(y=20, color='green', linestyle='--', alpha=0.5, label='Oversold')
-    ax4.set_ylim(0, 100)
-    ax4.set_title('Stochastic Slow')
-    ax4.set_ylabel('%K/%D')
-    ax4.legend()
-    ax4.grid(True, alpha=0.3)
+    # Y축을 오른쪽으로 이동
+    ax3.yaxis.set_label_position('right')
+    ax3.yaxis.tick_right()
     
-    # 5. 볼린저 밴드 폭 차트 (다섯 번째 패널)
-    ax5 = axes[4]
-    bb_width_normalized = bb_width / df['BB_Middle'] * 100  # 중간선 대비 폭을 퍼센트로
-    ax5.plot(range(len(df)), bb_width_normalized, color='brown', linewidth=1, label='BB Width %')
-    ax5.set_title('Bollinger Band Width')
-    ax5.set_ylabel('Width %')
-    ax5.legend()
-    ax5.grid(True, alpha=0.3)
-    
-    # 모든 패널의 x축 날짜 설정
-    for ax in axes:
-        ax.set_xticks([0, len(df)//4, len(df)//2, 3*len(df)//4, len(df)-1])
-        ax.set_xticklabels([
-            df.index[0].strftime('%Y-%m-%d'),
-            df.index[len(df)//4].strftime('%Y-%m-%d'),
-            df.index[len(df)//2].strftime('%Y-%m-%d'),
-            df.index[3*len(df)//4].strftime('%Y-%m-%d'),
-            df.index[-1].strftime('%Y-%m-%d')
-        ], rotation=45, ha='right')
+    # X축 날짜 설정 - 하단에만 표시
+    for i, ax in enumerate(axes):
+        if i == len(axes) - 1:  # 마지막 패널에만 날짜 표시
+            # 주간 차트이므로 적절한 간격으로 날짜 선택
+            date_indices = [df.index[0], df.index[len(df)//4], df.index[len(df)//2], 
+                           df.index[3*len(df)//4], df.index[-1]]
+            ax.set_xticks(date_indices)
+            ax.set_xticklabels([date.strftime('%Y-%m-%d') for date in date_indices], 
+                              rotation=45, ha='right', fontweight='bold')
+        else:
+            ax.set_xticks([])  # 다른 패널은 X축 눈금 숨김
     
     plt.tight_layout()
     

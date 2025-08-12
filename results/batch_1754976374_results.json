@@ -1,0 +1,13 @@
+[
+  {
+    "stock_name": "019210",
+    "chart_type": "주봉",
+    "analysis_score": 0,
+    "summary": "분석 실패: 차트 생성 실패",
+    "detailed_analysis": "종목 019210 분석 중 오류가 발생했습니다. 오류: 차트 생성 실패",
+    "timestamp": "2025-08-12T14:26:18.959941",
+    "batch_id": "batch_1754976374",
+    "stock_code": "019210",
+    "processed_at": "2025-08-12T14:26:18.959967"
+  }
+]
