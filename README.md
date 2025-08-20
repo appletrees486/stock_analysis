@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # 국내 주식 차트 분석 및 AI 분석 프로그램
 
 국내 주식의 일봉/주봉/월봉 데이터를 조회하고 기술적 분석을 제공하며, AI 제미나이를 활용한 차트 분석까지 수행하는 Python 프로그램입니다.
@@ -6,23 +5,38 @@
 ## 🚀 주요 기능
 
 ### 📊 차트 데이터 조회 (일봉/주봉/월봉 지원)
-- **1년간 일봉 데이터** 자동 조회
-- **주봉/월봉 데이터** 지원
+- **1년간 일봉 데이터** 자동 조회 (240일)
+- **5년간 주봉 데이터** 지원 (240주)
+- **10년간 월봉 데이터** 지원 (120개월)
 - **Yahoo Finance API** 활용
 - **국내 주식 종목코드** 지원 (6자리 숫자)
 
 ### 📈 기술적 지표 분석
+
+#### 일봉 차트 보조지표
 - **이동평균선**: 5일, 20일, 60일, 120일
+- **거래량**
 - **MACD**: 12일/26일 EMA, 9일 Signal, Histogram
 - **RSI**: 14일 기준 과매수/과매도 구간 분석
+
+#### 주봉 차트 보조지표
+- **이동평균선**: 5주, 20주, 60주
+- **거래량**
+- **Stochastic Slow**
+- **Bollinger Band**
+
+#### 월봉 차트 보조지표
+- **이동평균선**: 5개월, 20개월, 60개월
+- **거래량**
+- **CCI**
+- **ADX**
 
 ### 📊 차트 시각화
 - **일봉/주봉/월봉 캔들차트** + 이동평균선
 - **거래량 차트**
-- **MACD 차트** (MACD, Signal, Histogram)
-- **RSI 차트** (과매수/과매도 구간 표시)
+- **보조지표 차트** (차트 유형별 특화)
 
-### 🤖 AI 차트 분석 (NEW!)
+### 🤖 AI 차트 분석
 - **Google Gemini AI** 활용한 차트 이미지 분석
 - **일봉/주봉/월봉별 특화 프롬프트** 지원
 - **자동 기술적 지표 해석**
@@ -111,9 +125,9 @@ python integrated_stock_analysis.py
 4. AI 분석
 5. 결과 저장 (JSON + Word 문서)
 
-### 2. 배치 분석 (NEW!)
+### 2. 배치 분석
 ```bash
-python batch_stock_analyzer.py
+python batch_stock_analyzer_optimized.py
 ```
 **배치 처리 플로우:**
 1. 종목 목록 입력 (직접 입력 또는 파일에서 읽기)
@@ -146,34 +160,49 @@ python month_stock_analysis.py
 python ai_chart_analysis.py
 ```
 
-### 5. API 키 설정
+### 5. 웹 인터페이스
 ```bash
-python setup_api_key.py
+python app.py
 ```
+- Flask 기반 웹 애플리케이션
+- 배치 분석 및 단일 분석 지원
+- 결과 파일 다운로드 기능
 
 ## 📁 파일 구조
 
 ```
 stock_analysis/
-├── day_stock_analysis.py          # 일봉 차트 생성 스크립트
-├── week_stock_analysis.py         # 주봉 차트 생성 스크립트
-├── month_stock_analysis.py        # 월봉 차트 생성 스크립트
-├── ai_chart_analysis.py           # AI 차트 분석 스크립트 (일봉/주봉/월봉 지원)
-├── integrated_stock_analysis.py   # 통합 실행 스크립트 (새로운 플로우)
-├── batch_stock_analyzer_optimized.py  # 배치 분석 스크립트 (최적화)
-├── setup_api_key.py              # API 키 설정 스크립트
-├── config.py                     # 설정 관리 모듈
-├── requirements.txt              # 필수 라이브러리 목록
-├── stock_list.txt                # 배치 분석용 종목 목록 파일
-├── daily_charts/                 # 일봉 차트 이미지 저장 폴더
-├── weekly_charts/                # 주봉 차트 이미지 저장 폴더
-├── monthly_charts/               # 월봉 차트 이미지 저장 폴더
-├── ai_analysis_results/          # AI 분석 결과 저장 폴더
-├── api/                          # 웹 API 모듈
-├── templates/                    # 웹 템플릿
-├── static/                       # 웹 정적 파일
-├── uploads/                      # 파일 업로드 폴더
-└── results/                      # 분석 결과 폴더
+├── app.py                           # Flask 웹 애플리케이션
+├── day_stock_analysis.py            # 일봉 차트 생성 스크립트
+├── week_stock_analysis.py           # 주봉 차트 생성 스크립트
+├── month_stock_analysis.py          # 월봉 차트 생성 스크립트
+├── ai_chart_analysis.py             # AI 차트 분석 스크립트
+├── integrated_stock_analysis.py     # 통합 실행 스크립트
+├── batch_stock_analyzer_optimized.py # 배치 분석 스크립트
+├── setup_api_key.py                 # API 키 설정 스크립트
+├── config.py                        # 설정 관리 모듈
+├── naver_data_module.py             # 네이버 데이터 모듈
+├── requirements.txt                  # 필수 라이브러리 목록
+├── stock_list.txt                   # 배치 분석용 종목 목록 파일
+├── stock_mapping.json               # 종목코드-종목명 매핑 파일
+├── daily_charts/                    # 일봉 차트 이미지 저장 폴더
+├── ai_analysis_results/             # AI 분석 결과 저장 폴더
+├── results/                         # 배치 분석 결과 폴더
+├── api/                             # 웹 API 모듈
+│   ├── __init__.py
+│   ├── routes.py                    # API 라우트
+│   ├── utils.py                     # 유틸리티 함수
+│   └── batch_analyzer.py            # 배치 분석 API
+├── templates/                       # 웹 템플릿
+│   ├── index.html                   # 메인 페이지
+│   ├── single_analysis.html         # 단일 분석 페이지
+│   └── batch_analysis.html          # 배치 분석 페이지
+├── static/                          # 웹 정적 파일
+│   ├── css/
+│   └── js/
+└── uploads/                         # 파일 업로드 폴더
+    ├── charts/                      # 업로드된 차트
+    └── stock_lists/                 # 업로드된 종목 목록
 ```
 
 ## 🤖 AI 분석 기능
@@ -206,55 +235,14 @@ stock_analysis/
    - 골든 크로스/데드 크로스 발생 여부
    - 이동평균선 밀집도 분석
 
-3. **MACD 분석**
-   - MACD/시그널 선 위치 관계
-   - 히스토그램 변화 분석
-   - 가격과 MACD 다이버전스 확인
+3. **보조지표 분석**
+   - **일봉**: MACD, RSI 분석
+   - **주봉**: Stochastic, Bollinger Band 분석
+   - **월봉**: CCI, ADX 분석
 
-4. **RSI 분석**
-   - 과매수/과매도 구간 판단
-   - 가격과 RSI 다이버전스 확인
-
-5. **투자 아이디어**
+4. **투자 아이디어**
    - 차트 유형별 추세 및 모멘텀 종합 판단
    - 매수/매도 시점 제안
-
-### 분석 결과 예시
-```json
-{
-  "종목정보": {
-    "종목명": "삼성전자",
-    "종목번호": "005930",
-    "분석일시": "2025-01-15 14:30:25",
-    "차트유형": "일봉"
-  },
-  "가격및거래량": {
-    "최근5일가격동향": "상승",
-    "거래량특징": "거래량 증가 추세",
-    "주요가격대": "저항선 돌파 시도"
-  },
-  "이동평균선": {
-    "정배열여부": true,
-    "현재가위치": "모든 이동평균선 위",
-    "골든크로스": "20일선이 60일선 상향 돌파",
-    "이동평균선밀집도": "확산 추세"
-  },
-  "MACD": {
-    "MACD위치": "시그널 선 위",
-    "히스토그램변화": "양의 히스토그램 확대",
-    "다이버전스": "다이버전스 없음"
-  },
-  "RSI": {
-    "RSI구간": "중립",
-    "다이버전스": "다이버전스 없음"
-  },
-  "투자아이디어": {
-    "단기추세": "상승",
-    "매매시점": "매수",
-    "핵심포인트": "이동평균선 정배열과 MACD 상승 신호로 단기 상승 추세 지속 예상"
-  }
-}
-```
 
 ## 🔧 설정 및 문제해결
 
@@ -280,7 +268,7 @@ export GOOGLE_AI_API_KEY=your_api_key_here
 
 ## 📊 실행 예시
 
-### 통합 분석 (새로운 플로우)
+### 통합 분석
 ```
 🚀 통합 주식 분석 프로그램
 ============================================================
@@ -315,7 +303,7 @@ export GOOGLE_AI_API_KEY=your_api_key_here
 📄 Word 문서 파일: ai_analysis_results/analysis_daily_삼성전자_20250115_143025.docx
 ```
 
-### 배치 분석 (NEW!)
+### 배치 분석
 ```
 🚀 배치 주식 분석 프로그램
 ============================================================
@@ -381,22 +369,27 @@ export GOOGLE_AI_API_KEY=your_api_key_here
 📊 평균 처리 시간: 18.2초/종목
 ```
 
-### AI 분석 결과
+### 웹 인터페이스
 ```
-📈 투자 아이디어:
-   추세: 상승
-   매매 시점: 매수
-   핵심 포인트: 이동평균선 정배열과 MACD 상승 신호로 단기 상승 추세 지속 예상
+🌐 웹 브라우저에서 http://localhost:5000 접속
+📊 배치 분석 및 단일 분석을 웹 인터페이스로 실행
+📁 결과 파일 다운로드 및 관리
 ```
 
-## 🆕 새로운 기능
+## 🆕 주요 기능
 
-### 🚀 배치 분석 시스템 (NEW!)
+### 🚀 배치 분석 시스템
 - **병렬 처리**: ThreadPoolExecutor를 활용한 다중 종목 동시 분석
 - **진행률 추적**: 실시간 진행률 및 예상 완료 시간 표시
 - **유연한 입력**: 종목코드, 종목명 혼합 입력 및 파일 기반 입력 지원
 - **결과 요약**: 전체 분석 통계 및 개별 파일 자동 저장
 - **에러 처리**: 개별 종목 실패 시에도 전체 프로세스 계속 진행
+
+### 🌐 웹 인터페이스
+- **Flask 기반 웹 애플리케이션**
+- **배치 분석 및 단일 분석 지원**
+- **파일 업로드 및 다운로드 기능**
+- **실시간 진행률 표시**
 
 ### 📊 프롬프트 관리 시스템
 - **ChartAnalysisPrompts 클래스**로 프롬프트 체계적 관리
@@ -410,7 +403,7 @@ export GOOGLE_AI_API_KEY=your_api_key_here
 - **차트 유형별 파일명 구분**
 
 ### 📁 체계적인 파일 관리
-- **차트 유형별 폴더 분리** (daily_charts/, weekly_charts/, monthly_charts/)
+- **차트 유형별 폴더 분리**
 - **분석 결과 파일명에 차트 유형 포함**
 - **종목별 결과 파일 그룹화**
 
@@ -424,8 +417,4 @@ export GOOGLE_AI_API_KEY=your_api_key_here
 
 ## 📞 지원
 
-문제가 발생하거나 질문이 있으시면 이슈를 통해 문의해주세요. 
-=======
-# stock_analysis
-
->>>>>>> 272002eb8a0459970e61adaa7e18355c5e7ab912
+문제가 발생하거나 질문이 있으시면 이슈를 통해 문의해주세요.

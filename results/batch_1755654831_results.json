@@ -1,0 +1,35 @@
+[
+  {
+    "stock_name": "055550",
+    "chart_type": "일봉",
+    "analysis_score": 0,
+    "summary": "분석 실패: [WinError 233] 파이프의 다른 끝에 프로세스가 없습니다",
+    "detailed_analysis": "종목 055550 분석 중 오류가 발생했습니다. 오류: [WinError 233] 파이프의 다른 끝에 프로세스가 없습니다",
+    "timestamp": "2025-08-20T10:53:51.656933",
+    "batch_id": "batch_1755654831",
+    "stock_code": "055550",
+    "processed_at": "2025-08-20T10:53:51.656943"
+  },
+  {
+    "stock_name": "064260",
+    "chart_type": "일봉",
+    "analysis_score": 0,
+    "summary": "분석 실패: [WinError 233] 파이프의 다른 끝에 프로세스가 없습니다",
+    "detailed_analysis": "종목 064260 분석 중 오류가 발생했습니다. 오류: [WinError 233] 파이프의 다른 끝에 프로세스가 없습니다",
+    "timestamp": "2025-08-20T10:53:51.673061",
+    "batch_id": "batch_1755654831",
+    "stock_code": "064260",
+    "processed_at": "2025-08-20T10:53:51.673068"
+  },
+  {
+    "stock_name": "000660",
+    "chart_type": "일봉",
+    "analysis_score": 0,
+    "summary": "분석 실패: [WinError 233] 파이프의 다른 끝에 프로세스가 없습니다",
+    "detailed_analysis": "종목 000660 분석 중 오류가 발생했습니다. 오류: [WinError 233] 파이프의 다른 끝에 프로세스가 없습니다",
+    "timestamp": "2025-08-20T10:53:51.673405",
+    "batch_id": "batch_1755654831",
+    "stock_code": "000660",
+    "processed_at": "2025-08-20T10:53:51.673408"
+  }
+]
