@@ -1,0 +1,97 @@
+name: Deploy to Production Server
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.9
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Run basic syntax check
+      run: |
+        python -m py_compile stock_data_collector.py
+        python -m py_compile app.py
+        python -m py_compile market_status_detector.py
+    
+    - name: Test database config (without connection)
+      run: |
+        python -c "from database_config import DatabaseManager; print('Database config loaded successfully')"
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Deploy to Production Server
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.PRODUCTION_HOST }}
+        username: ${{ secrets.PRODUCTION_USER }}
+        key: ${{ secrets.PRODUCTION_SSH_KEY }}
+        port: ${{ secrets.PRODUCTION_PORT }}
+        script: |
+          echo "🚀 Starting deployment to production server..."
+          
+          # 프로젝트 디렉토리로 이동
+          cd ${{ secrets.PRODUCTION_PATH }}
+          
+          # Git에서 최신 변경사항 가져오기
+          echo "📥 Pulling latest changes from GitHub..."
+          git fetch origin
+          git reset --hard origin/main
+          
+          # Python 의존성 업데이트 (필요한 경우)
+          echo "📦 Updating Python dependencies..."
+          pip install -r requirements.txt --user
+          
+          # 기존 프로세스 종료 (graceful shutdown)
+          echo "🛑 Stopping existing application..."
+          pkill -f "python.*app.py" || echo "No existing process found"
+          sleep 5
+          
+          # 백그라운드에서 새 애플리케이션 시작
+          echo "🚀 Starting new application..."
+          nohup python app.py > app.log 2>&1 &
+          
+          # 프로세스 시작 확인
+          sleep 10
+          if pgrep -f "python.*app.py" > /dev/null; then
+            echo "✅ Application started successfully"
+            echo "🌐 Server is running on http://${{ secrets.PRODUCTION_HOST }}:5000"
+          else
+            echo "❌ Failed to start application"
+            echo "📋 Last 20 lines of log:"
+            tail -20 app.log
+            exit 1
+          fi
+          
+          echo "🎉 Deployment completed successfully!"
+
+    - name: Notify Deployment Status
+      if: always()
+      run: |
+        if [ "${{ job.status }}" == "success" ]; then
+          echo "✅ 배포가 성공적으로 완료되었습니다!"
+          echo "🌐 웹서버 주소: http://${{ secrets.PRODUCTION_HOST }}:5000"
+        else
+          echo "❌ 배포 중 오류가 발생했습니다."
+        fi
