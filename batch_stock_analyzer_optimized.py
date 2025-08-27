@@ -265,7 +265,19 @@ def run_ai_analysis_fast(stock_name: str, stock_code: str, chart_type: str, char
             print(f"❌ 종목 {stock_code}의 차트 파일을 찾을 수 없습니다")
             return False
         
-        selected_file = sorted(chart_files)[-1]
+        # 파일 생성 시간 기준으로 최신 파일 선택 (알파벳 순 정렬 문제 해결)
+        chart_files_with_time = []
+        for file in chart_files:
+            file_path = os.path.join(charts_dir, file)
+            if os.path.exists(file_path):
+                mtime = os.path.getmtime(file_path)
+                chart_files_with_time.append((mtime, file))
+        
+        if chart_files_with_time:
+            # 생성 시간 기준으로 정렬하여 최신 파일 선택
+            selected_file = sorted(chart_files_with_time, key=lambda x: x[0])[-1][1]
+        else:
+            selected_file = chart_files[0]  # fallback
         print(f"📊 선택된 차트 파일: {selected_file}")
         
         # AI 분석 실행
@@ -279,20 +291,39 @@ def run_ai_analysis_fast(stock_name: str, stock_code: str, chart_type: str, char
         
         print(f"✅ API 키 확인 완료")
         
+        # DB에서 한글 종목명 조회 (stocks 테이블 기반 통일)
+        db_stock_name = stock_code  # 기본값
+        try:
+            from database_config import DatabaseManager
+            db_manager = DatabaseManager()
+            if db_manager.connect():
+                query = "SELECT stock_name FROM stocks WHERE stock_code = %s"
+                result_db = db_manager.fetch_one(query, (stock_code,))
+                if result_db and result_db.get('stock_name'):
+                    db_stock_name = str(result_db['stock_name'])
+                    print(f"✅ DB에서 종목명 조회 성공: {stock_code} -> {db_stock_name}")
+                else:
+                    print(f"⚠️ DB에서 종목명을 찾을 수 없음: {stock_code}")
+                db_manager.disconnect()
+            else:
+                print(f"⚠️ DB 연결 실패")
+        except Exception as e:
+            print(f"⚠️ DB 종목명 조회 중 오류: {e}")
+        
         analyzer = ai_chart_analysis.AIChartAnalyzer(api_key)
         image_path = os.path.join(charts_dir, selected_file)
         
-        print(f"🤖 AI 분석 시작: {stock_name} ({stock_code})")
+        print(f"🤖 AI 분석 시작: {db_stock_name} ({stock_code})")
         print(f"📁 이미지 경로: {image_path}")
         print(f"📊 차트 유형: {chart_type}")
         
-        # 차트 데이터가 있는 경우 AI 분석에 전달
+        # 차트 데이터가 있는 경우 AI 분석에 전달 (DB에서 조회한 한글 종목명 사용)
         if chart_data is not None:
             print(f"📊 차트 데이터 포함하여 분석")
-            result = analyzer.analyze_chart_image(image_path, "", chart_type, chart_data)
+            result = analyzer.analyze_chart_image(image_path, db_stock_name, chart_type, chart_data)
         else:
             print(f"📊 차트 데이터 없이 분석")
-            result = analyzer.analyze_chart_image(image_path, "", chart_type)
+            result = analyzer.analyze_chart_image(image_path, db_stock_name, chart_type)
         
         if result:
             print(f"✅ AI 분석 성공")
@@ -304,14 +335,24 @@ def run_ai_analysis_fast(stock_name: str, stock_code: str, chart_type: str, char
             
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             
-            json_path = os.path.join(output_dir, f"analysis_{chart_type_en}_{stock_name}_{timestamp}.json")
-            doc_path = os.path.join(output_dir, f"analysis_{chart_type_en}_{stock_name}_{timestamp}.docx")
+            json_path = os.path.join(output_dir, f"analysis_{chart_type_en}_{stock_code}_{timestamp}.json")
+            doc_path = os.path.join(output_dir, f"analysis_{chart_type_en}_{stock_code}_{timestamp}.docx")
             
             print(f"💾 JSON 파일 저장: {json_path}")
-            json_success = analyzer.save_analysis_result(result, json_path)
+            try:
+                json_success = analyzer.save_analysis_result(result, json_path)
+                print(f"   JSON 저장 결과: {json_success}")
+            except Exception as e:
+                print(f"   ❌ JSON 저장 중 오류: {e}")
+                json_success = False
             
             print(f"💾 DOCX 파일 생성: {doc_path}")
-            doc_success = analyzer.create_word_document(result, image_path, doc_path, chart_type)
+            try:
+                doc_success = analyzer.create_word_document(result, image_path, doc_path, chart_type)
+                print(f"   DOCX 생성 결과: {doc_success}")
+            except Exception as e:
+                print(f"   ❌ DOCX 생성 중 오류: {e}")
+                doc_success = False
             
             if json_success and doc_success:
                 print(f"✅ 파일 저장 완료")
@@ -395,6 +436,15 @@ def run_batch_analysis_fast(stock_list: List[str], chart_type: str, chart_type_e
             tracker.update(False)
     
     print("\n")  # 진행률 출력 후 줄바꿈
+    
+    # 통합 파일 생성 (새로 추가)
+    try:
+        print(f"\n🔗 통합 분석 파일 생성 시작...")
+        create_consolidated_files(results, chart_type, chart_type_en)
+    except Exception as e:
+        print(f"⚠️ 통합 파일 생성 중 오류: {e}")
+        print("   개별 파일들은 정상적으로 생성되었습니다.")
+    
     return results
 
 
@@ -466,6 +516,10 @@ def main():
         # 5단계: 결과 표시
         display_results_fast(results, chart_type)
         
+        # 6단계: 요약 분석 및 통합 파일 생성 (자동 실행)
+        print(f"\n🔄 {chart_type} 요약 분석 및 통합 파일 생성 중...")
+        create_summary_analysis(chart_type, chart_type_en)
+        
         # 성능 통계
         total_time = end_time - start_time
         print(f"\n⏱️ 총 소요 시간: {total_time/60:.1f}분 ({total_time:.0f}초)")
@@ -475,6 +529,131 @@ def main():
     except KeyboardInterrupt:
         print("\n\n👋 프로그램을 종료합니다.")
         sys.exit(0)
+
+def create_summary_analysis(chart_type: str, chart_type_en: str):
+    """
+    배치 분석 완료 후 자동으로 요약 분석 및 통합 파일 생성
+    
+    Args:
+        chart_type (str): 차트 유형 (한글)
+        chart_type_en (str): 차트 유형 (영문)
+    """
+    try:
+        print(f"📊 {chart_type} 요약 분석 시작...")
+        
+        # ai_chart_analysis 모듈에서 SummaryFileGenerator import
+        from ai_chart_analysis import SummaryFileGenerator
+        from database_config import get_db_config
+        
+        # 데이터베이스 설정 로드
+        db_config = get_db_config()
+        
+        # 요약 파일 생성기 초기화
+        summary_generator = SummaryFileGenerator(db_config)
+        
+        # 통합 요약 파일 생성 (차트 유형별)
+        result = summary_generator.create_consolidated_summary_by_type(chart_type_en)
+        
+        if result:
+            print(f"✅ {chart_type} 요약 분석 완료:")
+            print(f"   📄 JSON 파일: {result.get('json_path', 'N/A')}")
+            print(f"   📄 DOCX 파일: {result.get('docx_path', 'N/A')}")
+        else:
+            print(f"⚠️ {chart_type} 요약 분석 실패 또는 분석할 데이터 없음")
+        
+    except Exception as e:
+        print(f"❌ {chart_type} 요약 분석 중 오류 발생: {e}")
+        print("   개별 분석 결과는 정상적으로 저장되었습니다.")
+
+def create_consolidated_files(results: List[Dict], chart_type: str, chart_type_en: str):
+    """
+    배치 분석 결과를 통합하여 통합 파일들 생성
+    
+    Args:
+        results (List[Dict]): 분석 결과 리스트
+        chart_type (str): 차트 유형 (한글)
+        chart_type_en (str): 차트 유형 (영문)
+    """
+    try:
+        print(f"🔗 {chart_type} 통합 파일 생성 중...")
+        
+        # ai_chart_analysis 모듈에서 통합 함수들 import
+        from ai_chart_analysis import (
+            create_consolidated_analysis,
+            create_consolidated_word_document,
+            create_summary_document
+        )
+        
+        # 통합 분석 결과 생성
+        consolidated_result = create_consolidated_analysis(results, chart_type)
+        if not consolidated_result:
+            print("❌ 통합 분석 결과 생성 실패")
+            return
+        
+        # 출력 디렉토리 확인
+        output_dir = "ai_analysis_results"
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+            print(f"📁 {output_dir} 폴더 생성")
+        
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        # 1. 통합 JSON 파일 생성
+        consolidated_json_path = os.path.join(
+            output_dir, 
+            f"consolidated_{chart_type_en}_{timestamp}.json"
+        )
+        
+        try:
+            with open(consolidated_json_path, 'w', encoding='utf-8') as f:
+                json.dump(consolidated_result, f, ensure_ascii=False, indent=2)
+            print(f"✅ 통합 JSON 파일 생성 완료: {consolidated_json_path}")
+        except Exception as e:
+            print(f"❌ 통합 JSON 파일 생성 실패: {e}")
+        
+        # 2. 통합 Word 문서 생성
+        consolidated_doc_path = os.path.join(
+            output_dir, 
+            f"consolidated_{chart_type_en}_{timestamp}.docx"
+        )
+        
+        try:
+            doc_success = create_consolidated_word_document(
+                consolidated_result, chart_type, consolidated_doc_path
+            )
+            if doc_success:
+                print(f"✅ 통합 Word 문서 생성 완료: {consolidated_doc_path}")
+            else:
+                print(f"❌ 통합 Word 문서 생성 실패")
+        except Exception as e:
+            print(f"❌ 통합 Word 문서 생성 중 오류: {e}")
+        
+        # 3. 요약본 Word 문서 생성 (월봉 요약 프롬프트 기반)
+        summary_doc_path = os.path.join(
+            output_dir, 
+            f"summary_{chart_type_en}_{timestamp}.docx"
+        )
+        
+        try:
+            summary_success = create_summary_document(
+                consolidated_result, chart_type, summary_doc_path
+            )
+            if summary_success:
+                print(f"✅ 요약본 Word 문서 생성 완료: {summary_doc_path}")
+            else:
+                print(f"❌ 요약본 Word 문서 생성 실패")
+        except Exception as e:
+            print(f"❌ 요약본 Word 문서 생성 중 오류: {e}")
+        
+        print(f"🔗 {chart_type} 통합 파일 생성 완료!")
+        print(f"   📊 통합 JSON: {os.path.basename(consolidated_json_path)}")
+        print(f"   📄 통합 Word: {os.path.basename(consolidated_doc_path)}")
+        print(f"   📋 요약본: {os.path.basename(summary_doc_path)}")
+        
+    except Exception as e:
+        print(f"❌ 통합 파일 생성 중 치명적 오류: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     main() 

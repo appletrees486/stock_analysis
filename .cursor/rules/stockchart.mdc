@@ -1,13 +1,173 @@
----
-alwaysApply: true
----
+# 주식 차트 분석 프로젝트 개발 규칙
 
 ## Git 관리 규칙
 - 사용자가 "깃에 커밋해달라" 또는 "Git 커밋" 요청 시, 현재까지의 모든 수정사항을 자동으로 커밋하고 GitHub에 푸시
 - 커밋 메시지는 수정된 내용을 반영하여 명확하게 작성
 - 커밋 후 GitHub 저장소 상태를 확인하여 성공 여부 보고
 
-## 시세 데이터 수집 기준
+## 🔍 기존 코드 참고 규칙 (중요!)
+
+### 코드 수정 시 준수사항
+**모든 코드 수정 작업 전에 반드시 기존 코드나 파일을 먼저 검토하고 참고해야 함**
+
+#### ✅ 해야 할 것
+1. **기존 코드 검토**: 수정하려는 기능과 유사한 기존 코드가 있는지 먼저 확인
+2. **기존 함수 활용**: 이미 구현된 함수나 클래스가 있다면 재사용
+3. **기존 패턴 따르기**: 프로젝트의 코딩 스타일과 패턴을 일관성 있게 유지
+4. **기존 테이블 활용**: 새로운 테이블 생성 전에 기존 테이블 구조 검토
+
+#### ❌ 하지 말아야 할 것
+1. **중복 코드 작성**: 기존에 있는 기능을 새로 구현하지 않음
+2. **기존 코드 무시**: 기존 구현을 확인하지 않고 새로운 코드 작성
+3. **일관성 없는 패턴**: 프로젝트 전체와 다른 코딩 스타일 사용
+4. **불필요한 의존성 추가**: 기존 모듈로 해결 가능한 기능에 새 라이브러리 도입
+
+#### 검토 순서
+1. **README.md** README.md의 스키마 및 구조를 참고해서 코드 생성 및 수정 하여 사이드 임팩드 발생이 안되록한다.
+2. **현재 파일 내 검색**: 같은 파일 내에 유사한 기능이 있는지 확인
+3. **프로젝트 전체 검색**: `grep_search` 또는 `codebase_search`로 유사 기능 검색
+4. **기존 모듈 확인**: `enhanced_data_validator.py`, `market_status_detector.py` 등 관련 모듈 검토
+5. **데이터베이스 스키마 확인**: 새로운 테이블이나 컬럼이 필요한지 검토
+6. **기존 패턴 분석**: 성공적으로 작동하는 코드의 패턴을 학습하고 적용
+
+#### 예시
+```python
+# ❌ 잘못된 방법 - 기존 코드 확인 없이 새로 구현
+def validate_data():
+    # 새로운 검증 로직 구현
+    pass
+
+# ✅ 올바른 방법 - 기존 코드 먼저 확인
+def validate_data():
+    # enhanced_data_validator.py의 기존 검증 함수 활용
+    from enhanced_data_validator import EnhancedDataValidator
+    validator = EnhancedDataValidator()
+    return validator.validate_stock_data_integrity(stock_code)
+```
+
+## 🗄️ MySQL 데이터베이스 시스템 규칙
+
+### 데이터베이스 구조
+**프로젝트는 MySQL 데이터베이스를 기반으로 구축되어야 함**
+
+#### 필수 테이블 구조
+```sql
+-- 1. 종목 정보 테이블
+CREATE TABLE stocks (
+    stock_code VARCHAR(6) PRIMARY KEY,      -- 종목코드 (6자리)
+    stock_name VARCHAR(100) NOT NULL,       -- 종목명
+    market_type ENUM('KOSPI', 'KOSDAQ'),   -- 마켓 구분
+    listing_date DATE,                      -- 상장일
+    is_active BOOLEAN DEFAULT TRUE,         -- 활성 상태
+    created_at TIMESTAMP,                   -- 생성일시
+    updated_at TIMESTAMP                    -- 수정일시
+);
+
+-- 2. 일봉 데이터 테이블
+CREATE TABLE daily_data (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    stock_code VARCHAR(6) NOT NULL,
+    trade_date DATE NOT NULL,
+    open DECIMAL(10,2) NOT NULL,
+    high DECIMAL(10,2) NOT NULL,
+    low DECIMAL(10,2) NOT NULL,
+    close DECIMAL(10,2) NOT NULL,
+    volume BIGINT NOT NULL,
+    FOREIGN KEY (stock_code) REFERENCES stocks(stock_code)
+);
+
+-- 3. 주봉 데이터 테이블
+CREATE TABLE weekly_data (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    stock_code VARCHAR(6) NOT NULL,
+    week_start DATE NOT NULL,
+    open DECIMAL(10,2) NOT NULL,
+    high DECIMAL(10,2) NOT NULL,
+    low DECIMAL(10,2) NOT NULL,
+    close DECIMAL(10,2) NOT NULL,
+    volume BIGINT NOT NULL,
+    FOREIGN KEY (stock_code) REFERENCES stocks(stock_code)
+);
+
+-- 4. 월봉 데이터 테이블
+CREATE TABLE monthly_data (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    stock_code VARCHAR(6) NOT NULL,
+    month_start DATE NOT NULL,
+    open DECIMAL(10,2) NOT NULL,
+    high DECIMAL(10,2) NOT NULL,
+    low DECIMAL(10,2) NOT NULL,
+    close DECIMAL(10,2) NOT NULL,
+    volume BIGINT NOT NULL,
+    FOREIGN KEY (stock_code) REFERENCES stocks(stock_code)
+);
+
+-- 5. 기술적 지표 테이블
+CREATE TABLE technical_indicators (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    stock_code VARCHAR(6) NOT NULL,
+    trade_date DATE NOT NULL,
+    ma5 DECIMAL(10,2), ma20 DECIMAL(10,2), ma60 DECIMAL(10,2), ma120 DECIMAL(10,2),
+    rsi DECIMAL(5,2), macd DECIMAL(10,4), macd_signal DECIMAL(10,4), macd_histogram DECIMAL(10,4),
+    bb_upper DECIMAL(10,2), bb_middle DECIMAL(10,2), bb_lower DECIMAL(10,2),
+    FOREIGN KEY (stock_code) REFERENCES stocks(stock_code)
+);
+```
+
+### 데이터 수집 원칙
+1. **10년치 일봉 데이터**: 각 종목별로 최소 10년간의 일봉 데이터 수집
+2. **기술적 지표 자동 계산**: 일봉 데이터 수집 시 이동평균, RSI, MACD, 볼린저밴드 자동 계산
+3. **증분 업데이트**: 빈 일자만 채우는 방식으로 빠른 데이터 업데이트
+4. **데이터 무결성**: 마감 전 수집 데이터 검증 및 최종 데이터 보장
+
+## 🔍 향상된 데이터 검증 시스템 규칙
+
+### 데이터 품질 검증 기준
+1. **이동평균선 검증**
+   - 0.00 값 검증 (0값 개수 확인)
+   - 음수 값 검증 (주가가 음수일 수 없음)
+   - 극단적 값 검증 (주가의 10배 이상)
+   - NaN 값 검증
+
+2. **RSI 검증**
+   - 범위 검증 (0-100 범위 내)
+   - 극단값 검증 (0 또는 100에 가까운 값)
+
+3. **MACD 검증**
+   - 극단값 검증 (절댓값 10000 이상)
+   - NaN 값 검증
+
+### 검증 결과에 따른 자동 조치
+- **데이터 품질 점수 70% 미만**: 보조지표 자동 재계산
+- **심각한 오류 발견**: 즉시 보조지표 업데이트
+- **최신일 데이터 신뢰성 문제**: 장마감 후 재수집 권장
+
+## 📊 주봉/월봉 데이터 생성 규칙
+
+### 생성 원칙
+1. **일봉 기반 변환**: 일봉 데이터를 기반으로 주봉, 월봉 데이터 생성
+2. **한국 공휴일 고려**: 공휴일을 고려한 정확한 주봉/월봉 데이터 생성
+3. **배치 처리**: 100개 종목씩 배치로 효율적인 데이터 생성
+4. **데이터베이스 저장**: 생성된 주봉/월봉 데이터를 별도 테이블에 저장
+
+### 데이터 생성 기준
+- **주봉**: 일봉 데이터를 주 단위로 집계 (5일 이동평균)
+- **월봉**: 일봉 데이터를 월 단위로 집계 (20일 이동평균)
+
+## 🌐 웹 인터페이스 시스템 규칙
+
+### Flask 애플리케이션 구조
+1. **메인 페이지**: 분석 유형 선택 (단일/배치)
+2. **단일 분석**: 종목명 입력 및 차트 유형 선택
+3. **배치 분석**: 파일 업로드 및 분석 실행
+4. **결과 다운로드**: 생성된 파일들의 다운로드 기능
+
+### 웹 인터페이스 기능
+- **실시간 진행률**: 배치 분석 진행 상황 실시간 모니터링
+- **파일 관리**: 업로드된 종목 목록 및 결과 파일 관리
+- **에러 처리**: 분석 실패 시 사용자 친화적 에러 메시지
+
+## 📊 차트 데이터 조회 기준
 차트생성요청일 기준으로 가장 최근에 있는 데이터로 수집한다. 각 기간은 아래 일봉, 주봉, 월봉 차트의 데이터 수집기간을 기준으로 한다.
 
 ### 일봉차트 생성을 위한 데이터 수집 기준
@@ -33,3 +193,179 @@ alwaysApply: true
 2. 거래량
 3. CCI
 4. ADX
+
+## 📊 주식 데이터 수집 우선순위
+
+### 1순위: 야후 파이낸스 (Yahoo Finance)
+- **데이터 소스**: Yahoo Finance API 또는 웹 스크래핑
+- **사용 이유**: 
+  - 글로벌 표준 데이터 제공
+  - 실시간 데이터 업데이트
+  - 다양한 시장 데이터 제공
+  - 안정적인 API 서비스
+
+### 2순위: 기타 데이터 소스
+- **네이버 금융**: 보조 데이터 검증용
+
+## 🗄️ 종목 정보 관리 규칙
+
+### 종목 정보 참조 원칙
+**모든 종목 관련 정보는 반드시 DB의 'stocks' 테이블을 우선 참조해야 함**
+
+### stocks 테이블 구조
+```sql
+CREATE TABLE stocks (
+    stock_code VARCHAR(6) PRIMARY KEY,      -- 종목코드 (6자리)
+    stock_name VARCHAR(100) NOT NULL,       -- 종목명
+    market_type ENUM('KOSPI', 'KOSDAQ'),   -- 마켓 구분
+    listing_date DATE,                      -- 상장일
+    is_active BOOLEAN DEFAULT TRUE,         -- 활성 상태
+    created_at TIMESTAMP,                   -- 생성일시
+    updated_at TIMESTAMP                    -- 수정일시
+);
+```
+
+### 종목 정보 매핑 규칙
+1. **종목코드**: `stocks.stock_code` 사용
+2. **종목명**: `stocks.stock_name` 사용  
+3. **마켓 구분**: `stocks.market_type` 사용
+4. **활성 상태**: `stocks.is_active = TRUE`인 종목만 사용
+
+## 🔄 데이터 수집 워크플로우
+
+### 1. 종목 정보 확인
+```python
+# 올바른 방법
+def get_stock_info(stock_code):
+    query = "SELECT * FROM stocks WHERE stock_code = %s AND is_active = TRUE"
+    return db.fetch_one(query, (stock_code,))
+
+# 잘못된 방법 - 하드코딩
+stock_info = {
+    "000020": "동화약품",
+    "000040": "KR모터스"
+}
+```
+
+### 2. 데이터 수집 시
+```python
+# 1. stocks 테이블에서 종목 정보 조회
+stock_info = get_stock_info(stock_code)
+if not stock_info:
+    logging.error(f"종목 정보를 찾을 수 없음: {stock_code}")
+    return None
+
+# 2. Yahoo Finance에서 데이터 수집
+yahoo_data = collect_from_yahoo_finance(stock_code)
+
+# 3. 수집된 데이터에 종목 정보 추가
+data = {
+    "stock_code": stock_info["stock_code"],
+    "stock_name": stock_info["stock_name"], 
+    "market_type": stock_info["market_type"],
+    "yahoo_data": yahoo_data
+}
+```
+
+## 📋 개발 시 준수사항
+
+### ✅ 해야 할 것
+- 모든 종목 정보는 `stocks` 테이블에서 조회
+- Yahoo Finance를 우선 데이터 소스로 사용
+- 종목코드, 종목명, 마켓 구분은 DB 참조
+- 새로운 종목 추가 시 `stocks` 테이블 업데이트
+- 데이터 품질 검증 시스템 활용
+- 주봉/월봉 데이터는 일봉 데이터 기반으로 생성
+- 웹 인터페이스는 Flask 기반으로 구현
+
+### ❌ 하지 말아야 할 것
+- 하드코딩된 종목 정보 사용 금지
+- 외부 API에서 종목 정보 직접 파싱 금지
+- `stocks` 테이블을 거치지 않고 데이터 처리 금지
+- 종목 정보를 별도 파일에 저장 금지
+- 데이터 품질 검증 없이 보조지표 계산 금지
+- 일봉 데이터 없이 주봉/월봉 데이터 생성 금지
+
+## 🔧 유지보수 규칙
+
+### 종목 정보 업데이트
+1. **신규 상장**: `update_stocks_from_json.py` 실행
+2. **상장 폐지**: `stocks.is_active = FALSE` 설정
+3. **종목명 변경**: `stocks.stock_name` 업데이트
+4. **마켓 이전**: `stocks.market_type` 업데이트
+
+### 데이터 소스 변경 시
+1. Yahoo Finance API 변경 시 전체 시스템 점검
+2. 백업 데이터 소스 준비
+3. 데이터 품질 검증 프로세스 실행
+
+### 데이터베이스 관리
+1. **정기 백업**: 주 1회 데이터베이스 백업
+2. **성능 모니터링**: 쿼리 실행 시간 및 인덱스 사용률 모니터링
+3. **데이터 정합성**: 월 1회 데이터 정합성 검사
+
+## 📊 모니터링 및 품질 관리
+
+### 데이터 품질 체크
+- `stocks` 테이블의 데이터 정합성 확인
+- Yahoo Finance 데이터 수집 성공률 모니터링
+- 종목 정보와 실제 거래 데이터 매칭 검증
+- 보조지표 계산 정확성 검증
+
+### 정기 점검 항목
+- 월 1회: `stocks` 테이블 데이터 정합성 검사
+- 주 1회: Yahoo Finance API 연결 상태 확인
+- 일 1회: 데이터 수집 로그 점검
+- 주 1회: 주봉/월봉 데이터 생성 상태 확인
+
+## 🚨 예외 상황 처리
+
+### Yahoo Finance 접근 불가 시
+1. 백업 데이터 소스 사용 (KRX, 키움증권 등)
+2. `stocks` 테이블의 기존 데이터 활용
+3. 관리자에게 알림 발송
+
+### 종목 정보 불일치 시
+1. `stocks` 테이블 데이터 우선 사용
+2. 외부 소스와의 차이점 로깅
+3. 데이터 정합성 검증 프로세스 실행
+
+### 데이터 품질 문제 시
+1. 향상된 데이터 검증 시스템 실행
+2. 문제가 있는 보조지표 자동 재계산
+3. 심각한 문제 시 데이터 재수집 권장
+
+## 🔄 개발 우선순위
+
+### 1단계 (완료)
+- ✅ MySQL 데이터베이스 구축
+- ✅ 기본 데이터 수집 시스템
+- ✅ 기술적 지표 계산
+- ✅ 향상된 데이터 검증 시스템
+
+### 2단계 (진행 중)
+- 🔄 차트 생성 모듈 DB 기반 수정
+- 🔄 증분 업데이트 시스템 구현
+
+### 3단계 (계획)
+- 📋 전체 상장 종목 자동 수집
+- 📋 실시간 데이터 수집 시스템
+- 📋 고급 기술적 지표 추가
+
+## 📚 참고 문서
+
+### 핵심 파일들
+- `create_database_schema.py`: 데이터베이스 스키마 생성
+- `stock_data_collector_mysql.py`: 주식 데이터 수집
+- `week_month_data_generator.py`: 주봉/월봉 데이터 생성
+- `enhanced_data_validator.py`: 데이터 검증 시스템
+- `app.py`: 웹 인터페이스
+
+### 설정 파일들
+- `database_config.py`: 데이터베이스 연결 설정
+- `config.py`: 전역 설정 관리
+- `requirements.txt`: 필수 라이브러리 목록
+
+---
+
+**이 규칙은 프로젝트의 데이터 일관성과 신뢰성을 보장하기 위한 것입니다. 모든 개발자는 이 규칙을 준수해야 합니다.**

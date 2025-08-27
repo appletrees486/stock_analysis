@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-국내 주식 월봉 시세 조회 스크립트
+국내 주식 월봉 시세 조회 스크립트 (DB 기반 + 공통 컨센선스 적용)
 """
 
 # matplotlib 백엔드를 Agg로 설정 (tkinter 에러 방지)
@@ -22,6 +22,11 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils.dataframe import dataframe_to_rows
 import json
+
+# 데이터베이스 연결을 위한 import 추가
+from database_config import DatabaseManager
+# 한국 공휴일 관리자 import 추가
+from korean_holiday_manager import KoreanHolidayManager
 
 # 운영체제별 한글 폰트 설정
 system = platform.system()
@@ -60,127 +65,358 @@ except AttributeError:
     # 최신 matplotlib 버전에서는 _rebuild가 제거됨
     fm.findfont('DejaVu Sans', rebuild_if_missing=True)
 
-def get_monthly_stock_data(stock_code):
-    """국내 주식 월봉 데이터 조회 (10년) - 네이버 금융 우선, Yahoo Finance 보조"""
-    print(f"🔍 {stock_code} 10년 월봉 시세 조회 중...")
-    print("   📅 월봉 데이터는 거래일 기준으로 제공되며, 월말 기준으로 집계됩니다.")
+def get_monthly_stock_data_from_db(stock_code):
+    """DB에서 월봉 데이터 조회 (보조지표 포함)"""
+    print(f"🔍 DB에서 {stock_code} 월봉 데이터 조회 중...")
     
-    # 네이버 금융 데이터 조회 (우선)
-    print("   🔄 네이버 금융에서 실시간 데이터 확인 중...")
-    from naver_data_module import get_naver_stock_data, get_naver_historical_data
-    
-    naver_result = get_naver_stock_data(stock_code)
-    if naver_result['success']:
-        print(f"   ✅ 네이버 금융 실시간 데이터: {naver_result['stock_name']}")
-        print(f"   📈 현재가: {naver_result['current_price']:,.0f}원")
-        print(f"   📊 변동: {naver_result['change_direction']} {naver_result['change_amount']:+,}원")
-        print(f"   ⏰ 조회시간: {naver_result['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}")
-    
-    # Yahoo Finance에서 월봉 데이터 조회 (주 데이터)
-    yf_monthly_data = None
-    tickers_to_try = [
-        f"{stock_code}.KS",   # 코스피
-        f"{stock_code}.KQ",   # 코스닥 (일부)
-        f"{stock_code}.KS",   # 다시 시도
-    ]
-    
-    for i, ticker in enumerate(tickers_to_try):
-        try:
-            print(f"   시도 {i+1}: {ticker}")
-            stock = yf.Ticker(ticker)
-            # 10년 월봉 데이터 조회
-            hist = stock.history(period="10y", interval="1mo")
+    try:
+        db = DatabaseManager()
+        if not db.connect():
+            print("   ❌ 데이터베이스 연결 실패")
+            return None
+        
+        # 종목명 조회
+        stock_name_query = "SELECT stock_name FROM stocks WHERE stock_code = %s"
+        stock_info = db.fetch_one(stock_name_query, (stock_code,))
+        if not stock_info:
+            print(f"   ❌ 종목코드 {stock_code}를 찾을 수 없습니다.")
+            db.disconnect()
+            return None
+        
+        stock_name = stock_info['stock_name']
+        print(f"   🏢 종목명: {stock_name}")
+        
+        # 최신 월봉 데이터 기준으로 기간 설정
+        latest_date_query = "SELECT MAX(month_start) as latest_date FROM monthly_data WHERE stock_code = %s"
+        latest_date_result = db.fetch_one(latest_date_query, (stock_code,))
+        
+        if latest_date_result and latest_date_result['latest_date']:
+            end_date = latest_date_result['latest_date']
+            start_date = end_date - timedelta(days=3650)  # 10년 전
+            print(f"   📅 DB 최신 월봉: {end_date}")
+            print(f"   📅 조회 시작일: {start_date}")
+        else:
+            # 월봉 데이터가 없으면 일봉 데이터에서 생성
+            print(f"   ⚠️ DB에 월봉 데이터가 없습니다. 일봉 데이터에서 생성합니다...")
+            db.disconnect()
+            return generate_monthly_from_daily(stock_code)
+        
+        # 월봉 데이터 조회 (보조지표 포함)
+        monthly_query = """
+        SELECT month_start, open, high, low, close, volume,
+               ma5, ma20, ma60, cci, adx, plus_di, minus_di,
+               bb_upper, bb_middle, bb_lower
+        FROM monthly_data 
+        WHERE stock_code = %s 
+        AND month_start >= %s 
+        AND month_start <= %s
+        ORDER BY month_start ASC
+        """
+        
+        params = (stock_code, start_date, end_date)
+        monthly_data = db.fetch_all(monthly_query, params)
+        
+        db.disconnect()
+        
+        if monthly_data:
+            # DataFrame으로 변환
+            df = pd.DataFrame(monthly_data)
+            df['month_start'] = pd.to_datetime(df['month_start'])
+            df.set_index('month_start', inplace=True)
             
-            if not hist.empty:
-                print(f"✅ Yahoo Finance 월봉: {hist.index[0].strftime('%Y-%m-%d')} ~ {hist.index[-1].strftime('%Y-%m-%d')} 기간 월봉 데이터를 조회했습니다.")
-                print(f"📅 총 {len(hist)}개월의 월봉 거래 데이터를 가져왔습니다.")
-                print(f"🏢 사용된 티커: {ticker}")
-                yf_monthly_data = hist
-                break
-                
-        except Exception as e:
-            print(f"   ❌ {ticker} 시도 실패: {str(e)[:50]}...")
-            continue
-    
-    # Yahoo Finance 월봉 데이터가 있는 경우 최신도 확인
-    if yf_monthly_data is not None:
-        # 최신 데이터 확인 (현재 날짜와 비교)
-        latest_monthly_date = yf_monthly_data.index[-1]
-        # 타임존 정보 제거
-        if hasattr(latest_monthly_date, 'tz_localize'):
-            latest_monthly_date = latest_monthly_date.tz_localize(None)
-        elif hasattr(latest_monthly_date, 'replace'):
-            latest_monthly_date = latest_monthly_date.replace(tzinfo=None)
-        
-        current_date = datetime.now()
-        days_diff = (current_date - latest_monthly_date).days
-        
-        print(f"   📅 Yahoo Finance 월봉 최신 데이터: {latest_monthly_date.strftime('%Y-%m-%d')}")
-        print(f"   📅 현재 날짜: {current_date.strftime('%Y-%m-%d')}")
-        print(f"   📅 데이터 차이: {days_diff}일")
-        
-        # 7일 이상 차이나면 일봉 데이터로 최신 월봉 보완
-        if days_diff > 7:
-            print(f"   ⚠️ Yahoo Finance 월봉 데이터가 {days_diff}일 전 데이터입니다.")
-            print(f"   🔄 Yahoo Finance 일봉 데이터로 최신 월봉을 보완합니다...")
+            # 컬럼명을 기존 형식과 맞춤
+            df.columns = ['Open', 'High', 'Low', 'Close', 'Volume', 
+                         'MA5', 'MA20', 'MA60', 'CCI', 'ADX', 'Plus_DI', 'Minus_DI',
+                         'BB_Upper', 'BB_Middle', 'BB_Lower']
             
-            # Yahoo Finance에서 일봉 데이터 조회 (최근 90일)
-            try:
-                daily_hist = stock.history(period="90d", interval="1d")
-                if not daily_hist.empty:
-                    print(f"   ✅ Yahoo Finance 일봉: {daily_hist.index[0].strftime('%Y-%m-%d')} ~ {daily_hist.index[-1].strftime('%Y-%m-%d')}")
-                    print(f"   📊 일봉 데이터 상세:")
-                    for i, (date, row) in enumerate(daily_hist.tail(5).iterrows()):
-                        print(f"      {date.strftime('%Y-%m-%d')}: {row['Open']:,.0f} → {row['Close']:,.0f}")
-                    
-                    # 일봉을 월봉으로 변환
-                    enhanced_monthly_data = convert_daily_to_monthly(daily_hist, yf_monthly_data)
-                    if enhanced_monthly_data is not None:
-                        print(f"   ✅ 일봉 데이터로 월봉을 보완했습니다!")
-                        print(f"   📅 최신 월봉 데이터: {enhanced_monthly_data.index[-1].strftime('%Y-%m-%d')}")
-                        return enhanced_monthly_data
-                    else:
-                        print(f"   ⚠️ 일봉 데이터 변환에 실패하여 기존 월봉 데이터를 사용합니다.")
-                else:
-                    print(f"   ⚠️ Yahoo Finance 일봉 데이터를 가져올 수 없어 기존 월봉 데이터를 사용합니다.")
-            except Exception as e:
-                print(f"   ❌ Yahoo Finance 일봉 데이터 조회 실패: {str(e)[:50]}...")
-        
-        return yf_monthly_data
-    
-    # Yahoo Finance에서 월봉 데이터를 가져올 수 없는 경우
-    print("   ⚠️ Yahoo Finance에서 월봉 데이터를 가져올 수 없습니다.")
-    print("   🔄 Yahoo Finance 일봉 데이터로 월봉을 생성합니다...")
-    
-    # Yahoo Finance에서 일봉 데이터로 월봉 생성 시도
-    for ticker in tickers_to_try:
-        try:
-            stock = yf.Ticker(ticker)
-            # 10년 일봉 데이터 조회
-            daily_hist = stock.history(period="10y", interval="1d")
-            if not daily_hist.empty:
-                print(f"   ✅ Yahoo Finance 일봉: {daily_hist.index[0].strftime('%Y-%m-%d')} ~ {daily_hist.index[-1].strftime('%Y-%m-%d')}")
+            print(f"   ✅ DB에서 월봉 데이터 {len(df)}개월 조회 완료")
+            print(f"   📅 데이터 기간: {df.index[0].strftime('%Y-%m')} ~ {df.index[-1].strftime('%Y-%m')}")
+            
+            # 최근 데이터 확인
+            latest_monthly_date = df.index[-1]
+            current_date = datetime.now()
+            days_diff = (current_date - latest_monthly_date).days
+            
+            print(f"   📅 최신 월봉: {latest_monthly_date.strftime('%Y-%m-%d')}")
+            print(f"   📅 현재 날짜: {current_date.strftime('%Y-%m-%d')}")
+            print(f"   📅 데이터 차이: {days_diff}일")
+            
+            # 30일 이상 차이나면 일봉 데이터로 최신 월봉 보완
+            if days_diff > 30:
+                print(f"   ⚠️ 월봉 데이터가 {days_diff}일 전 데이터입니다.")
+                print(f"   🔄 일봉 데이터로 최신 월봉을 보완합니다...")
                 
-                # 일봉을 월봉으로 변환
-                monthly_from_daily = convert_daily_to_monthly(daily_hist, None)
-                if monthly_from_daily is not None:
-                    print(f"   ✅ 일봉 데이터로 월봉을 생성했습니다!")
-                    return monthly_from_daily
-                break
-        except Exception as e:
-            print(f"   ❌ {ticker} 일봉 시도 실패: {str(e)[:50]}...")
-            continue
+                enhanced_df = enhance_monthly_with_daily(stock_code, df)
+                if enhanced_df is not None:
+                    print(f"   ✅ 일봉 데이터로 월봉을 보완했습니다!")
+                    return enhanced_df
+            
+            return df
+        else:
+            print(f"   ⚠️ DB에 월봉 데이터가 없습니다.")
+            return None
+            
+    except Exception as e:
+        print(f"   ❌ DB에서 월봉 데이터 조회 실패: {str(e)}")
+        try:
+            db.disconnect()
+        except:
+            pass
+        return None
+
+def generate_monthly_from_daily(stock_code):
+    """일봉 데이터에서 월봉 데이터 생성"""
+    print(f"   🔄 일봉 데이터에서 월봉 데이터 생성 중...")
     
-    # 모든 소스에서 실패
-    print("❌ 월봉 데이터 조회에 실패했습니다.")
-    print("💡 가능한 원인:")
-    print("   - 종목코드가 잘못되었습니다")
-    print("   - 해당 종목이 상장폐지되었습니다")
-    print("   - Yahoo Finance에서 지원하지 않는 종목입니다")
-    return None
+    try:
+        db = DatabaseManager()
+        if not db.connect():
+            return None
+        
+        # 일봉 데이터 조회 (10년)
+        daily_query = """
+        SELECT trade_date, open, high, low, close, volume
+        FROM daily_data 
+        WHERE stock_code = %s 
+        ORDER BY trade_date DESC 
+        LIMIT 3650
+        """
+        
+        daily_data = db.fetch_all(daily_query, (stock_code,))
+        db.disconnect()
+        
+        if not daily_data:
+            print(f"   ❌ 일봉 데이터가 없습니다.")
+            return None
+        
+        # DataFrame으로 변환
+        daily_df = pd.DataFrame(daily_data)
+        daily_df['trade_date'] = pd.to_datetime(daily_df['trade_date'])
+        daily_df.set_index('trade_date', inplace=True)
+        daily_df.sort_index(inplace=True)
+        
+        # 컬럼명을 대문자로 통일 (기존 코드와 맞춤)
+        daily_df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+        
+        # 데이터 타입을 float로 변환 (DB decimal 타입 문제 해결)
+        for col in ['Open', 'High', 'Low', 'Close']:
+            daily_df[col] = daily_df[col].astype(float)
+        daily_df['Volume'] = daily_df['Volume'].astype(int)
+        
+        print(f"   ✅ 일봉 데이터 {len(daily_df)}일 조회 완료")
+        
+        # 월봉 데이터 생성
+        monthly_df = convert_daily_to_monthly(daily_df, None)
+        
+        if monthly_df is not None:
+            # 보조지표 계산
+            monthly_df = calculate_technical_indicators(monthly_df)
+            
+            # DB에 저장
+            save_monthly_to_db(stock_code, monthly_df)
+            
+            return monthly_df
+        
+        return None
+        
+    except Exception as e:
+        print(f"   ❌ 일봉에서 월봉 생성 실패: {str(e)}")
+        return None
+
+def enhance_monthly_with_daily(stock_code, existing_monthly_df):
+    """기존 월봉 데이터를 일봉 데이터로 보완"""
+    try:
+        print(f"   🔄 일봉 데이터로 월봉 보완 중...")
+        
+        db = DatabaseManager()
+        if not db.connect():
+            return existing_monthly_df
+        
+        # 최신 일봉 데이터 조회 (최근 90일)
+        latest_monthly_date = existing_monthly_df.index[-1]
+        start_date = latest_monthly_date + timedelta(days=1)
+        
+        daily_query = """
+        SELECT trade_date, open, high, low, close, volume
+        FROM daily_data 
+        WHERE stock_code = %s 
+        AND trade_date >= %s
+        ORDER BY trade_date ASC
+        """
+        
+        daily_data = db.fetch_all(daily_query, (stock_code, start_date))
+        db.disconnect()
+        
+        if not daily_data:
+            print(f"   ⚠️ 보완할 일봉 데이터가 없습니다.")
+            return existing_monthly_df
+        
+        # DataFrame으로 변환
+        daily_df = pd.DataFrame(daily_data)
+        daily_df['trade_date'] = pd.to_datetime(daily_df['trade_date'])
+        daily_df.set_index('trade_date', inplace=True)
+        
+        # 컬럼명을 대문자로 통일 (기존 코드와 맞춤)
+        daily_df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+        
+        # 데이터 타입을 float로 변환 (DB decimal 타입 문제 해결)
+        for col in ['Open', 'High', 'Low', 'Close']:
+            daily_df[col] = daily_df[col].astype(float)
+        daily_df['Volume'] = daily_df['Volume'].astype(int)
+        
+        print(f"   ✅ 보완용 일봉 데이터 {len(daily_df)}일 조회 완료")
+        
+        # 일봉을 월봉으로 변환
+        new_monthly_df = convert_daily_to_monthly(daily_df, existing_monthly_df)
+        
+        if new_monthly_df is not None:
+            # 보조지표 재계산
+            new_monthly_df = calculate_technical_indicators(new_monthly_df)
+            
+            # DB에 업데이트
+            update_monthly_in_db(stock_code, new_monthly_df)
+            
+            return new_monthly_df
+        
+        return existing_monthly_df
+        
+    except Exception as e:
+        print(f"   ❌ 월봉 보완 실패: {str(e)}")
+        return existing_monthly_df
+
+def save_monthly_to_db(stock_code, monthly_df):
+    """월봉 데이터를 DB에 저장"""
+    try:
+        if monthly_df is None or monthly_df.empty:
+            return False
+        
+        db = DatabaseManager()
+        if not db.connect():
+            return False
+        
+        # 월봉 데이터 삽입 (보조지표 포함)
+        monthly_insert_sql = """
+        INSERT INTO monthly_data 
+        (stock_code, month_start, open, high, low, close, volume,
+         ma5, ma20, ma60, cci, adx, plus_di, minus_di, bb_upper, bb_middle, bb_lower)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+        open = VALUES(open), high = VALUES(high), low = VALUES(low), 
+        close = VALUES(close), volume = VALUES(volume),
+        ma5 = VALUES(ma5), ma20 = VALUES(ma20), ma60 = VALUES(ma60),
+        cci = VALUES(cci), adx = VALUES(adx), plus_di = VALUES(plus_di), minus_di = VALUES(minus_di),
+        bb_upper = VALUES(bb_upper), bb_middle = VALUES(bb_middle), bb_lower = VALUES(bb_lower),
+        updated_at = CURRENT_TIMESTAMP
+        """
+        
+        success_count = 0
+        for date, row in monthly_df.iterrows():
+            monthly_data = (
+                stock_code,
+                date.strftime('%Y-%m-%d'),
+                float(row['Open']),
+                float(row['High']),
+                float(row['Low']),
+                float(row['Close']),
+                int(row['Volume']),
+                float(row.get('MA5', 0)) if pd.notna(row.get('MA5')) else None,
+                float(row.get('MA20', 0)) if pd.notna(row.get('MA20')) else None,
+                float(row.get('MA60', 0)) if pd.notna(row.get('MA60')) else None,
+                float(row.get('CCI', 0)) if pd.notna(row.get('CCI')) else None,
+                float(row.get('ADX', 0)) if pd.notna(row.get('ADX')) else None,
+                float(row.get('Plus_DI', 0)) if pd.notna(row.get('Plus_DI')) else None,
+                float(row.get('Minus_DI', 0)) if pd.notna(row.get('Minus_DI')) else None,
+                float(row.get('BB_Upper', 0)) if pd.notna(row.get('BB_Upper')) else None,
+                float(row.get('BB_Middle', 0)) if pd.notna(row.get('BB_Middle')) else None,
+                float(row.get('BB_Lower', 0)) if pd.notna(row.get('BB_Lower')) else None
+            )
+            
+            if db.execute_query(monthly_insert_sql, monthly_data):
+                success_count += 1
+            else:
+                print(f"   ❌ 월봉 데이터 저장 실패: {date}")
+        
+        db.disconnect()
+        print(f"   ✅ 월봉 데이터 {success_count}개월 DB 저장 완료")
+        return success_count > 0
+        
+    except Exception as e:
+        print(f"   ❌ 월봉 데이터 DB 저장 실패: {str(e)}")
+        try:
+            db.disconnect()
+        except:
+            pass
+        return False
+
+def update_monthly_in_db(stock_code, monthly_df):
+    """기존 월봉 데이터를 DB에서 업데이트"""
+    try:
+        if monthly_df is None or monthly_df.empty:
+            return False
+        
+        db = DatabaseManager()
+        if not db.connect():
+            return False
+        
+        # 최신 데이터만 업데이트 (기존 데이터는 건드리지 않음)
+        latest_existing_query = "SELECT MAX(month_start) as latest_date FROM monthly_data WHERE stock_code = %s"
+        latest_result = db.fetch_one(latest_existing_query, (stock_code,))
+        
+        if latest_result and latest_result['latest_date']:
+            latest_existing_date = latest_result['latest_date']
+            new_data = monthly_df[monthly_df.index > latest_existing_date]
+            
+            if not new_data.empty:
+                print(f"   📅 새로운 월봉 데이터 {len(new_data)}개월 업데이트")
+                return save_monthly_to_db(stock_code, new_data)
+            else:
+                print(f"   📅 새로운 월봉 데이터가 없습니다.")
+                return True
+        
+        db.disconnect()
+        return False
+        
+    except Exception as e:
+        print(f"   ❌ 월봉 데이터 업데이트 실패: {str(e)}")
+        try:
+            db.disconnect()
+        except:
+            pass
+        return False
+
+def is_complete_month(target_date, current_date):
+    """해당 월이 완성되었는지 확인 (현재 월보다 이전 월인 경우만 완성된 월로 간주)"""
+    try:
+        # target_date를 date 객체로 변환
+        if hasattr(target_date, 'date'):
+            target = target_date.date()
+        else:
+            target = target_date
+        
+        # current_date를 date 객체로 변환
+        if hasattr(current_date, 'date'):
+            current = current_date.date()
+        else:
+            current = current_date
+        
+        # 해당 월의 첫째 날로 변환하여 비교
+        target_month = target.replace(day=1)
+        current_month = current.replace(day=1)
+        
+        # target_date가 현재 월보다 이전 월인 경우만 완성된 월로 간주
+        is_complete = target_month < current_month
+        
+        if not is_complete:
+            print(f"   ⚠️ 미완성 월 감지: {target_month.strftime('%Y-%m')} (현재: {current_month.strftime('%Y-%m')})")
+        
+        return is_complete
+        
+    except Exception as e:
+        print(f"   ❌ 월 완성도 확인 중 오류: {e}")
+        return False
 
 def convert_daily_to_monthly(daily_data, existing_monthly_data=None):
-    """일봉 데이터를 월봉으로 변환 (미완성 월 포함)"""
+    """일봉 데이터를 월봉으로 변환 (완성된 월만 포함)"""
     try:
         # 일봉 데이터를 월별로 그룹화
         daily_data_copy = daily_data.copy()
@@ -199,47 +435,21 @@ def convert_daily_to_monthly(daily_data, existing_monthly_data=None):
                 # 월봉 데이터 계산
                 month_start = group.index[0]
                 
-                # 미완성 월인지 확인 (현재 월인 경우)
-                is_current_month = False
-                if hasattr(month_start, 'date'):
-                    month_start_date = month_start.date()
-                else:
-                    month_start_date = month_start
+                # ✅ 완성된 월인지 확인 - 미완성 월은 제외
+                if not is_complete_month(month_start, current_date):
+                    print(f"   ⚠️ 미완성 월 제외: {month_start.strftime('%Y-%m')}")
+                    continue  # 미완성 월은 건너뛰기
                 
-                # 현재 월인지 확인
-                current_month_start = current_date.replace(day=1)
-                if month_start_date.month == current_date.month and month_start_date.year == current_date.year:
-                    is_current_month = True
-                    print(f"   📅 현재 월 감지: {month_start_date.strftime('%Y-%m')}")
-                
-                # 현재 월인 경우 실제 마지막 거래일을 날짜로 사용
-                if is_current_month:
-                    # 현재 월의 실제 마지막 거래일 찾기
-                    last_trading_day = group.index[-1]
-                    actual_close = group['Close'].iloc[-1]
-                    print(f"      📅 현재 월 마지막 거래일: {last_trading_day.strftime('%Y-%m-%d')}, 종가: {actual_close:,.0f}")
-                    
-                    # 현재 월은 실제 마지막 거래일을 날짜로 사용
-                    monthly_data.append({
-                        'Date': last_trading_day,       # 실제 마지막 거래일
-                        'Open': group['Open'].iloc[0],  # 월 첫날 시가
-                        'High': group['High'].max(),    # 월 최고가
-                        'Low': group['Low'].min(),      # 월 최저가
-                        'Close': actual_close,          # 실제 마지막 거래일 종가
-                        'Volume': group['Volume'].sum(), # 월 총 거래량
-                        'IsCurrentMonth': is_current_month # 현재 월 여부
-                    })
-                else:
-                    # 완성된 월은 기존 방식
-                    monthly_data.append({
-                        'Date': month_start,
-                        'Open': group['Open'].iloc[0],      # 월 첫날 시가
-                        'High': group['High'].max(),        # 월 최고가
-                        'Low': group['Low'].min(),          # 월 최저가
-                        'Close': group['Close'].iloc[-1],   # 월 마지막날 종가
-                        'Volume': group['Volume'].sum(),    # 월 총 거래량
-                        'IsCurrentMonth': is_current_month  # 현재 월 여부
-                    })
+                # ✅ 완성된 월만 처리 - 월 첫날을 기준 날짜로 사용
+                monthly_data.append({
+                    'Date': month_start,                    # 월 첫날을 기준 날짜로 사용
+                    'Open': group['Open'].iloc[0],          # 월 첫날 시가
+                    'High': group['High'].max(),            # 월 최고가
+                    'Low': group['Low'].min(),              # 월 최저가
+                    'Close': group['Close'].iloc[-1],       # 월 마지막날 종가
+                    'Volume': group['Volume'].sum(),        # 월 총 거래량
+                    'IsCurrentMonth': False                 # 완성된 월만 처리하므로 항상 False
+                })
         
         if not monthly_data:
             print("   ❌ 월봉 데이터 변환에 실패했습니다.")
@@ -250,15 +460,11 @@ def convert_daily_to_monthly(daily_data, existing_monthly_data=None):
         monthly_df.set_index('Date', inplace=True)
         monthly_df.sort_index(inplace=True)
         
-        # 현재 월이 있는지 확인
-        current_months = monthly_df[monthly_df['IsCurrentMonth'] == True]
-        if not current_months.empty:
-            print(f"   ✅ 현재 월 포함: {len(current_months)}개월")
-            for idx, row in current_months.iterrows():
-                print(f"      📅 {idx.strftime('%Y-%m-%d')}: {row['Open']:,.0f} → {row['Close']:,.0f}")
-        
         # IsCurrentMonth 컬럼 제거 (분석에 불필요)
         monthly_df = monthly_df.drop('IsCurrentMonth', axis=1)
+        
+        # ✅ 완성된 월만 포함되었음을 알림
+        print(f"   ✅ 완성된 월봉만 포함: {len(monthly_df)}개월")
         
         # 기존 월봉 데이터가 있는 경우 병합
         if existing_monthly_data is not None:
@@ -281,6 +487,16 @@ def calculate_technical_indicators(df):
     """기술적 지표 계산"""
     print(f"   🔧 기술적 지표 계산 시작 (데이터 수: {len(df)}개월)")
     
+    # 데이터 타입을 float로 변환 (decimal 타입 문제 해결)
+    try:
+        numeric_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+        for col in numeric_columns:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce').astype(float)
+        print(f"   ✅ 데이터 타입 변환 완료: float64")
+    except Exception as e:
+        print(f"   ⚠️ 데이터 타입 변환 중 오류: {e}")
+    
     # 이동평균선 (월간 기준)
     df['MA5'] = df['Close'].rolling(window=5).mean()
     df['MA10'] = df['Close'].rolling(window=10).mean()
@@ -294,14 +510,19 @@ def calculate_technical_indicators(df):
     df['BB_Lower'] = df['BB_Middle'] - (bb_std * 2)
     
     # CCI (Commodity Channel Index) 계산
-    # CCI = (Typical Price - SMA of Typical Price) / (0.015 * Mean Deviation)
-    # Typical Price = (High + Low + Close) / 3
-    typical_price = (df['High'] + df['Low'] + df['Close']) / 3
-    sma_tp = typical_price.rolling(window=20).mean()
-    
-    # Mean Deviation 계산
-    mean_deviation = typical_price.rolling(window=20).apply(lambda x: np.mean(np.abs(x - x.mean())))
-    df['CCI'] = (typical_price - sma_tp) / (0.015 * mean_deviation)
+    try:
+        # CCI = (Typical Price - SMA of Typical Price) / (0.015 * Mean Deviation)
+        # Typical Price = (High + Low + Close) / 3
+        typical_price = (df['High'] + df['Low'] + df['Close']) / 3
+        sma_tp = typical_price.rolling(window=20).mean()
+        
+        # Mean Deviation 계산
+        mean_deviation = typical_price.rolling(window=20).apply(lambda x: np.mean(np.abs(x - x.mean())))
+        df['CCI'] = (typical_price - sma_tp) / (0.015 * mean_deviation)
+        print(f"   ✅ CCI 계산 완료")
+    except Exception as e:
+        print(f"   ⚠️ CCI 계산 실패: {e}")
+        df['CCI'] = 0.0
     
     # ADX (Average Directional Index) 계산
     print(f"   📊 ADX 계산 시작 (기간: {min(14, len(df) // 2)}개월)")
@@ -313,11 +534,17 @@ def calculate_technical_indicators(df):
     plus_dm = np.where((high_diff > low_diff) & (high_diff > 0), high_diff, 0)
     minus_dm = np.where((low_diff > high_diff) & (low_diff > 0), -low_diff, 0)
     
-    # True Range 계산
-    tr1 = df['High'] - df['Low']
-    tr2 = np.abs(df['High'] - df['Close'].shift(1))
-    tr3 = np.abs(df['Low'] - df['Close'].shift(1))
-    true_range = np.maximum(tr1, np.maximum(tr2, tr3))
+    # True Range 계산 (오류 처리 강화)
+    try:
+        tr1 = df['High'] - df['Low']
+        tr2 = np.abs(df['High'] - df['Close'].shift(1))
+        tr3 = np.abs(df['Low'] - df['Close'].shift(1))
+        true_range = np.maximum(tr1, np.maximum(tr2, tr3))
+        print(f"   ✅ True Range 계산 완료")
+    except Exception as e:
+        print(f"   ❌ True Range 계산 실패: {e}")
+        # 기본값으로 설정
+        true_range = pd.Series(0.0, index=df.index)
     
     # 14기간 평균 계산 (월봉 데이터 특성을 고려하여 조정)
     period = min(14, len(df) // 2)  # 데이터가 적은 경우 기간 조정
@@ -377,6 +604,7 @@ def calculate_technical_indicators(df):
     else:
         print(f"   ⚠️ ADX 계산 실패: 모든 값이 NaN입니다")
     
+    print(f"   ✅ 기술적 지표 계산 완료")
     return df
 
 def analyze_monthly_stock_data(hist, stock_code):
@@ -588,29 +816,27 @@ def create_monthly_stock_chart(hist, stock_code):
         os.makedirs(charts_dir)
         print(f"📁 {charts_dir} 폴더를 생성했습니다.")
     
-    # 종목명 가져오기 (yfinance에서) - 코스피/코스닥 자동 구분
+    # 종목명 가져오기 (DB stocks 테이블에서)
     stock_name = stock_code  # 기본값
-    tickers_to_try = [
-        f"{stock_code}.KS",   # 코스피
-        f"{stock_code}.KQ",   # 코스닥
-    ]
-    
-    for ticker in tickers_to_try:
-        try:
-            stock = yf.Ticker(ticker)
-            stock_info = stock.info
+    try:
+        from database_config import DatabaseManager
+        db_manager = DatabaseManager()
+        if db_manager.connect():
+            # stocks 테이블에서 종목명 조회
+            query = "SELECT stock_name FROM stocks WHERE stock_code = %s"
+            result = db_manager.execute_query(query, (stock_code,))
             
-            # 종목명 우선순위: longName > shortName > 종목코드
-            if 'longName' in stock_info and stock_info['longName'] and stock_info['longName'] != 'N/A':
-                stock_name = stock_info['longName']
-                break
-            elif 'shortName' in stock_info and stock_info['shortName'] and stock_info['shortName'] != 'N/A':
-                # shortName이 종목코드와 같은 경우는 제외
-                if stock_info['shortName'] != stock_code and not stock_info['shortName'].startswith(stock_code):
-                    stock_name = stock_info['shortName']
-                    break
-        except:
-            continue
+            if result and len(result) > 0:
+                stock_name = str(result[0][0])
+                print(f"✅ DB에서 종목명 조회 성공: {stock_code} -> {stock_name}")
+            else:
+                print(f"⚠️ DB에서 종목명을 찾을 수 없음: {stock_code}")
+            
+            db_manager.disconnect()
+        else:
+            print(f"⚠️ DB 연결 실패로 종목코드를 종목명으로 사용: {stock_code}")
+    except Exception as e:
+        print(f"⚠️ DB 조회 중 오류: {e}, 종목코드를 종목명으로 사용: {stock_code}")
     
     # 파일명 생성: monthly_종목명_종목번호_생성일.png
     current_date = datetime.now().strftime("%Y%m%d")
@@ -1032,6 +1258,137 @@ def save_chart_data_to_excel(chart_data, stock_code, stock_name):
         return None
 '''
 
+def get_monthly_stock_data(stock_code):
+    """국내 주식 월봉 데이터 조회 (10년) - DB 우선, Yahoo Finance fallback"""
+    print(f"🔍 {stock_code} 10년 월봉 시세 조회 중...")
+    print("   📅 월봉 데이터는 거래일 기준으로 제공되며, 월말 기준으로 집계됩니다.")
+    
+    # 1. DB에서 월봉 데이터 조회 시도 (우선)
+    db_monthly_data = get_monthly_stock_data_from_db(stock_code)
+    if db_monthly_data is not None and not db_monthly_data.empty:
+        print(f"   ✅ DB에서 월봉 데이터 조회 완료")
+        return db_monthly_data
+    
+    # 2. DB에서 실패한 경우 Yahoo Finance fallback
+    print(f"   ⚠️ DB에서 월봉 데이터 조회 실패. Yahoo Finance에서 조회합니다...")
+    
+    # 네이버 금융 데이터 조회 (우선)
+    print("   🔄 네이버 금융에서 실시간 데이터 확인 중...")
+    try:
+        from naver_data_module import get_naver_stock_data, get_naver_historical_data
+        
+        naver_result = get_naver_stock_data(stock_code)
+        if naver_result['success']:
+            print(f"   ✅ 네이버 금융 실시간 데이터: {naver_result['stock_name']}")
+            print(f"   📈 현재가: {naver_result['current_price']:,.0f}원")
+            print(f"   📊 변동: {naver_result['change_direction']} {naver_result['change_amount']:+,}원")
+            print(f"   ⏰ 조회시간: {naver_result['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}")
+    except ImportError:
+        print("   ⚠️ 네이버 금융 모듈을 불러올 수 없습니다.")
+    
+    # Yahoo Finance에서 월봉 데이터 조회
+    yf_monthly_data = None
+    tickers_to_try = [
+        f"{stock_code}.KS",   # 코스피
+        f"{stock_code}.KQ",   # 코스닥 (일부)
+        f"{stock_code}.KS",   # 다시 시도
+    ]
+    
+    for i, ticker in enumerate(tickers_to_try):
+        try:
+            print(f"   시도 {i+1}: {ticker}")
+            stock = yf.Ticker(ticker)
+            # 10년 월봉 데이터 조회
+            hist = stock.history(period="10y", interval="1mo")
+            
+            if not hist.empty:
+                print(f"✅ Yahoo Finance 월봉: {hist.index[0].strftime('%Y-%m-%d')} ~ {hist.index[-1].strftime('%Y-%m-%d')} 기간 월봉 데이터를 조회했습니다.")
+                print(f"📅 총 {len(hist)}개월의 월봉 거래 데이터를 가져왔습니다.")
+                print(f"🏢 사용된 티커: {ticker}")
+                yf_monthly_data = hist
+                break
+                
+        except Exception as e:
+            print(f"   ❌ {ticker} 시도 실패: {str(e)[:50]}...")
+            continue
+    
+    # Yahoo Finance 월봉 데이터가 있는 경우 최신도 확인
+    if yf_monthly_data is not None:
+        # 최신 데이터 확인 (현재 날짜와 비교)
+        latest_monthly_date = yf_monthly_data.index[-1]
+        # 타임존 정보 제거
+        if hasattr(latest_monthly_date, 'tz_localize'):
+            latest_monthly_date = latest_monthly_date.tz_localize(None)
+        elif hasattr(latest_monthly_date, 'replace'):
+            latest_monthly_date = latest_monthly_date.replace(tzinfo=None)
+        
+        current_date = datetime.now()
+        days_diff = (current_date - latest_monthly_date).days
+        
+        print(f"   📅 Yahoo Finance 월봉 최신 데이터: {latest_monthly_date.strftime('%Y-%m-%d')}")
+        print(f"   📅 현재 날짜: {current_date.strftime('%Y-%m-%d')}")
+        print(f"   📅 데이터 차이: {days_diff}일")
+        
+        # 7일 이상 차이나면 일봉 데이터로 최신 월봉 보완
+        if days_diff > 7:
+            print(f"   ⚠️ Yahoo Finance 월봉 데이터가 {days_diff}일 전 데이터입니다.")
+            print(f"   🔄 Yahoo Finance 일봉 데이터로 최신 월봉을 보완합니다...")
+            
+            # Yahoo Finance에서 일봉 데이터 조회 (최근 90일)
+            try:
+                daily_hist = stock.history(period="90d", interval="1d")
+                if not daily_hist.empty:
+                    print(f"   ✅ Yahoo Finance 일봉: {daily_hist.index[0].strftime('%Y-%m-%d')} ~ {daily_hist.index[-1].strftime('%Y-%m-%d')}")
+                    print(f"   📊 일봉 데이터 상세:")
+                    for i, (date, row) in enumerate(daily_hist.tail(5).iterrows()):
+                        print(f"      {date.strftime('%Y-%m-%d')}: {row['Open']:,.0f} → {row['Close']:,.0f}")
+                    
+                    # 일봉을 월봉으로 변환
+                    enhanced_monthly_data = convert_daily_to_monthly(daily_hist, yf_monthly_data)
+                    if enhanced_monthly_data is not None:
+                        print(f"   ✅ 일봉 데이터로 월봉을 보완했습니다!")
+                        print(f"   📅 최신 월봉 데이터: {enhanced_monthly_data.index[-1].strftime('%Y-%m-%d')}")
+                        return enhanced_monthly_data
+                    else:
+                        print(f"   ⚠️ 일봉 데이터 변환에 실패하여 기존 월봉 데이터를 사용합니다.")
+                else:
+                    print(f"   ⚠️ Yahoo Finance 일봉 데이터를 가져올 수 없어 기존 월봉 데이터를 사용합니다.")
+            except Exception as e:
+                print(f"   ❌ Yahoo Finance 일봉 데이터 조회 실패: {str(e)[:50]}...")
+        
+        return yf_monthly_data
+    
+    # Yahoo Finance에서 월봉 데이터를 가져올 수 없는 경우
+    print("   ⚠️ Yahoo Finance에서 월봉 데이터를 가져올 수 없습니다.")
+    print("   🔄 Yahoo Finance 일봉 데이터로 월봉을 생성합니다...")
+    
+    # Yahoo Finance에서 일봉 데이터로 월봉 생성 시도
+    for ticker in tickers_to_try:
+        try:
+            stock = yf.Ticker(ticker)
+            # 10년 일봉 데이터 조회
+            daily_hist = stock.history(period="10y", interval="1d")
+            if not daily_hist.empty:
+                print(f"   ✅ Yahoo Finance 일봉: {daily_hist.index[0].strftime('%Y-%m-%d')} ~ {daily_hist.index[-1].strftime('%Y-%m-%d')}")
+                
+                # 일봉을 월봉으로 변환
+                monthly_from_daily = convert_daily_to_monthly(daily_hist, None)
+                if monthly_from_daily is not None:
+                    print(f"   ✅ 일봉 데이터로 월봉을 생성했습니다!")
+                    return monthly_from_daily
+                break
+        except Exception as e:
+            print(f"   ❌ {ticker} 일봉 시도 실패: {str(e)[:50]}...")
+            continue
+    
+    # 모든 소스에서 실패
+    print("❌ 월봉 데이터 조회에 실패했습니다.")
+    print("💡 가능한 원인:")
+    print("   - 종목코드가 잘못되었습니다")
+    print("   - 해당 종목이 상장폐지되었습니다")
+    print("   - Yahoo Finance에서 지원하지 않는 종목입니다")
+    return None
+
 def main():
     """메인 함수"""
     print("🚀 국내 주식 월봉 시세 조회 프로그램 (10년)")
@@ -1056,29 +1413,27 @@ def main():
         chart_path, chart_data = create_monthly_stock_chart(hist, stock_code)
         
         if chart_path and chart_data is not None:
-            # 종목명 가져오기
+            # 종목명 가져오기 (DB stocks 테이블에서)
             stock_name = stock_code
-            tickers_to_try = [
-                f"{stock_code}.KS",   # 코스피
-                f"{stock_code}.KQ",   # 코스닥
-            ]
-            
-            for ticker in tickers_to_try:
-                try:
-                    stock = yf.Ticker(ticker)
-                    stock_info = stock.info
+            try:
+                from database_config import DatabaseManager
+                db_manager = DatabaseManager()
+                if db_manager.connect():
+                    # stocks 테이블에서 종목명 조회
+                    query = "SELECT stock_name FROM stocks WHERE stock_code = %s"
+                    result = db_manager.execute_query(query, (stock_code,))
                     
-                    # 종목명 우선순위: longName > shortName > 종목코드
-                    if 'longName' in stock_info and stock_info['longName'] and stock_info['longName'] != 'N/A':
-                        stock_name = stock_info['longName']
-                        break
-                    elif 'shortName' in stock_info and stock_info['shortName'] and stock_info['shortName'] != 'N/A':
-                        # shortName이 종목코드와 같은 경우는 제외
-                        if stock_info['shortName'] != stock_code and not stock_info['shortName'].startswith(stock_code):
-                            stock_name = stock_info['shortName']
-                            break
-                except:
-                    continue
+                    if result and len(result) > 0:
+                        stock_name = str(result[0][0])
+                        print(f"✅ DB에서 종목명 조회 성공: {stock_code} -> {stock_name}")
+                    else:
+                        print(f"⚠️ DB에서 종목명을 찾을 수 없음: {stock_code}")
+                    
+                    db_manager.disconnect()
+                else:
+                    print(f"⚠️ DB 연결 실패로 종목코드를 종목명으로 사용: {stock_code}")
+            except Exception as e:
+                print(f"⚠️ DB 조회 중 오류: {e}, 종목코드를 종목명으로 사용: {stock_code}")
             
             # JSON 저장 (추천)
             json_path = save_chart_data_to_json(chart_data, stock_code, stock_name)

@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>배치 스케줄 관리 - AI 주식 차트 분석</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .schedule-card {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 20px;
+            margin: 15px 0;
+            border-left: 4px solid #007bff;
+            transition: all 0.3s ease;
+        }
+        
+        .schedule-card.active {
+            border-left-color: #28a745;
+            background: rgba(40, 167, 69, 0.1);
+        }
+        
+        .schedule-card.inactive {
+            border-left-color: #6c757d;
+            background: rgba(108, 117, 125, 0.1);
+        }
+        
+        .schedule-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .schedule-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #e9ecef;
+        }
+        
+        .schedule-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        
+        .status-active {
+            background: #28a745;
+            color: white;
+        }
+        
+        .status-inactive {
+            background: #6c757d;
+            color: white;
+        }
+        
+        .schedule-details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        
+        .detail-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #ced4da;
+            font-size: 14px;
+        }
+        
+        .detail-icon {
+            color: #007bff;
+            width: 16px;
+        }
+        
+        .schedule-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 20px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 14px;
+        }
+        
+        .btn-toggle {
+            background: linear-gradient(135deg, #28a745, #20c997);
+            color: white;
+        }
+        
+        .btn-toggle:hover {
+            background: linear-gradient(135deg, #20c997, #17a2b8);
+            transform: translateY(-1px);
+        }
+        
+        .btn-toggle.inactive {
+            background: linear-gradient(135deg, #6c757d, #495057);
+        }
+        
+        .btn-delete {
+            background: linear-gradient(135deg, #dc3545, #c82333);
+            color: white;
+        }
+        
+        .btn-delete:hover {
+            background: linear-gradient(135deg, #c82333, #a71e2a);
+            transform: translateY(-1px);
+        }
+        
+        .scheduler-status {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .scheduler-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        
+        .scheduler-running {
+            background-color: #28a745;
+            animation: pulse 2s infinite;
+        }
+        
+        .scheduler-stopped {
+            background-color: #dc3545;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        .create-schedule-form {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 20px;
+            margin: 20px 0;
+            display: none;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        .form-label {
+            display: block;
+            color: #e9ecef;
+            font-weight: 500;
+            margin-bottom: 5px;
+        }
+        
+        .form-control {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #495057;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            color: #e9ecef;
+            font-size: 14px;
+        }
+        
+        .form-control:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+        }
+        
+        .cron-helper {
+            font-size: 12px;
+            color: #6c757d;
+            margin-top: 5px;
+        }
+        
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: #e9ecef;
+            text-decoration: none;
+            margin-bottom: 20px;
+            padding: 8px 16px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            transition: all 0.3s ease;
+        }
+        
+        .back-link:hover {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            text-decoration: none;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #6c757d;
+        }
+        
+        .error-message {
+            background: rgba(220, 53, 69, 0.1);
+            border: 1px solid #dc3545;
+            color: #dc3545;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            display: none;
+        }
+        
+        .success-message {
+            background: rgba(40, 167, 69, 0.1);
+            border: 1px solid #28a745;
+            color: #28a745;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>⏰ 배치 스케줄 관리</h1>
+            <p class="subtitle">자동 수집 작업 스케줄 설정 및 관리</p>
+            <a href="/" class="back-link">
+                <i class="fas fa-arrow-left"></i> 메인으로 돌아가기
+            </a>
+        </header>
+        
+        <!-- 메시지 영역 -->
+        <div class="error-message" id="errorMessage"></div>
+        <div class="success-message" id="successMessage"></div>
+        
+        <!-- 스케줄러 상태 -->
+        <div class="scheduler-status">
+            <h3><i class="fas fa-server"></i> 스케줄러 상태</h3>
+            <div id="schedulerStatus">
+                <span class="scheduler-indicator scheduler-stopped"></span>
+                <span>확인 중...</span>
+            </div>
+            <p id="schedulerDescription">스케줄러 상태를 확인하고 있습니다.</p>
+        </div>
+        
+        <!-- 액션 버튼 -->
+        <div class="action-buttons">
+            <button class="btn btn-primary" onclick="toggleCreateForm()">
+                <i class="fas fa-plus"></i> 새 스케줄 생성
+            </button>
+            <button class="btn btn-secondary" onclick="refreshSchedules()">
+                <i class="fas fa-sync"></i> 새로고침
+            </button>
+            <button class="btn btn-warning" onclick="reloadScheduler()">
+                <i class="fas fa-redo"></i> 스케줄러 재로드
+            </button>
+        </div>
+        
+        <!-- 새 스케줄 생성 폼 -->
+        <div class="create-schedule-form" id="createForm">
+            <h4><i class="fas fa-plus"></i> 새 스케줄 생성</h4>
+            <form id="scheduleForm">
+                <div class="form-group">
+                    <label class="form-label">스케줄 이름</label>
+                    <input type="text" class="form-control" id="scheduleName" placeholder="예: 일일 시세 수집 (오후 5시)" required>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">작업 유형</label>
+                    <select class="form-control" id="jobType" required>
+                        <option value="DAILY_COLLECTION">일일 시세 수집</option>
+                        <option value="BATCH_ANALYSIS">배치 분석</option>
+                        <option value="DATA_VALIDATION">데이터 검증</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">크론 표현식</label>
+                    <input type="text" class="form-control" id="cronExpression" placeholder="예: 0 17 * * 1-5" required>
+                    <div class="cron-helper">
+                        <strong>예시:</strong><br>
+                        • 0 16 * * 1-5 (평일 오후 4시)<br>
+                        • 0 18 * * 1-5 (평일 오후 6시)<br>
+                        • 0 9 * * 6 (토요일 오전 9시)
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">설명</label>
+                    <textarea class="form-control" id="description" rows="3" placeholder="스케줄에 대한 설명을 입력하세요"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="isActive"> 생성 후 즉시 활성화
+                    </label>
+                </div>
+                
+                <div class="schedule-actions">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save"></i> 생성
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="toggleCreateForm()">
+                        <i class="fas fa-times"></i> 취소
+                    </button>
+                </div>
+            </form>
+        </div>
+        
+        <!-- 스케줄 목록 -->
+        <div id="schedulesContainer">
+            <div class="loading">
+                <i class="fas fa-spinner fa-spin"></i> 스케줄 목록을 불러오는 중...
+            </div>
+        </div>
+        
+        <footer class="footer">
+            <p>© 2025 AI 주식 차트 분석 시스템 | Powered by APScheduler</p>
+        </footer>
+    </div>
+    
+    <script>
+        let schedules = [];
+        let schedulerInfo = {};
+        
+        // 페이지 로드 시 초기화
+        document.addEventListener('DOMContentLoaded', function() {
+            loadSchedulerStatus();
+            loadSchedules();
+            
+            // 폼 제출 이벤트
+            document.getElementById('scheduleForm').addEventListener('submit', createSchedule);
+            
+            // 주기적으로 상태 업데이트 (30초마다)
+            setInterval(loadSchedulerStatus, 30000);
+        });
+        
+        // 스케줄러 상태 로드
+        function loadSchedulerStatus() {
+            fetch('/api/batch-schedule/scheduler/status')
+            .then(response => response.json())
+            .then(data => {
+                schedulerInfo = data;
+                updateSchedulerUI(data);
+            })
+            .catch(error => {
+                console.error('스케줄러 상태 조회 실패:', error);
+                showError('스케줄러 상태를 확인할 수 없습니다.');
+            });
+        }
+        
+        // 스케줄러 UI 업데이트
+        function updateSchedulerUI(data) {
+            const statusElement = document.getElementById('schedulerStatus');
+            const descElement = document.getElementById('schedulerDescription');
+            
+            if (data.scheduler_available) {
+                const isRunning = data.status === 'running';
+                const indicatorClass = isRunning ? 'scheduler-running' : 'scheduler-stopped';
+                const statusText = isRunning ? '실행 중' : '중지됨';
+                const jobCount = data.scheduled_jobs ? data.scheduled_jobs.length : 0;
+                
+                statusElement.innerHTML = `
+                    <span class="scheduler-indicator ${indicatorClass}"></span>
+                    <span>${statusText}</span>
+                `;
+                
+                descElement.textContent = `스케줄러가 ${statusText}입니다. 등록된 작업: ${jobCount}개`;
+            } else {
+                statusElement.innerHTML = `
+                    <span class="scheduler-indicator scheduler-stopped"></span>
+                    <span>사용 불가</span>
+                `;
+                descElement.textContent = 'APScheduler를 사용할 수 없습니다.';
+            }
+        }
+        
+        // 스케줄 목록 로드
+        function loadSchedules() {
+            fetch('/api/batch-schedule/list')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    schedules = data.schedules || [];
+                    renderSchedules();
+                } else {
+                    showError(data.error || '스케줄 목록을 불러올 수 없습니다.');
+                }
+            })
+            .catch(error => {
+                console.error('스케줄 목록 조회 실패:', error);
+                showError('스케줄 목록을 불러오는 중 오류가 발생했습니다.');
+            });
+        }
+        
+        // 스케줄 목록 렌더링
+        function renderSchedules() {
+            const container = document.getElementById('schedulesContainer');
+            
+            if (schedules.length === 0) {
+                container.innerHTML = `
+                    <div class="schedule-card">
+                        <div class="schedule-header">
+                            <div class="schedule-title">등록된 스케줄이 없습니다</div>
+                        </div>
+                        <p>새 스케줄을 생성하여 자동 수집 작업을 설정하세요.</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            const html = schedules.map(schedule => `
+                <div class="schedule-card ${schedule.is_active ? 'active' : 'inactive'}">
+                    <div class="schedule-header">
+                        <div class="schedule-title">${schedule.schedule_name}</div>
+                        <div class="schedule-status ${schedule.is_active ? 'status-active' : 'status-inactive'}">
+                            <i class="fas ${schedule.is_active ? 'fa-play' : 'fa-pause'}"></i>
+                            ${schedule.is_active ? '활성' : '비활성'}
+                        </div>
+                    </div>
+                    
+                    <div class="schedule-details">
+                        <div class="detail-item">
+                            <i class="fas fa-clock detail-icon"></i>
+                            <span>${schedule.cron_expression}</span>
+                        </div>
+                        <div class="detail-item">
+                            <i class="fas fa-cog detail-icon"></i>
+                            <span>${getJobTypeText(schedule.job_type)}</span>
+                        </div>
+                        ${schedule.last_run ? `
+                        <div class="detail-item">
+                            <i class="fas fa-history detail-icon"></i>
+                            <span>마지막 실행: ${formatDateTime(schedule.last_run)}</span>
+                        </div>
+                        ` : ''}
+                        ${schedule.last_success_count > 0 || schedule.last_failed_count > 0 ? `
+                        <div class="detail-item">
+                            <i class="fas fa-chart-bar detail-icon"></i>
+                            <span>성공: ${schedule.last_success_count}, 실패: ${schedule.last_failed_count}</span>
+                        </div>
+                        ` : ''}
+                    </div>
+                    
+                    ${schedule.description ? `<p style="color: #ced4da; font-size: 14px; margin: 10px 0;">${schedule.description}</p>` : ''}
+                    
+                    <div class="schedule-actions">
+                        <button class="btn btn-toggle ${schedule.is_active ? '' : 'inactive'}" 
+                                onclick="toggleSchedule(${schedule.id}, ${schedule.is_active})">
+                            <i class="fas ${schedule.is_active ? 'fa-pause' : 'fa-play'}"></i>
+                            ${schedule.is_active ? '비활성화' : '활성화'}
+                        </button>
+                        <button class="btn btn-delete" onclick="deleteSchedule(${schedule.id}, '${schedule.schedule_name}')">
+                            <i class="fas fa-trash"></i> 삭제
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+            
+            container.innerHTML = html;
+        }
+        
+        // 작업 유형 텍스트 변환
+        function getJobTypeText(jobType) {
+            const types = {
+                'DAILY_COLLECTION': '일일 시세 수집',
+                'BATCH_ANALYSIS': '배치 분석',
+                'DATA_VALIDATION': '데이터 검증'
+            };
+            return types[jobType] || jobType;
+        }
+        
+        // 날짜 시간 포맷
+        function formatDateTime(dateString) {
+            if (!dateString) return '';
+            const date = new Date(dateString);
+            return date.toLocaleString('ko-KR');
+        }
+        
+        // 스케줄 토글
+        function toggleSchedule(scheduleId, isActive) {
+            const action = isActive ? '비활성화' : '활성화';
+            
+            if (confirm(`정말로 이 스케줄을 ${action}하시겠습니까?`)) {
+                fetch(`/api/batch-schedule/toggle/${scheduleId}`, {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showSuccess(data.message);
+                        loadSchedules(); // 목록 새로고침
+                        loadSchedulerStatus(); // 스케줄러 상태 새로고침
+                    } else {
+                        showError(data.error || `스케줄 ${action}에 실패했습니다.`);
+                    }
+                })
+                .catch(error => {
+                    console.error('스케줄 토글 실패:', error);
+                    showError(`스케줄 ${action} 중 오류가 발생했습니다.`);
+                });
+            }
+        }
+        
+        // 스케줄 삭제
+        function deleteSchedule(scheduleId, scheduleName) {
+            if (confirm(`정말로 "${scheduleName}" 스케줄을 삭제하시겠습니까?\\n이 작업은 되돌릴 수 없습니다.`)) {
+                fetch(`/api/batch-schedule/delete/${scheduleId}`, {
+                    method: 'DELETE'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showSuccess(data.message);
+                        loadSchedules(); // 목록 새로고침
+                        loadSchedulerStatus(); // 스케줄러 상태 새로고침
+                    } else {
+                        showError(data.error || '스케줄 삭제에 실패했습니다.');
+                    }
+                })
+                .catch(error => {
+                    console.error('스케줄 삭제 실패:', error);
+                    showError('스케줄 삭제 중 오류가 발생했습니다.');
+                });
+            }
+        }
+        
+        // 새 스케줄 생성 폼 토글
+        function toggleCreateForm() {
+            const form = document.getElementById('createForm');
+            const isVisible = form.style.display === 'block';
+            
+            if (isVisible) {
+                form.style.display = 'none';
+                document.getElementById('scheduleForm').reset();
+            } else {
+                form.style.display = 'block';
+                document.getElementById('scheduleName').focus();
+            }
+        }
+        
+        // 새 스케줄 생성
+        function createSchedule(event) {
+            event.preventDefault();
+            
+            const formData = {
+                schedule_name: document.getElementById('scheduleName').value,
+                job_type: document.getElementById('jobType').value,
+                cron_expression: document.getElementById('cronExpression').value,
+                description: document.getElementById('description').value,
+                is_active: document.getElementById('isActive').checked
+            };
+            
+            fetch('/api/batch-schedule/create', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(formData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showSuccess(data.message);
+                    toggleCreateForm(); // 폼 닫기
+                    loadSchedules(); // 목록 새로고침
+                    loadSchedulerStatus(); // 스케줄러 상태 새로고침
+                } else {
+                    showError(data.error || '스케줄 생성에 실패했습니다.');
+                }
+            })
+            .catch(error => {
+                console.error('스케줄 생성 실패:', error);
+                showError('스케줄 생성 중 오류가 발생했습니다.');
+            });
+        }
+        
+        // 스케줄 목록 새로고침
+        function refreshSchedules() {
+            loadSchedulerStatus();
+            loadSchedules();
+            showSuccess('스케줄 목록을 새로고침했습니다.');
+        }
+        
+        // 스케줄러 재로드
+        function reloadScheduler() {
+            if (confirm('스케줄러를 재로드하시겠습니까?')) {
+                fetch('/api/batch-schedule/scheduler/reload', {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showSuccess(data.message);
+                        loadSchedulerStatus();
+                    } else {
+                        showError(data.error || '스케줄러 재로드에 실패했습니다.');
+                    }
+                })
+                .catch(error => {
+                    console.error('스케줄러 재로드 실패:', error);
+                    showError('스케줄러 재로드 중 오류가 발생했습니다.');
+                });
+            }
+        }
+        
+        // 성공 메시지 표시
+        function showSuccess(message) {
+            const element = document.getElementById('successMessage');
+            element.textContent = message;
+            element.style.display = 'block';
+            
+            // 에러 메시지 숨기기
+            document.getElementById('errorMessage').style.display = 'none';
+            
+            // 5초 후 자동 숨김
+            setTimeout(() => {
+                element.style.display = 'none';
+            }, 5000);
+        }
+        
+        // 에러 메시지 표시
+        function showError(message) {
+            const element = document.getElementById('errorMessage');
+            element.textContent = message;
+            element.style.display = 'block';
+            
+            // 성공 메시지 숨기기
+            document.getElementById('successMessage').style.display = 'none';
+            
+            // 10초 후 자동 숨김
+            setTimeout(() => {
+                element.style.display = 'none';
+            }, 10000);
+        }
+    </script>
+</body>
+</html>

@@ -12,6 +12,7 @@ import logging
 from datetime import datetime
 from werkzeug.utils import secure_filename
 import json
+from .volume_ranking_utils import VolumeRankingDataManager
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
@@ -208,4 +209,242 @@ def get_chart_types():
         return jsonify({'chart_types': chart_types})
     except Exception as e:
         logger.error(f"차트 유형 조회 오류: {e}")
+        return jsonify({'error': str(e)}), 500 
+
+@api_bp.route('/volume-ranking', methods=['GET'])
+def get_volume_ranking():
+    """거래량 상위 50개 종목 조회 API"""
+    try:
+        logger.info("거래량 랭킹 조회 API 요청")
+        
+        # 날짜 파라미터 확인
+        date_str = request.args.get('date', '')
+        if not date_str:
+            return jsonify({'error': '날짜 파라미터가 필요합니다 (YYYY-MM-DD 형식)'}), 400
+        
+        # 날짜 형식 검증
+        try:
+            from datetime import datetime
+            datetime.strptime(date_str, '%Y-%m-%d')
+        except ValueError:
+            return jsonify({'error': '날짜 형식이 올바르지 않습니다 (YYYY-MM-DD 형식)'}), 400
+        
+        # 거래량 랭킹 조회
+        from .utils import get_volume_ranking
+        result = get_volume_ranking(date_str)
+        
+        if 'error' in result:
+            return jsonify(result), 500
+        
+        logger.info(f"거래량 랭킹 조회 완료: {date_str}")
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"거래량 랭킹 조회 API 오류: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/volume-ranking/dates', methods=['GET'])
+def get_available_dates():
+    """거래량 랭킹을 조회할 수 있는 날짜 목록 API"""
+    try:
+        logger.info("사용 가능한 날짜 목록 조회 API 요청")
+        
+        # 사용 가능한 날짜 목록 조회
+        from .utils import get_available_dates
+        dates = get_available_dates()
+        
+        logger.info(f"사용 가능한 날짜 목록 조회 완료: {len(dates)}개")
+        return jsonify({
+            'dates': dates,
+            'total_count': len(dates),
+            'message': '사용 가능한 날짜 목록을 조회했습니다.'
+        })
+        
+    except Exception as e:
+        logger.error(f"사용 가능한 날짜 목록 조회 API 오류: {e}")
+        return jsonify({'error': str(e)}), 500 
+
+# VolumeRankingDataManager import 추가
+from .volume_ranking_utils import VolumeRankingDataManager
+
+@api_bp.route('/volume-ranking/daily/volume', methods=['GET'])
+def get_daily_volume_ranking():
+    """일일 거래량 상위 종목 조회 API"""
+    try:
+        logger.info("일일 거래량 랭킹 조회 API 요청")
+        
+        # 날짜 파라미터 확인
+        date_str = request.args.get('date', '')
+        limit = int(request.args.get('limit', 50))
+        
+        # VolumeRankingDataManager 사용
+        manager = VolumeRankingDataManager()
+        result = manager.get_daily_volume_ranking(date_str, limit)
+        
+        logger.info(f"일일 거래량 랭킹 조회 완료: {date_str}")
+        return jsonify({
+            'type': 'daily_volume',
+            'date': date_str,
+            'limit': limit,
+            'data': result,
+            'total_count': len(result)
+        })
+        
+    except Exception as e:
+        logger.error(f"일일 거래량 랭킹 조회 API 오류: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/volume-ranking/daily/turnover', methods=['GET'])
+def get_daily_turnover_ranking():
+    """일일 거래률 상위 종목 조회 API"""
+    try:
+        logger.info("일일 거래률 랭킹 조회 API 요청")
+        
+        # 날짜 파라미터 확인
+        date_str = request.args.get('date', '')
+        limit = int(request.args.get('limit', 50))
+        
+        # VolumeRankingDataManager 사용
+        manager = VolumeRankingDataManager()
+        result = manager.get_daily_turnover_ranking(date_str, limit)
+        
+        logger.info(f"일일 거래률 랭킹 조회 완료: {date_str}")
+        return jsonify({
+            'type': 'daily_turnover',
+            'date': date_str,
+            'limit': limit,
+            'data': result,
+            'total_count': len(result)
+        })
+        
+    except Exception as e:
+        logger.error(f"일일 거래률 랭킹 조회 API 오류: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/volume-ranking/weekly/volume', methods=['GET'])
+def get_weekly_volume_ranking():
+    """주간 거래량 상위 종목 조회 API"""
+    try:
+        logger.info("주간 거래량 랭킹 조회 API 요청")
+        
+        # 주 시작일 파라미터 확인
+        week_start = request.args.get('week_start', '')
+        limit = int(request.args.get('limit', 50))
+        
+        # VolumeRankingDataManager 사용
+        manager = VolumeRankingDataManager()
+        result = manager.get_weekly_volume_ranking(week_start, limit)
+        
+        logger.info(f"주간 거래량 랭킹 조회 완료: {week_start}")
+        return jsonify({
+            'type': 'weekly_volume',
+            'week_start': week_start,
+            'limit': limit,
+            'data': result,
+            'total_count': len(result)
+        })
+        
+    except Exception as e:
+        logger.error(f"주간 거래량 랭킹 조회 API 오류: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/volume-ranking/weekly/turnover', methods=['GET'])
+def get_weekly_turnover_ranking():
+    """주간 거래률 상위 종목 조회 API"""
+    try:
+        logger.info("주간 거래률 랭킹 조회 API 요청")
+        
+        # 주 시작일 파라미터 확인
+        week_start = request.args.get('week_start', '')
+        limit = int(request.args.get('limit', 50))
+        
+        # VolumeRankingDataManager 사용
+        manager = VolumeRankingDataManager()
+        result = manager.get_weekly_turnover_ranking(week_start, limit)
+        
+        logger.info(f"주간 거래률 랭킹 조회 완료: {week_start}")
+        return jsonify({
+            'type': 'weekly_turnover',
+            'week_start': week_start,
+            'limit': limit,
+            'data': result,
+            'total_count': len(result)
+        })
+        
+    except Exception as e:
+        logger.error(f"주간 거래률 랭킹 조회 API 오류: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/volume-ranking/monthly/volume', methods=['GET'])
+def get_monthly_volume_ranking():
+    """월간 거래량 상위 종목 조회 API"""
+    try:
+        logger.info("월간 거래량 랭킹 조회 API 요청")
+        
+        # 년월 파라미터 확인
+        year_month = request.args.get('year_month', '')
+        limit = int(request.args.get('limit', 50))
+        
+        # VolumeRankingDataManager 사용
+        manager = VolumeRankingDataManager()
+        result = manager.get_monthly_volume_ranking(year_month, limit)
+        
+        logger.info(f"월간 거래량 랭킹 조회 완료: {year_month}")
+        return jsonify({
+            'type': 'monthly_volume',
+            'year_month': year_month,
+            'limit': limit,
+            'data': result,
+            'total_count': len(result)
+        })
+        
+    except Exception as e:
+        logger.error(f"월간 거래량 랭킹 조회 API 오류: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/volume-ranking/monthly/turnover', methods=['GET'])
+def get_monthly_turnover_ranking():
+    """월간 거래률 상위 종목 조회 API"""
+    try:
+        logger.info("월간 거래률 랭킹 조회 API 요청")
+        
+        # 년월 파라미터 확인
+        year_month = request.args.get('year_month', '')
+        limit = int(request.args.get('limit', 50))
+        
+        # VolumeRankingDataManager 사용
+        manager = VolumeRankingDataManager()
+        result = manager.get_monthly_turnover_ranking(year_month, limit)
+        
+        logger.info(f"월간 거래률 랭킹 조회 완료: {year_month}")
+        return jsonify({
+            'type': 'monthly_turnover',
+            'year_month': year_month,
+            'limit': limit,
+            'data': result,
+            'total_count': len(result)
+        })
+        
+    except Exception as e:
+        logger.error(f"월간 거래률 랭킹 조회 API 오류: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/volume-ranking/cache/clear', methods=['POST'])
+def clear_volume_ranking_cache():
+    """거래량 랭킹 캐시 초기화 API"""
+    try:
+        logger.info("거래량 랭킹 캐시 초기화 API 요청")
+        
+        # VolumeRankingDataManager 사용
+        manager = VolumeRankingDataManager()
+        manager.clear_cache()
+        
+        logger.info("거래량 랭킹 캐시 초기화 완료")
+        return jsonify({
+            'message': '거래량 랭킹 캐시가 초기화되었습니다.',
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"거래량 랭킹 캐시 초기화 API 오류: {e}")
         return jsonify({'error': str(e)}), 500 

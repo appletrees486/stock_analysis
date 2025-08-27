@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>일일 시세 수집 - AI 주식 차트 분석</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .collection-status {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        
+        .status-idle { background-color: #6c757d; }
+        .status-running { background-color: #28a745; animation: pulse 1.5s infinite; }
+        .status-completed { background-color: #007bff; }
+        .status-error { background-color: #dc3545; }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        .progress-container {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 15px;
+            margin: 15px 0;
+            display: none;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #28a745, #20c997);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+        
+        .log-container {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            padding: 15px;
+            margin: 15px 0;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: #e9ecef;
+        }
+        
+        .log-entry {
+            margin: 2px 0;
+            padding: 2px 0;
+        }
+        
+        .log-info { color: #17a2b8; }
+        .log-success { color: #28a745; }
+        .log-warning { color: #ffc107; }
+        .log-error { color: #dc3545; }
+        
+        .action-buttons {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+        
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 25px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #007bff, #0056b3);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #0056b3, #004085);
+            transform: translateY(-2px);
+        }
+        
+        .btn-danger {
+            background: linear-gradient(135deg, #dc3545, #c82333);
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: linear-gradient(135deg, #c82333, #a71e2a);
+            transform: translateY(-2px);
+        }
+        
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        
+        .stat-card {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 15px;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #28a745;
+            margin-bottom: 5px;
+        }
+        
+        .stat-label {
+            color: #e9ecef;
+            font-size: 14px;
+        }
+        
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: #e9ecef;
+            text-decoration: none;
+            margin-bottom: 20px;
+            padding: 8px 16px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            transition: all 0.3s ease;
+        }
+        
+        .back-link:hover {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>📅 일일 시세 수집</h1>
+            <p class="subtitle">전체 종목의 일별 주가 데이터 및 유통주식수 수집</p>
+            <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+                <a href="/" class="back-link">
+                    <i class="fas fa-arrow-left"></i> 메인으로 돌아가기
+                </a>
+                <a href="/batch-schedule" class="back-link">
+                    <i class="fas fa-clock"></i> 배치 스케줄 관리
+                </a>
+            </div>
+        </header>
+        
+        <div class="collection-status">
+            <h3><i class="fas fa-info-circle"></i> 수집 상태</h3>
+            <div class="status-indicator status-idle" id="statusIndicator"></div>
+            <span id="statusText">대기 중</span>
+            <p id="statusDescription">일일 시세 수집을 시작하려면 '수집 시작' 버튼을 클릭하세요.</p>
+        </div>
+        
+        <div class="action-buttons">
+            <button class="btn btn-primary" id="startBtn" onclick="startCollection()">
+                <i class="fas fa-play"></i> 수집 시작
+            </button>
+            <button class="btn btn-danger" id="stopBtn" onclick="stopCollection()" disabled>
+                <i class="fas fa-stop"></i> 중지
+            </button>
+        </div>
+        
+        <div class="progress-container" id="progressContainer">
+            <h4><i class="fas fa-chart-line"></i> 진행 상황</h4>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <p id="progressText">0% 완료</p>
+        </div>
+        
+        <div class="stats-grid" id="statsGrid" style="display: none;">
+            <div class="stat-card">
+                <div class="stat-value" id="totalStocks">0</div>
+                <div class="stat-label">전체 종목</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="processedStocks">0</div>
+                <div class="stat-label">처리된 종목</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="successCount">0</div>
+                <div class="stat-label">성공</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="failedCount">0</div>
+                <div class="stat-label">실패</div>
+            </div>
+        </div>
+        
+        <!-- 작업 히스토리 -->
+        <div class="stats-grid" id="historyGrid" style="display: none;">
+            <div class="stat-card" style="grid-column: 1 / -1;">
+                <div class="stat-label">최근 수집 작업</div>
+                <div id="recentJobs" style="text-align: left; margin-top: 10px;">
+                    로딩 중...
+                </div>
+            </div>
+        </div>
+        
+        <div class="log-container" id="logContainer">
+            <div class="log-entry log-info">일일 시세 수집 시스템이 준비되었습니다.</div>
+            <div class="log-entry log-info">수집을 시작하려면 '수집 시작' 버튼을 클릭하세요.</div>
+        </div>
+        
+        <footer class="footer">
+            <p>© 2025 AI 주식 차트 분석 시스템 | Powered by Google Gemini AI</p>
+        </footer>
+    </div>
+    
+    <script>
+        let collectionStatus = 'idle';
+        let progressInterval;
+        
+        // 수집 시작
+        function startCollection() {
+            // UI 상태 업데이트
+            updateStatus('running', '수집 중...', '데이터 수집이 진행 중입니다. 진행 상황을 실시간으로 확인할 수 있습니다.');
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('stopBtn').disabled = false;
+            document.getElementById('progressContainer').style.display = 'block';
+            document.getElementById('statsGrid').style.display = 'grid';
+            
+            // 로그 추가
+            addLog('수집을 시작합니다...', 'info');
+            addLog('전체 종목을 100개씩 배치로 수집합니다.', 'info');
+            
+            // API 호출
+            fetch('/api/daily-collection/start', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({})
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    addLog('수집 작업이 성공적으로 시작되었습니다.', 'success');
+                    startProgressMonitoring();
+                } else {
+                    addLog(`수집 시작 실패: ${data.error}`, 'error');
+                    resetUI();
+                }
+            })
+            .catch(error => {
+                addLog(`수집 시작 중 오류 발생: ${error}`, 'error');
+                resetUI();
+            });
+        }
+        
+        // 중지
+        function stopCollection() {
+            if (confirm('정말로 수집을 중지하시겠습니까?')) {
+                addLog('수집을 중지합니다...', 'warning');
+                
+                fetch('/api/daily-collection/stop', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        addLog('수집이 중지되었습니다.', 'warning');
+                        resetUI();
+                    } else {
+                        addLog(`중지 실패: ${data.error}`, 'error');
+                    }
+                })
+                .catch(error => {
+                    addLog(`중지 중 오류 발생: ${error}`, 'error');
+                });
+            }
+        }
+        
+        // 진행 상황 모니터링 시작
+        function startProgressMonitoring() {
+            progressInterval = setInterval(() => {
+                fetch('/api/daily-collection/status')
+                .then(response => response.json())
+                .then(data => {
+                    updateStatusFromResponse(data);
+                    updateProgress(data);
+                    updateStats(data);
+                })
+                .catch(error => {
+                    console.error('진행 상황 확인 중 오류:', error);
+                });
+            }, 2000); // 2초마다 업데이트
+        }
+        
+        // 응답에서 상태 업데이트
+        function updateStatusFromResponse(data) {
+            if (data.status === 'completed') {
+                updateStatus('completed', '수집 완료', '모든 데이터 수집이 완료되었습니다.');
+                clearInterval(progressInterval);
+                resetUI();
+            } else if (data.status === 'error') {
+                updateStatus('error', '오류 발생', '수집 중 오류가 발생했습니다.');
+                clearInterval(progressInterval);
+                resetUI();
+            } else if (data.status === 'running') {
+                updateStatus('running', '수집 중...', '데이터 수집이 진행 중입니다.');
+            }
+        }
+        
+        // 진행률 업데이트
+        function updateProgress(data) {
+            if (data.progress) {
+                const progress = data.progress;
+                const percentage = Math.round((progress.processed / progress.total) * 100);
+                
+                document.getElementById('progressFill').style.width = percentage + '%';
+                document.getElementById('progressText').textContent = `${percentage}% 완료 (${progress.processed}/${progress.total})`;
+            }
+        }
+        
+        // 통계 업데이트
+        function updateStats(data) {
+            if (data.stats) {
+                document.getElementById('totalStocks').textContent = data.stats.total || 0;
+                document.getElementById('processedStocks').textContent = data.stats.processed || 0;
+                document.getElementById('successCount').textContent = data.stats.success || 0;
+                document.getElementById('failedCount').textContent = data.stats.failed || 0;
+            }
+        }
+        
+        // 상태 업데이트
+        function updateStatus(status, text, description) {
+            collectionStatus = status;
+            const indicator = document.getElementById('statusIndicator');
+            const statusText = document.getElementById('statusText');
+            const statusDescription = document.getElementById('statusDescription');
+            
+            // 기존 클래스 제거
+            indicator.className = 'status-indicator';
+            
+            // 새 상태 적용
+            indicator.classList.add(`status-${status}`);
+            statusText.textContent = text;
+            statusDescription.textContent = description;
+        }
+        
+        // 로그 추가
+        function addLog(message, type = 'info') {
+            const logContainer = document.getElementById('logContainer');
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry log-${type}`;
+            logEntry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            
+            logContainer.appendChild(logEntry);
+            logContainer.scrollTop = logContainer.scrollHeight;
+            
+            // 로그가 너무 많아지면 오래된 것 제거
+            if (logContainer.children.length > 100) {
+                logContainer.removeChild(logContainer.firstChild);
+            }
+        }
+        
+        // UI 초기화
+        function resetUI() {
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+            document.getElementById('progressContainer').style.display = 'none';
+            document.getElementById('statsGrid').style.display = 'none';
+            
+            if (progressInterval) {
+                clearInterval(progressInterval);
+            }
+        }
+        
+        // 작업 히스토리 로드
+        function loadJobHistory() {
+            fetch('/api/daily-collection/history?limit=5')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success && data.jobs && data.jobs.length > 0) {
+                    displayJobHistory(data.jobs);
+                    document.getElementById('historyGrid').style.display = 'grid';
+                }
+            })
+            .catch(error => {
+                console.error('작업 히스토리 로드 중 오류:', error);
+            });
+        }
+        
+        // 작업 히스토리 표시
+        function displayJobHistory(jobs) {
+            const container = document.getElementById('recentJobs');
+            const html = jobs.map(job => {
+                const statusIcon = job.status === 'COMPLETED' ? '✅' : 
+                                  job.status === 'FAILED' ? '❌' : 
+                                  job.status === 'RUNNING' ? '🔄' : '⏸️';
+                
+                const triggerText = job.trigger_type === 'SCHEDULED' ? '자동' : '수동';
+                const duration = job.duration ? `${job.duration}초` : '-';
+                
+                return `
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                        <div>
+                            ${statusIcon} Job ${job.id} (${triggerText})
+                        </div>
+                        <div style="font-size: 12px; color: #6c757d;">
+                            ${job.stats ? `성공: ${job.stats.success}, 실패: ${job.stats.failed}` : ''} | ${duration}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            container.innerHTML = html;
+        }
+        
+        // 페이지 로드 시 상태 확인
+        window.addEventListener('load', function() {
+            fetch('/api/daily-collection/status')
+            .then(response => response.json())
+            .then(data => {
+                updateStatusFromResponse(data);
+                updateProgress(data);
+                updateStats(data);
+            })
+            .catch(error => {
+                console.error('초기 상태 확인 중 오류:', error);
+            });
+            
+            // 작업 히스토리 로드
+            loadJobHistory();
+        });
+    </script>
+</body>
+</html>

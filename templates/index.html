@@ -5,12 +5,50 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI 주식 차트 분석</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .nav-menu {
+            margin-top: 15px;
+        }
+        
+        .nav-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 20px;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            text-decoration: none;
+            border-radius: 25px;
+            transition: all 0.3s ease;
+            font-weight: 500;
+        }
+        
+        .nav-link:hover {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            text-decoration: none;
+            transform: translateY(-2px);
+        }
+        
+        .nav-link i {
+            font-size: 16px;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
         <header class="header">
             <h1>🤖 AI 주식 차트 분석</h1>
             <p class="subtitle">Google Gemini AI를 활용한 전문적인 주식 차트 분석</p>
+            <nav class="nav-menu">
+                <a href="/prompts" class="nav-link">
+                    <i class="fas fa-cog"></i> 프롬프트 관리
+                </a>
+                <a href="/batch-schedule" class="nav-link">
+                    <i class="fas fa-clock"></i> 배치 스케줄 관리
+                </a>
+            </nav>
         </header>
         
         <div class="analysis-types">
@@ -38,6 +76,32 @@
                     <li>✅ 결과 파일 다운로드</li>
                 </ul>
                 <div class="card-button">대량 분석 시작</div>
+            </div>
+            
+            <div class="type-card" onclick="location.href='/volume-ranking'">
+                <div class="card-icon">🏆</div>
+                <h3>거래량 랭킹</h3>
+                <p>일일 거래량 상위 50개 종목 조회 및 분석</p>
+                <ul class="feature-list">
+                    <li>✅ 특정 날짜 거래량 랭킹</li>
+                    <li>✅ 상위 50개 종목 정보</li>
+                    <li>✅ 시장구분 및 가격 정보</li>
+                    <li>✅ 실시간 데이터 조회</li>
+                </ul>
+                <div class="card-button">거래량 랭킹 보기</div>
+            </div>
+            
+            <div class="type-card" onclick="location.href='/daily-collection'">
+                <div class="card-icon">📅</div>
+                <h3>일일 시세 수집</h3>
+                <p>전체 종목의 일별 주가 데이터 및 유통주식수 수집</p>
+                <ul class="feature-list">
+                    <li>✅ 전체 종목 일봉 데이터 수집</li>
+                    <li>✅ 유통주식수 및 시가총액 업데이트</li>
+                    <li>✅ 기술적 지표 자동 계산</li>
+                    <li>✅ 배치 처리로 효율적 수집</li>
+                </ul>
+                <div class="card-button">일일 시세 수집 시작</div>
             </div>
         </div>
         

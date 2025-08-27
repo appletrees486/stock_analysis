@@ -233,6 +233,33 @@ class BatchAnalyzer:
             
             logger.info(f"배치 분석 완료: batch_id={batch_id}, 총 {len(self.batch_results[batch_id])}개 결과")
             
+            # 요약 분석 실행 (ZIP에 추가하기 위해 결과 저장)
+            summary_files = None
+            try:
+                logger.info(f"요약 분석 시작: batch_id={batch_id}, chart_type={chart_type}")
+                summary_files = self._create_summary_analysis(chart_type)
+                logger.info(f"요약 분석 완료: batch_id={batch_id}")
+            except Exception as e:
+                logger.error(f"요약 분석 중 오류: {e}")
+                logger.info("개별 분석 결과는 정상적으로 저장되었습니다.")
+            
+            # 요약 분석 결과를 배치 결과에 저장 (ZIP 생성 시 사용)
+            if summary_files and batch_id in self.batch_results:
+                self.batch_results[batch_id].append({
+                    'type': 'summary_info',
+                    'chart_type': chart_type,
+                    'summary_files': summary_files
+                })
+            
+            # 통합 파일 생성 (기존 방식 - 호환성 유지)
+            try:
+                logger.info(f"통합 분석 파일 생성 시작: batch_id={batch_id}")
+                self._create_consolidated_files(batch_id, chart_type)
+                logger.info(f"통합 분석 파일 생성 완료: batch_id={batch_id}")
+            except Exception as e:
+                logger.error(f"통합 파일 생성 중 오류: {e}")
+                logger.info("개별 파일들은 정상적으로 생성되었습니다.")
+            
             # 결과 저장
             try:
                 logger.info(f"배치 결과 저장 시작: batch_id={batch_id}")
@@ -283,35 +310,30 @@ class BatchAnalyzer:
                 os.makedirs(results_dir)
                 logger.info(f"results 폴더 생성: {results_dir}")
             
-            # JSON 결과 저장
-            results_file = f"results/{batch_id}_results.json"
-            logger.info(f"JSON 파일 저장: {results_file}")
-            
-            with open(results_file, 'w', encoding='utf-8') as f:
-                json.dump(self.batch_results[batch_id], f, ensure_ascii=False, indent=2)
-            
-            logger.info(f"JSON 파일 저장 완료: {results_file}")
-            
-            # ZIP 파일 생성 (결과 다운로드용)
+            # ZIP 파일만 생성 (결과 다운로드용)
             zip_file = f"results/{batch_id}_results.zip"
             logger.info(f"ZIP 파일 생성: {zip_file}")
             
             with zipfile.ZipFile(zip_file, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                # JSON 파일 추가
-                zipf.write(results_file, os.path.basename(results_file))
-                logger.info(f"ZIP에 JSON 파일 추가: {os.path.basename(results_file)}")
+                # 배치 결과 JSON을 메모리에서 직접 ZIP에 추가 (파일로 저장하지 않음)
+                batch_results_json = json.dumps(self.batch_results[batch_id], ensure_ascii=False, indent=2)
+                zipf.writestr(f"{batch_id}_results.json", batch_results_json)
+                logger.info(f"ZIP에 배치 결과 JSON 추가: {batch_id}_results.json")
                 
-                # 요약 파일 생성 및 추가
-                summary_file = f"results/{batch_id}_summary.txt"
-                logger.info(f"요약 파일 생성: {summary_file}")
-                self._create_summary_file(batch_id, summary_file)
-                zipf.write(summary_file, os.path.basename(summary_file))
-                logger.info(f"ZIP에 요약 파일 추가: {os.path.basename(summary_file)}")
+                # 요약 파일을 메모리에서 직접 ZIP에 추가 (파일로 저장하지 않음)
+                summary_content = self._create_summary_content(batch_id)
+                zipf.writestr(f"{batch_id}_summary.txt", summary_content)
+                logger.info(f"ZIP에 요약 파일 추가: {batch_id}_summary.txt")
                 
                 # ai_analysis_results 폴더의 개별 종목별 분석 결과 파일들 추가
                 logger.info(f"AI 분석 결과 파일들 ZIP에 추가 시작")
                 self._add_analysis_files_to_zip(zipf, batch_id)
                 logger.info(f"AI 분석 결과 파일들 ZIP에 추가 완료")
+                
+                # 통합 파일들 ZIP에 추가
+                logger.info(f"통합 분석 파일들 ZIP에 추가 시작")
+                self._add_consolidated_files_to_zip(zipf, batch_id)
+                logger.info(f"통합 분석 파일들 ZIP에 추가 완료")
             
             logger.info(f"ZIP 파일 생성 완료: {zip_file}")
             logger.info(f"배치 결과 저장 완료: {batch_id}")
@@ -320,7 +342,6 @@ class BatchAnalyzer:
             logger.error(f"배치 결과 저장 오류: {e}")
             import traceback
             logger.error(f"상세 오류: {traceback.format_exc()}")
-            raise
     
     def _add_analysis_files_to_zip(self, zipf, batch_id: str):
         """ai_analysis_results 폴더의 분석 결과 파일들을 ZIP에 추가"""
@@ -405,6 +426,50 @@ class BatchAnalyzer:
         except Exception as e:
             logger.error(f"분석 결과 파일 ZIP 추가 오류: {e}")
     
+    def _create_summary_content(self, batch_id: str) -> str:
+        """분석 결과 요약 내용을 메모리에서 생성"""
+        try:
+            if batch_id not in self.batch_results:
+                return ""
+            
+            results = self.batch_results[batch_id]
+            status = self.batch_status.get(batch_id, {})
+            
+            summary_lines = []
+            summary_lines.append("=" * 50)
+            summary_lines.append("AI 주식 차트 분석 결과 요약")
+            summary_lines.append("=" * 50)
+            summary_lines.append("")
+            
+            summary_lines.append(f"배치 ID: {batch_id}")
+            summary_lines.append(f"차트 유형: {status.get('chart_type', 'N/A')}")
+            summary_lines.append(f"시작 시간: {status.get('start_time', 'N/A')}")
+            summary_lines.append(f"완료 시간: {status.get('end_time', 'N/A')}")
+            summary_lines.append(f"총 종목 수: {status.get('total', 0)}")
+            summary_lines.append(f"성공: {status.get('completed', 0)}")
+            summary_lines.append(f"실패: {status.get('failed', 0)}")
+            summary_lines.append(f"진행률: {status.get('progress', 0):.1f}%")
+            summary_lines.append("")
+            
+            summary_lines.append("=" * 50)
+            summary_lines.append("종목별 분석 결과")
+            summary_lines.append("=" * 50)
+            summary_lines.append("")
+            
+            for i, result in enumerate(results, 1):
+                summary_lines.append(f"{i}. 종목코드: {result.get('stock_code', 'N/A')}")
+                summary_lines.append(f"   분석 점수: {result.get('analysis_score', 0)}")
+                summary_lines.append(f"   요약: {result.get('summary', 'N/A')}")
+                if 'error' in result:
+                    summary_lines.append(f"   오류: {result['error']}")
+                summary_lines.append("")
+            
+            return "\n".join(summary_lines)
+            
+        except Exception as e:
+            logger.error(f"요약 내용 생성 오류: {e}")
+            return f"요약 생성 중 오류 발생: {str(e)}"
+    
     def _create_summary_file(self, batch_id: str, summary_file: str):
         """분석 결과 요약 파일 생성"""
         try:
@@ -460,4 +525,808 @@ class BatchAnalyzer:
     
     def get_all_batches(self) -> List[str]:
         """모든 배치 ID 목록 반환"""
-        return list(self.batch_status.keys()) 
+        return list(self.batch_status.keys())
+    
+    def _add_consolidated_files_to_zip(self, zipf, batch_id: str):
+        """통합 분석 파일들을 ZIP에 추가 (메모리에서 생성)"""
+        try:
+            # 배치 상태에서 차트 타입 가져오기
+            chart_type = self.batch_status.get(batch_id, {}).get('chart_type', '월봉')
+            
+            # 차트 타입 매핑
+            chart_type_mapping = {
+                "일봉": "daily",
+                "주봉": "weekly", 
+                "월봉": "monthly"
+            }
+            chart_type_en = chart_type_mapping.get(chart_type, "monthly")
+            
+            # 배치 결과에서 통합 파일 정보 찾기
+            if batch_id not in self.batch_results:
+                return
+            
+            batch_results = self.batch_results[batch_id]
+            consolidated_info = None
+            
+            # 통합 파일 정보 찾기
+            for result in batch_results:
+                if result.get('type') == 'consolidated_info':
+                    consolidated_info = result
+                    break
+            
+            if not consolidated_info:
+                logger.warning(f"배치 {batch_id}의 통합 파일 정보를 찾을 수 없습니다.")
+                return
+            
+            timestamp = consolidated_info.get('timestamp', '')
+            consolidated_result = consolidated_info.get('consolidated_result', {})
+            analysis_results = consolidated_info.get('analysis_results', [])
+            
+            # consolidated_analysis 폴더 파일들 제거 (사용자 요청)
+            
+            # 4. Total Analysis JSON을 메모리에서 생성하여 ZIP에 추가
+            try:
+                total_analysis_result = self._create_total_analysis_json(batch_id, chart_type)
+                if total_analysis_result:
+                    total_analysis_json_content = json.dumps(total_analysis_result, ensure_ascii=False, indent=2)
+                    total_analysis_json_filename = f"total_analysis/total_analysis_{chart_type_en}_{timestamp}.json"
+                    zipf.writestr(total_analysis_json_filename, total_analysis_json_content)
+                    logger.info(f"Total Analysis JSON 추가: {total_analysis_json_filename}")
+                else:
+                    logger.error(f"Total Analysis JSON 생성 실패")
+            except Exception as e:
+                logger.error(f"Total Analysis JSON ZIP 추가 실패: {e}")
+            
+            # 5. Total Analysis DOCX를 메모리에서 생성하여 ZIP에 추가
+            try:
+                import tempfile
+                total_analysis_result = self._create_total_analysis_json(batch_id, chart_type)
+                if total_analysis_result:
+                    total_analysis_doc_filename = f"total_analysis/total_analysis_{chart_type_en}_{timestamp}.docx"
+                    
+                    # 임시 파일로 생성 후 ZIP에 추가
+                    with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as temp_file:
+                        temp_path = temp_file.name
+                    
+                    doc_success = self._create_total_analysis_docx(
+                        total_analysis_result, chart_type, temp_path
+                    )
+                    
+                    if doc_success:
+                        zipf.write(temp_path, total_analysis_doc_filename)
+                        logger.info(f"Total Analysis DOCX 추가: {total_analysis_doc_filename}")
+                        
+                        # 임시 파일 삭제
+                        os.unlink(temp_path)
+                    else:
+                        logger.error(f"Total Analysis DOCX 생성 실패")
+                        if os.path.exists(temp_path):
+                            os.unlink(temp_path)
+                else:
+                    logger.error(f"Total Analysis DOCX 생성 실패 (JSON 데이터 없음)")
+            except Exception as e:
+                logger.error(f"Total Analysis DOCX ZIP 추가 실패: {e}")
+            
+            # 6. 요약 분석 파일들을 ZIP에 추가
+            try:
+                summary_info = None
+                for result in batch_results:
+                    if result.get('type') == 'summary_info':
+                        summary_info = result
+                        break
+                
+                if summary_info:
+                    summary_files = summary_info.get('summary_files', {})
+                    if summary_files:
+                        # JSON 파일 추가
+                        json_path = summary_files.get('json_path')
+                        if json_path and os.path.exists(json_path):
+                            summary_json_filename = f"summary_analysis/summary_{chart_type_en}_{timestamp}.json"
+                            zipf.write(json_path, summary_json_filename)
+                            logger.info(f"요약 분석 JSON 추가: {summary_json_filename}")
+                        
+                        # DOCX 파일 추가
+                        docx_path = summary_files.get('docx_path')
+                        if docx_path and os.path.exists(docx_path):
+                            summary_docx_filename = f"summary_analysis/summary_{chart_type_en}_{timestamp}.docx"
+                            zipf.write(docx_path, summary_docx_filename)
+                            logger.info(f"요약 분석 DOCX 추가: {summary_docx_filename}")
+                    else:
+                        logger.warning(f"요약 분석 파일 정보가 없습니다")
+                else:
+                    logger.warning(f"요약 분석 정보를 찾을 수 없습니다")
+            except Exception as e:
+                logger.error(f"요약 분석 파일 ZIP 추가 실패: {e}")
+            
+            logger.info(f"통합 파일들 ZIP 추가 완료: {chart_type_en}")
+            
+        except Exception as e:
+            logger.error(f"통합 파일 ZIP 추가 오류: {e}")
+            import traceback
+            logger.error(f"상세 오류: {traceback.format_exc()}")
+    
+    def _create_consolidated_files(self, batch_id: str, chart_type: str):
+        """배치 분석 결과를 통합하여 통합 파일들 생성 (메모리에서만 처리, ZIP에만 추가)"""
+        try:
+            logger.info(f"🔗 {chart_type} 통합 파일 생성 중...")
+            
+            # ai_chart_analysis 모듈에서 통합 함수들 import
+            sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            try:
+                from ai_chart_analysis import (
+                    create_consolidated_analysis,
+                    create_consolidated_word_document,
+                    create_summary_document
+                )
+            except ImportError as ie:
+                logger.error(f"ai_chart_analysis 모듈 import 실패: {ie}")
+                return
+            
+            # 배치 결과를 통합 분석용 형식으로 변환
+            batch_results = self.batch_results.get(batch_id, [])
+            if not batch_results:
+                logger.warning(f"배치 {batch_id}의 결과가 없습니다.")
+                return
+            
+            # 통합 분석용 결과 형식으로 변환 (통합 예시.json과 동일한 구조)
+            analysis_results = []
+            for result in batch_results:
+                analysis_result = {
+                    "stock_code": result.get("stock_code"),
+                    "stock_name": result.get("stock_name", ""),
+                    "success": result.get("analysis_score", 0) > 0,
+                    "error": result.get("error") if result.get("analysis_score", 0) == 0 else None,
+                    "timestamp": result.get("timestamp", result.get("processed_at", ""))
+                }
+                
+                # AI 분석 데이터가 있는 경우 전체 데이터 추가 (통합 예시.json과 동일한 구조)
+                if "ai_analysis_data" in result:
+                    ai_data = result["ai_analysis_data"]
+                    # 통합 예시.json과 동일한 구조로 데이터 매핑
+                    analysis_result.update({
+                        "ai_analysis_data": ai_data  # 전체 AI 분석 데이터 포함
+                    })
+                
+                analysis_results.append(analysis_result)
+            
+            # 통합 분석 결과 생성
+            consolidated_result = create_consolidated_analysis(analysis_results, chart_type)
+            if not consolidated_result:
+                logger.error("통합 분석 결과 생성 실패")
+                return
+            
+            # 차트 타입 매핑
+            chart_type_mapping = {
+                "일봉": "daily",
+                "주봉": "weekly", 
+                "월봉": "monthly"
+            }
+            chart_type_en = chart_type_mapping.get(chart_type, "monthly")
+            
+            # 메타데이터만 생성하여 ZIP에 추가할 준비
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            
+            # 통합 파일 정보를 배치 결과에 저장 (ZIP 생성 시 사용)
+            if batch_id in self.batch_results:
+                self.batch_results[batch_id].append({
+                    'type': 'consolidated_info',
+                    'chart_type': chart_type,
+                    'chart_type_en': chart_type_en,
+                    'timestamp': timestamp,
+                    'consolidated_result': consolidated_result,
+                    'analysis_results': analysis_results
+                })
+            
+            logger.info(f"🔗 {chart_type} 통합 파일 정보 생성 완료!")
+            logger.info(f"   📊 통합 JSON: consolidated_{chart_type_en}_{timestamp}.json")
+            logger.info(f"   📄 통합 Word: consolidated_{chart_type_en}_{timestamp}.docx")
+            logger.info(f"   📋 요약본: summary_{chart_type_en}_{timestamp}.docx")
+            logger.info(f"   📊 Total Analysis: total_analysis_{chart_type_en}_{timestamp}.json")
+            logger.info(f"   📄 Total Analysis DOCX: total_analysis_{chart_type_en}_{timestamp}.docx")
+            
+        except Exception as e:
+            logger.error(f"❌ 통합 파일 생성 중 치명적 오류: {e}")
+            import traceback
+            logger.error(f"상세 오류: {traceback.format_exc()}")
+    
+    def _create_total_analysis_json(self, batch_id: str, chart_type: str) -> dict:
+        """
+        모든 개별 분석 결과를 순차적으로 통합하여 total_analysis.json 생성
+        개별 종목의 전체 구조를 그대로 유지
+        
+        Args:
+            batch_id (str): 배치 ID
+            chart_type (str): 차트 유형
+            
+        Returns:
+            dict: 통합된 분석 결과
+        """
+        try:
+            if batch_id not in self.batch_results:
+                return None
+            
+            results = self.batch_results[batch_id]
+            
+            # 메타데이터
+            total_analysis = {
+                "metadata": {
+                    "chart_type": chart_type,
+                    "total_stocks": len(results),
+                    "created_at": datetime.now().isoformat(),
+                    "analysis_version": "1.0",
+                    "file_type": "total_analysis"
+                },
+                "consolidated_analysis": {}
+            }
+            
+            # 각 종목별 분석 결과를 개별 종목과 동일한 구조로 추가
+            for result in results:
+                if "ai_analysis_data" in result:
+                    ai_data = result["ai_analysis_data"]
+                    stock_code = result.get("stock_code", "000000")
+                    stock_name = result.get("stock_name", "알수없음")
+                    
+                    # 개별 종목의 전체 구조를 그대로 유지하면서 키-값 형태로 저장
+                    # 키: 종목코드, 값: 전체 AI 분석 데이터
+                    total_analysis["consolidated_analysis"][stock_code] = ai_data
+                    
+                    # ai_analysis_file 정보 추가 (차트 이미지 찾기용)
+                    if "ai_analysis_file" in result:
+                        total_analysis["consolidated_analysis"][stock_code]["ai_analysis_file"] = result["ai_analysis_file"]
+                    
+                    logger.info(f"종목 {stock_code} ({stock_name}) 분석 데이터 추가 완료")
+                elif result.get("success", False):
+                    # AI 분석 데이터가 없는 경우 기본 정보라도 추가
+                    stock_code = result.get("stock_code", "000000")
+                    stock_name = result.get("stock_name", "알수없음")
+                    
+                    basic_result = {
+                        "종목정보": {
+                            "종목번호": stock_code,
+                            "종목명": stock_name,
+                            "분석일시": result.get("timestamp", result.get("processed_at", "")),
+                            "차트유형": chart_type
+                        },
+                        "분석상태": "성공",
+                        "분석점수": result.get("analysis_score", 0)
+                    }
+                    
+                    total_analysis["consolidated_analysis"][stock_code] = basic_result
+                    logger.info(f"종목 {stock_code} ({stock_name}) 기본 정보 추가 완료")
+            
+            logger.info(f"Total Analysis JSON 생성 완료: {len(total_analysis['consolidated_analysis'])}개 종목")
+            return total_analysis
+            
+        except Exception as e:
+            logger.error(f"Total Analysis JSON 생성 중 오류: {e}")
+            return None
+    
+    def _create_total_analysis_docx(self, total_analysis_result: dict, chart_type: str, output_path: str) -> bool:
+        """
+        Total Analysis JSON을 기반으로 DOCX 문서 생성
+        개별 분석 결과와 동일한 레이아웃과 구조 적용
+        
+        Args:
+            total_analysis_result (dict): Total Analysis JSON 데이터
+            chart_type (str): 차트 유형
+            output_path (str): 저장할 Word 파일 경로
+            
+        Returns:
+            bool: 생성 성공 여부
+        """
+        try:
+            if not total_analysis_result:
+                return False
+            
+            # 출력 디렉토리 생성 (파일이 현재 디렉토리에 있는 경우 처리)
+            output_dir = os.path.dirname(output_path)
+            if output_dir and not os.path.exists(output_dir):
+                os.makedirs(output_dir, exist_ok=True)
+            
+            # Word 문서 생성
+            from docx import Document
+            from docx.shared import Inches, Pt
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
+            
+            doc = Document()
+            
+            # 한글 폰트 설정을 위한 스타일 설정
+            from docx.oxml.ns import qn
+            
+            # 제목 설정 (개별 분석 결과와 동일한 스타일)
+            title = doc.add_heading(f'{chart_type} Total Analysis 보고서', 0)
+            title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            # 제목에 한글 폰트 적용
+            for run in title.runs:
+                run.font.name = '맑은 고딕'
+                run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+            
+            # 분석 개요
+            doc.add_heading('📊 분석 개요', level=1)
+            metadata = total_analysis_result.get("metadata", {})
+            doc.add_paragraph(f'• 차트 유형: {metadata.get("chart_type", "N/A")}')
+            doc.add_paragraph(f'• 총 분석 종목 수: {metadata.get("total_stocks", 0)}개')
+            doc.add_paragraph(f'• 생성일시: {metadata.get("created_at", "N/A")}')
+            
+            # 종목별 분석 결과 (개별 분석 결과와 동일한 구조)
+            doc.add_heading('📈 종목별 상세 분석 결과', level=1)
+            
+            consolidated_analysis = total_analysis_result.get("consolidated_analysis", {})
+            
+            for i, (stock_code, stock_data) in enumerate(consolidated_analysis.items(), 1):
+                # 종목 정보
+                stock_info = stock_data.get("종목정보", {})
+                stock_name = stock_info.get("종목명", f"종목{i}")
+                analysis_time = stock_info.get("분석일시", "N/A")
+                
+                # 종목 구분선 (첫 번째 종목이 아닌 경우)
+                if i > 1:
+                    doc.add_paragraph("=" * 80)
+                
+                # 종목 제목 (개별 분석 결과와 동일한 레벨)
+                heading_stock = doc.add_heading(f'{i}. {stock_name} ({stock_code})', level=1)
+                for run in heading_stock.runs:
+                    run.font.name = '맑은 고딕'
+                    run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                
+                # 종목별 기본 정보 (개별 분석 결과와 동일한 구조)
+                p_info1 = doc.add_paragraph(f"종목명: {stock_name}")
+                p_info2 = doc.add_paragraph(f"종목번호: {stock_code}")
+                p_info3 = doc.add_paragraph(f"분석일시: {analysis_time}")
+                p_info4 = doc.add_paragraph(f"차트유형: {chart_type}")
+                
+                # 한글 폰트 적용
+                for p in [p_info1, p_info2, p_info3, p_info4]:
+                    for run in p.runs:
+                        run.font.name = '맑은 고딕'
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                
+                # 차트 이미지 추가
+                chart_image_path = None
+                
+                # AI 분석 파일 정보 확인
+                ai_analysis_file = stock_data.get("ai_analysis_file")
+                if ai_analysis_file:
+                    # 차트 타입에 따른 이미지 폴더 및 파일명 패턴
+                    chart_type_mapping = {
+                        "일봉": "daily",
+                        "주봉": "weekly", 
+                        "월봉": "monthly"
+                    }
+                    chart_type_en = chart_type_mapping.get(chart_type, "daily")
+                    
+                    # 차트 이미지 파일 찾기 (여러 폴더에서 검색)
+                    chart_folders = [
+                        chart_type_en + "_charts",  # daily_charts, weekly_charts, monthly_charts
+                        "charts"                    # 일반 charts 폴더
+                    ]
+                    
+                    logger.info(f"차트 이미지 검색 시작: 종목코드={stock_code}, 차트타입={chart_type}, 차트타입_en={chart_type_en}")
+                    
+                    for folder in chart_folders:
+                        if os.path.exists(folder):
+                            logger.info(f"폴더 검색 중: {folder}")
+                            # 종목코드가 포함된 이미지 파일 찾기 (여러 패턴 시도)
+                            for file in os.listdir(folder):
+                                # 패턴 1: chart_type_en_stock_code_*.png
+                                if file.startswith(f"{chart_type_en}_{stock_code}_") and file.endswith('.png'):
+                                    chart_image_path = os.path.join(folder, file)
+                                    logger.info(f"패턴 1으로 찾음: {file}")
+                                    break
+                                # 패턴 2: chart_type_en_*stock_code*.png (종목명_종목코드_날짜 형태)
+                                elif f"{chart_type_en}_" in file and f"_{stock_code}_" in file and file.endswith('.png'):
+                                    chart_image_path = os.path.join(folder, file)
+                                    logger.info(f"패턴 2로 찾음: {file}")
+                                    break
+                            if chart_image_path:
+                                break
+                        else:
+                            logger.warning(f"폴더가 존재하지 않음: {folder}")
+                    
+                    if not chart_image_path:
+                        logger.warning(f"종목 {stock_code}의 차트 이미지를 찾을 수 없음. 검색한 폴더: {chart_folders}")
+                else:
+                    logger.warning(f"종목 {stock_code}의 AI 분석 파일 정보가 없음")
+                
+                if chart_image_path and os.path.exists(chart_image_path):
+                    heading_chart = doc.add_heading('차트 이미지', level=1)
+                    for run in heading_chart.runs:
+                        run.font.name = '맑은 고딕'
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                    
+                    doc.add_picture(chart_image_path, width=Inches(6))
+                    doc.add_paragraph()
+                    logger.info(f"차트 이미지 추가: {stock_code} - {chart_image_path}")
+                else:
+                    # 차트 이미지가 없는 경우 안내 메시지 추가
+                    heading_chart = doc.add_heading('차트 이미지', level=1)
+                    for run in heading_chart.runs:
+                        run.font.name = '맑은 고딕'
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                    
+                    # 더 구체적인 안내 메시지
+                    if ai_analysis_file:
+                        no_image_msg = doc.add_paragraph(f"차트 이미지를 찾을 수 없습니다. (종목코드: {stock_code}, 차트타입: {chart_type})")
+                        no_image_msg2 = doc.add_paragraph(f"검색한 폴더: {chart_type_en}_charts, charts")
+                        no_image_msg3 = doc.add_paragraph(f"파일명 패턴: {chart_type_en}_{stock_code}_*.png 또는 {chart_type_en}_*{stock_code}*.png")
+                        
+                        for p in [no_image_msg, no_image_msg2, no_image_msg3]:
+                            for run in p.runs:
+                                run.font.name = '맑은 고딕'
+                                run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                    else:
+                        no_image_msg = doc.add_paragraph(f"차트 이미지를 찾을 수 없습니다. (AI 분석 파일 정보 없음)")
+                        for run in no_image_msg.runs:
+                            run.font.name = '맑은 고딕'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                    
+                    logger.warning(f"차트 이미지를 찾을 수 없습니다: {stock_code}")
+                
+                # 차트 유형별 봉 요약 (개별 분석 결과와 동일한 구조)
+                if chart_type == "일봉" and "오늘의일봉" in stock_data:
+                    heading_candle = doc.add_heading('오늘의 일봉 요약', level=1)
+                    for run in heading_candle.runs:
+                        run.font.name = '맑은 고딕'
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                    
+                    candle = stock_data["오늘의일봉"]
+                    p_candle1 = doc.add_paragraph(f"종가: {candle.get('종가', 'N/A')}원")
+                    p_candle2 = doc.add_paragraph(f"등락률: {candle.get('등락률', 'N/A')}%")
+                    p_candle3 = doc.add_paragraph(f"거래량: {candle.get('거래량', 'N/A')}주")
+                    p_candle4 = doc.add_paragraph(f"주요 특징: {candle.get('주요특징', 'N/A')}")
+                    
+                    for p in [p_candle1, p_candle2, p_candle3, p_candle4]:
+                        for run in p.runs:
+                            run.font.name = '맑은 고딕'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                
+                elif chart_type == "주봉" and "이번주봉" in stock_data:
+                    heading_candle = doc.add_heading('이번 주 봉 요약', level=1)
+                    for run in heading_candle.runs:
+                        run.font.name = '맑은 고딕'
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                    
+                    candle = stock_data["이번주봉"]
+                    p_candle1 = doc.add_paragraph(f"종가: {candle.get('종가', 'N/A')}원")
+                    p_candle2 = doc.add_paragraph(f"등락률: {candle.get('등락률', 'N/A')}%")
+                    p_candle3 = doc.add_paragraph(f"거래량: {candle.get('거래량', 'N/A')}주")
+                    p_candle4 = doc.add_paragraph(f"주요 특징: {candle.get('주요특징', 'N/A')}")
+                    
+                    for p in [p_candle1, p_candle2, p_candle3, p_candle4]:
+                        for run in p.runs:
+                            run.font.name = '맑은 고딕'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                
+                elif chart_type == "월봉" and "이번월봉" in stock_data:
+                    heading_candle = doc.add_heading('이번 월봉 요약', level=1)
+                    for run in heading_candle.runs:
+                        run.font.name = '맑은 고딕'
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                    
+                    candle = stock_data["이번월봉"]
+                    p_candle1 = doc.add_paragraph(f"종가: {candle.get('종가', 'N/A')}원")
+                    p_candle2 = doc.add_paragraph(f"등락률: {candle.get('등락률', 'N/A')}%")
+                    p_candle3 = doc.add_paragraph(f"거래량: {candle.get('거래량', 'N/A')}주")
+                    p_candle4 = doc.add_paragraph(f"주요 특징: {candle.get('주요특징', 'N/A')}")
+                    
+                    for p in [p_candle1, p_candle2, p_candle3, p_candle4]:
+                        for run in p.runs:
+                            run.font.name = '맑은 고딕'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                
+                # 종합 분석 점수 (개별 분석 결과와 동일한 구조)
+                if "종합분석점수" in stock_data:
+                    heading_score = doc.add_heading('종합 분석 점수', level=1)
+                    for run in heading_score.runs:
+                        run.font.name = '맑은 고딕'
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                    
+                    score = stock_data["종합분석점수"]
+                    p_score1 = doc.add_paragraph(f"점수: {score.get('점수', 'N/A')}/100")
+                    p_score2 = doc.add_paragraph(f"요약: {score.get('요약', 'N/A')}")
+                    
+                    # 점수 강조 (개별 분석 결과와 동일한 스타일)
+                    p_score1.runs[0].bold = True
+                    p_score1.runs[0].font.size = Pt(14)
+                    
+                    for p in [p_score1, p_score2]:
+                        for run in p.runs:
+                            run.font.name = '맑은 고딕'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                
+                # 차트 유형별 봉 요약 (개별 분석 결과와 동일한 구조)
+                if chart_type == "일봉" and "오늘의일봉" in stock_data:
+                    heading_candle = doc.add_heading('오늘의 일봉 요약', level=1)
+                    for run in heading_candle.runs:
+                        run.font.name = '맑은 고딕'
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                    
+                    candle = stock_data["오늘의일봉"]
+                    p_candle1 = doc.add_paragraph(f"종가: {candle.get('종가', 'N/A')}원")
+                    p_candle2 = doc.add_paragraph(f"등락률: {candle.get('등락률', 'N/A')}%")
+                    p_candle3 = doc.add_paragraph(f"거래량: {candle.get('거래량', 'N/A')}주")
+                    p_candle4 = doc.add_paragraph(f"주요 특징: {candle.get('주요특징', 'N/A')}")
+                    
+                    for p in [p_candle1, p_candle2, p_candle3, p_candle4]:
+                        for run in p.runs:
+                            run.font.name = '맑은 고딕'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                
+                elif chart_type == "주봉" and "이번주봉" in stock_data:
+                    heading_candle = doc.add_heading('이번 주 봉 요약', level=1)
+                    for run in heading_candle.runs:
+                        run.font.name = '맑은 고딕'
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                    
+                    candle = stock_data["이번주봉"]
+                    p_candle1 = doc.add_paragraph(f"종가: {candle.get('종가', 'N/A')}원")
+                    p_candle2 = doc.add_paragraph(f"등락률: {candle.get('등락률', 'N/A')}%")
+                    p_candle3 = doc.add_paragraph(f"거래량: {candle.get('거래량', 'N/A')}주")
+                    p_candle4 = doc.add_paragraph(f"주요 특징: {candle.get('주요특징', 'N/A')}")
+                    
+                    for p in [p_candle1, p_candle2, p_candle3, p_candle4]:
+                        for run in p.runs:
+                            run.font.name = '맑은 고딕'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                
+                elif chart_type == "월봉" and "이번월봉" in stock_data:
+                    heading_candle = doc.add_heading('이번 월봉 요약', level=1)
+                    for run in heading_candle.runs:
+                        run.font.name = '맑은 고딕'
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                    
+                    candle = stock_data["이번월봉"]
+                    p_candle1 = doc.add_paragraph(f"종가: {candle.get('종가', 'N/A')}원")
+                    p_candle2 = doc.add_paragraph(f"등락률: {candle.get('등락률', 'N/A')}%")
+                    p_candle3 = doc.add_paragraph(f"거래량: {candle.get('거래량', 'N/A')}주")
+                    p_candle4 = doc.add_paragraph(f"주요 특징: {candle.get('주요특징', 'N/A')}")
+                    
+                    for p in [p_candle1, p_candle2, p_candle3, p_candle4]:
+                        for run in p.runs:
+                            run.font.name = '맑은 고딕'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                
+                # 핵심 기술적 분석 지표 (개별 분석 결과와 동일한 구조)
+                if "핵심기술적지표" in stock_data:
+                    heading_tech = doc.add_heading('핵심 기술적 분석 지표', level=1)
+                    for run in heading_tech.runs:
+                        run.font.name = '맑은 고딕'
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                    
+                    tech = stock_data["핵심기술적지표"]
+                    
+                    # 일봉 차트 지표들
+                    if chart_type == "일봉":
+                        if "이동평균선정배열" in tech:
+                            p_tech1 = doc.add_paragraph(f"이동평균선 정배열: {tech.get('이동평균선정배열', 'N/A')}")
+                        if "골든데드크로스" in tech:
+                            p_tech2 = doc.add_paragraph(f"골든/데드 크로스: {tech.get('골든데드크로스', 'N/A')}")
+                        if "MACD상태" in tech:
+                            p_tech3 = doc.add_paragraph(f"MACD 상태: {tech.get('MACD상태', 'N/A')}")
+                        if "RSI상태" in tech:
+                            p_tech4 = doc.add_paragraph(f"RSI 상태: {tech.get('RSI상태', 'N/A')}")
+                        if "볼린저밴드" in tech:
+                            p_tech5 = doc.add_paragraph(f"볼린저밴드: {tech.get('볼린저밴드', 'N/A')}")
+                    
+                    # 주봉 차트 지표들
+                    elif chart_type == "주봉":
+                        if "이동평균선정배열" in tech:
+                            p_tech1 = doc.add_paragraph(f"이동평균선 정배열: {tech.get('이동평균선정배열', 'N/A')}")
+                        if "골든데드크로스" in tech:
+                            p_tech2 = doc.add_paragraph(f"골든/데드 크로스: {tech.get('골든데드크로스', 'N/A')}")
+                        if "Stochastic상태" in tech:
+                            p_tech3 = doc.add_paragraph(f"Stochastic 상태: {tech.get('Stochastic상태', 'N/A')}")
+                        if "볼린저밴드" in tech:
+                            p_tech4 = doc.add_paragraph(f"볼린저밴드: {tech.get('볼린저밴드', 'N/A')}")
+                    
+                    # 월봉 차트 지표들
+                    elif chart_type == "월봉":
+                        if "장기정배열" in tech:
+                            p_tech1 = doc.add_paragraph(f"장기 정배열: {tech.get('장기정배열', 'N/A')}")
+                        if "CCI상태" in tech:
+                            p_tech2 = doc.add_paragraph(f"CCI 상태: {tech.get('CCI상태', 'N/A')}")
+                        if "ADX상태" in tech:
+                            p_tech3 = doc.add_paragraph(f"ADX 상태: {tech.get('ADX상태', 'N/A')}")
+                        if "주요이동평균선" in tech:
+                            p_tech4 = doc.add_paragraph(f"주요 이동평균선: {tech.get('주요이동평균선', 'N/A')}")
+                    
+                    # 한글 폰트 적용
+                    tech_paragraphs = []
+                    for j in range(1, 6):
+                        if f'p_tech{j}' in locals():
+                            tech_paragraphs.append(locals()[f'p_tech{j}'])
+                    
+                    for p in tech_paragraphs:
+                        for run in p.runs:
+                            run.font.name = '맑은 고딕'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                
+                # 세부 분석 (개별 분석 결과와 동일한 구조)
+                if "세부분석" in stock_data:
+                    heading_detail = doc.add_heading('세부 분석', level=1)
+                    for run in heading_detail.runs:
+                        run.font.name = '맑은 고딕'
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                    
+                    detail = stock_data["세부분석"]
+                    
+                    # 가격 및 거래량 분석
+                    if "가격및거래량" in detail:
+                        sub_heading1 = doc.add_heading('가격 및 거래량', level=2)
+                        for run in sub_heading1.runs:
+                            run.font.name = '맑은 고딕'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                        
+                        price_vol = detail["가격및거래량"]
+                        if "거래량비교" in price_vol:
+                            p_detail1 = doc.add_paragraph(f"거래량 비교: {price_vol.get('거래량비교', 'N/A')}")
+                        if "주요가격대" in price_vol:
+                            p_detail2 = doc.add_paragraph(f"주요 가격대: {price_vol.get('주요가격대', 'N/A')}")
+                        if "박스권분석" in price_vol:
+                            p_detail3 = doc.add_paragraph(f"박스권 분석: {price_vol.get('박스권분석', 'N/A')}")
+                        if "역사적고점저점" in price_vol:
+                            p_detail4 = doc.add_paragraph(f"역사적 고점/저점: {price_vol.get('역사적고점저점', 'N/A')}")
+                    
+                    # 이동평균선 분석
+                    if "이동평균선" in detail:
+                        sub_heading2 = doc.add_heading('이동평균선', level=2)
+                        for run in sub_heading2.runs:
+                            run.font.name = '맑은 고딕'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                        
+                        ma = detail["이동평균선"]
+                        if "현재가위치" in ma:
+                            p_detail5 = doc.add_paragraph(f"현재가 위치: {ma.get('현재가위치', 'N/A')}")
+                        if "밀집도" in ma:
+                            p_detail6 = doc.add_paragraph(f"밀집도: {ma.get('밀집도', 'N/A')}")
+                        if "20주선역할" in ma:
+                            p_detail7 = doc.add_paragraph(f"20주선 역할: {ma.get('20주선역할', 'N/A')}")
+                        if "20개월선역할" in ma:
+                            p_detail8 = doc.add_paragraph(f"20개월선 역할: {ma.get('20개월선역할', 'N/A')}")
+                    
+                    # 모멘텀 분석
+                    if "모멘텀" in detail:
+                        sub_heading3 = doc.add_heading('모멘텀 및 강도', level=2)
+                        for run in sub_heading3.runs:
+                            run.font.name = '맑은 고딕'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                        
+                        momentum = detail["모멘텀"]
+                        if "MACD분석" in momentum:
+                            p_detail9 = doc.add_paragraph(f"MACD 분석: {momentum.get('MACD분석', 'N/A')}")
+                        if "RSI분석" in momentum:
+                            p_detail10 = doc.add_paragraph(f"RSI 분석: {momentum.get('RSI분석', 'N/A')}")
+                        if "Stochastic분석" in momentum:
+                            p_detail11 = doc.add_paragraph(f"Stochastic 분석: {momentum.get('Stochastic분석', 'N/A')}")
+                        if "볼린저밴드분석" in momentum:
+                            p_detail12 = doc.add_paragraph(f"볼린저밴드 분석: {momentum.get('볼린저밴드분석', 'N/A')}")
+                        if "CCI분석" in momentum:
+                            p_detail13 = doc.add_paragraph(f"CCI 분석: {momentum.get('CCI분석', 'N/A')}")
+                        if "ADX분석" in momentum:
+                            p_detail14 = doc.add_paragraph(f"ADX 분석: {momentum.get('ADX분석', 'N/A')}")
+                    
+                    # 세부 분석 한글 폰트 적용
+                    detail_paragraphs = []
+                    for j in range(1, 15):
+                        if f'p_detail{j}' in locals():
+                            detail_paragraphs.append(locals()[f'p_detail{j}'])
+                    
+                    for p in detail_paragraphs:
+                        for run in p.runs:
+                            run.font.name = '맑은 고딕'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                
+                # 투자 아이디어 (개별 분석 결과와 동일한 구조)
+                if chart_type == "일봉" and "단기투자아이디어" in stock_data:
+                    heading_idea = doc.add_heading('단기 투자 아이디어', level=1)
+                    for run in heading_idea.runs:
+                        run.font.name = '맑은 고딕'
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                    
+                    idea = stock_data["단기투자아이디어"]
+                    if "추세요약" in idea:
+                        p_idea1 = doc.add_paragraph(f"추세 요약: {idea.get('추세요약', 'N/A')}")
+                    if "매매시그널" in idea:
+                        p_idea2 = doc.add_paragraph(f"매매 시그널: {idea.get('매매시그널', 'N/A')}")
+                        p_idea2.runs[0].bold = True
+                        p_idea2.runs[0].font.size = Pt(14)
+                    
+                    for p in [p_idea1, p_idea2]:
+                        for run in p.runs:
+                            run.font.name = '맑은 고딕'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                
+                elif chart_type == "주봉" and "중기투자아이디어" in stock_data:
+                    heading_idea = doc.add_heading('중기 투자 아이디어', level=1)
+                    for run in heading_idea.runs:
+                        run.font.name = '맑은 고딕'
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                    
+                    idea = stock_data["중기투자아이디어"]
+                    if "추세요약" in idea:
+                        p_idea1 = doc.add_paragraph(f"추세 요약: {idea.get('추세요약', 'N/A')}")
+                    if "매매시그널" in idea:
+                        p_idea2 = doc.add_paragraph(f"매매 시그널: {idea.get('매매시그널', 'N/A')}")
+                        p_idea2.runs[0].bold = True
+                        p_idea2.runs[0].font.size = Pt(14)
+                    
+                    for p in [p_idea1, p_idea2]:
+                        for run in p.runs:
+                            run.font.name = '맑은 고딕'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                
+                elif chart_type == "월봉" and "장기투자아이디어" in stock_data:
+                    heading_idea = doc.add_heading('장기 투자 아이디어', level=1)
+                    for run in heading_idea.runs:
+                        run.font.name = '맑은 고딕'
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                    
+                    idea = stock_data["장기투자아이디어"]
+                    if "사이클요약" in idea:
+                        p_idea1 = doc.add_paragraph(f"사이클 요약: {idea.get('사이클요약', 'N/A')}")
+                    if "투자전략" in idea:
+                        p_idea2 = doc.add_paragraph(f"투자 전략: {idea.get('투자전략', 'N/A')}")
+                        p_idea2.runs[0].bold = True
+                        p_idea2.runs[0].font.size = Pt(14)
+                    
+                    for p in [p_idea1, p_idea2]:
+                        for run in p.runs:
+                            run.font.name = '맑은 고딕'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+            
+            # 문서 저장
+            doc.save(output_path)
+            logger.info(f"Total Analysis DOCX 생성 완료: {output_path}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Total Analysis DOCX 생성 중 오류: {e}")
+            return False
+    
+    def _create_summary_analysis(self, chart_type: str) -> dict:
+        """
+        배치 분석 완료 후 요약 분석 실행
+        
+        Args:
+            chart_type (str): 차트 유형 (한글)
+            
+        Returns:
+            dict: 생성된 요약 파일 정보 {"json_path": "...", "docx_path": "..."}
+        """
+        try:
+            logger.info(f"요약 분석 시작: chart_type={chart_type}")
+            
+            # ai_chart_analysis 모듈에서 SummaryFileGenerator import
+            sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            from ai_chart_analysis import SummaryFileGenerator
+            from database_config import get_db_config
+            
+            # 차트 유형을 영문으로 변환
+            chart_type_en = {
+                "일봉": "daily",
+                "주봉": "weekly", 
+                "월봉": "monthly"
+            }.get(chart_type, chart_type.lower())
+            
+            # 데이터베이스 설정 로드
+            db_config = get_db_config()
+            
+            # 요약 파일 생성기 초기화
+            summary_generator = SummaryFileGenerator(db_config)
+            
+            # 통합 요약 파일 생성 (차트 유형별)
+            result = summary_generator.create_consolidated_summary_by_type(chart_type_en)
+            
+            if result:
+                logger.info(f"요약 분석 완료: chart_type={chart_type}")
+                logger.info(f"JSON 파일: {result.get('json_path', 'N/A')}")
+                logger.info(f"DOCX 파일: {result.get('docx_path', 'N/A')}")
+                return result
+            else:
+                logger.warning(f"요약 분석 실패 또는 분석할 데이터 없음: chart_type={chart_type}")
+                return None
+            
+        except Exception as e:
+            logger.error(f"요약 분석 중 오류 발생: {e}")
+            logger.info("개별 분석 결과는 정상적으로 저장되었습니다.")
+            return None 

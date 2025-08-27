@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-국내 주식 주봉 시세 조회 스크립트
+국내 주식 주봉 시세 조회 스크립트 (DB 기반)
 """
 
 # matplotlib 백엔드를 Agg로 설정 (tkinter 에러 방지)
 import matplotlib
 matplotlib.use('Agg')
 
-import yfinance as yf
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -22,6 +21,10 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils.dataframe import dataframe_to_rows
 import json
+# 데이터베이스 연결을 위한 import 추가
+from database_config import DatabaseManager
+# 한국 공휴일 관리자 import 추가
+from korean_holiday_manager import KoreanHolidayManager
 
 # 운영체제별 한글 폰트 설정
 system = platform.system()
@@ -61,248 +64,212 @@ except AttributeError:
     fm.findfont('DejaVu Sans', rebuild_if_missing=True)
 
 def get_weekly_stock_data(stock_code):
-    """국내 주식 주봉 데이터 조회 (5년) - 네이버 금융 우선, Yahoo Finance 보조"""
+    """국내 주식 주봉 데이터 조회 (5년) - DB daily_data에서 조회하여 주봉 변환"""
     print(f"🔍 {stock_code} 5년 주봉 시세 조회 중...")
     print("   📅 주봉 데이터는 거래일 기준으로 제공되며, 주말/공휴일은 포함되지 않습니다.")
     
-    # 네이버 금융 데이터 조회 (우선)
-    print("   🔄 네이버 금융에서 실시간 데이터 확인 중...")
-    from naver_data_module import get_naver_stock_data, get_naver_historical_data
-    
-    naver_result = get_naver_stock_data(stock_code)
-    if naver_result['success']:
-        print(f"   ✅ 네이버 금융 실시간 데이터: {naver_result['stock_name']}")
-        print(f"   📈 현재가: {naver_result['current_price']:,.0f}원")
-        print(f"   📊 변동: {naver_result['change_direction']} {naver_result['change_amount']:+,}원")
-        print(f"   ⏰ 조회시간: {naver_result['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}")
-    
-    # Yahoo Finance에서 주봉 데이터 조회 (주 데이터)
-    yf_weekly_data = None
-    tickers_to_try = [
-        f"{stock_code}.KS",   # 코스피
-        f"{stock_code}.KQ",   # 코스닥 (일부)
-        f"{stock_code}.KS",   # 다시 시도
-    ]
-    
-    for i, ticker in enumerate(tickers_to_try):
-        try:
-            print(f"   시도 {i+1}: {ticker}")
-            stock = yf.Ticker(ticker)
-            # 5년 주봉 데이터 조회
-            hist = stock.history(period="5y", interval="1wk")
-            
-            if not hist.empty:
-                print(f"✅ Yahoo Finance 주봉: {hist.index[0].strftime('%Y-%m-%d')} ~ {hist.index[-1].strftime('%Y-%m-%d')} 기간 주봉 데이터를 조회했습니다.")
-                print(f"📅 총 {len(hist)}주간의 주봉 거래 데이터를 가져왔습니다.")
-                print(f"🏢 사용된 티커: {ticker}")
-                yf_weekly_data = hist
-                break
-                
-        except Exception as e:
-            print(f"   ❌ {ticker} 시도 실패: {str(e)[:50]}...")
-            continue
-    
-    # Yahoo Finance 주봉 데이터가 있는 경우 최신도 확인
-    if yf_weekly_data is not None:
-        # 최신 데이터 확인 (현재 날짜와 비교)
-        latest_weekly_date = yf_weekly_data.index[-1]
-        # 타임존 정보 제거
-        if hasattr(latest_weekly_date, 'tz_localize'):
-            latest_weekly_date = latest_weekly_date.tz_localize(None)
-        elif hasattr(latest_weekly_date, 'replace'):
-            latest_weekly_date = latest_weekly_date.replace(tzinfo=None)
-        
-        current_date = datetime.now()
-        days_diff = (current_date - latest_weekly_date).days
-        
-        print(f"   📅 Yahoo Finance 주봉 최신 데이터: {latest_weekly_date.strftime('%Y-%m-%d')}")
-        print(f"   📅 현재 날짜: {current_date.strftime('%Y-%m-%d')}")
-        print(f"   📅 데이터 차이: {days_diff}일")
-        
-        # 1일 이상 차이나면 일봉 데이터로 최신 주봉 보완
-        if days_diff > 0:
-            print(f"   ⚠️ Yahoo Finance 주봉 데이터가 {days_diff}일 전 데이터입니다.")
-            print(f"   🔄 Yahoo Finance 일봉 데이터로 최신 주봉을 보완합니다...")
-            
-            # Yahoo Finance에서 일봉 데이터 조회 (최근 90일 + 오늘까지 확실히 포함)
-            try:
-                # 먼저 period로 시도
-                daily_hist = stock.history(period="90d", interval="1d")
-                
-                # 만약 오늘 데이터가 없다면 start/end로 다시 시도
-                if not daily_hist.empty:
-                    latest_date = daily_hist.index[-1]
-                    if hasattr(latest_date, 'tz_localize'):
-                        latest_date = latest_date.tz_localize(None)
-                    elif hasattr(latest_date, 'replace'):
-                        latest_date = latest_date.replace(tzinfo=None)
-                    
-                    # 오늘 데이터가 없으면 start/end로 다시 시도
-                    if latest_date.date() < current_date.date():
-                        print(f"   🔄 오늘 데이터가 없어 start/end 파라미터로 재시도합니다...")
-                        start_date = (current_date - timedelta(days=90)).strftime('%Y-%m-%d')
-                        end_date = current_date.strftime('%Y-%m-%d')
-                        daily_hist = stock.history(start=start_date, end=end_date, interval="1d")
-                if not daily_hist.empty:
-                    print(f"   ✅ Yahoo Finance 일봉: {daily_hist.index[0].strftime('%Y-%m-%d')} ~ {daily_hist.index[-1].strftime('%Y-%m-%d')}")
-                    
-                    # 일봉 데이터의 최신 날짜 확인
-                    latest_daily_date = daily_hist.index[-1]
-                    if hasattr(latest_daily_date, 'tz_localize'):
-                        latest_daily_date = latest_daily_date.tz_localize(None)
-                    elif hasattr(latest_daily_date, 'replace'):
-                        latest_daily_date = latest_daily_date.replace(tzinfo=None)
-                    
-                    print(f"   📅 일봉 최신 데이터: {latest_daily_date.strftime('%Y-%m-%d')}")
-                    print(f"   📅 현재 날짜: {current_date.strftime('%Y-%m-%d')}")
-                    
-                    # 일봉 데이터가 현재 날짜보다 최신인지 확인
-                    if latest_daily_date.date() >= current_date.date():
-                        print(f"   ✅ 일봉 데이터가 오늘까지 포함되어 있습니다!")
-                    else:
-                        print(f"   ⚠️ 일봉 데이터가 {latest_daily_date.strftime('%Y-%m-%d')}까지만 있습니다.")
-                        print(f"   📅 장이 열리지 않았거나 데이터 업데이트가 지연되었을 수 있습니다.")
-                    
-                    print(f"   📊 일봉 데이터 상세:")
-                    for i, (date, row) in enumerate(daily_hist.tail(5).iterrows()):
-                        print(f"      {date.strftime('%Y-%m-%d')}: {row['Open']:,.0f} → {row['Close']:,.0f}")
-                    
-                    # 일봉을 주봉으로 변환
-                    enhanced_weekly_data = convert_daily_to_weekly(daily_hist, yf_weekly_data, stock_code)
-                    if enhanced_weekly_data is not None:
-                        print(f"   ✅ 일봉 데이터로 주봉을 보완했습니다!")
-                        print(f"   📅 최신 주봉 데이터: {enhanced_weekly_data.index[-1].strftime('%Y-%m-%d')}")
-                        return enhanced_weekly_data
-                    else:
-                        print(f"   ⚠️ 일봉 데이터 변환에 실패하여 기존 주봉 데이터를 사용합니다.")
-                else:
-                    print(f"   ⚠️ Yahoo Finance 일봉 데이터를 가져올 수 없어 기존 주봉 데이터를 사용합니다.")
-            except Exception as e:
-                print(f"   ❌ Yahoo Finance 일봉 데이터 조회 실패: {str(e)[:50]}...")
-        
-        return yf_weekly_data
-    
-    # Yahoo Finance에서 주봉 데이터를 가져올 수 없는 경우
-    print("   ⚠️ Yahoo Finance에서 주봉 데이터를 가져올 수 없습니다.")
-    print("   🔄 Yahoo Finance 일봉 데이터로 주봉을 생성합니다...")
-    
-    # Yahoo Finance에서 일봉 데이터로 주봉 생성 시도
-    for ticker in tickers_to_try:
-        try:
-            stock = yf.Ticker(ticker)
-            # 5년 일봉 데이터 조회
-            daily_hist = stock.history(period="5y", interval="1d")
-            if not daily_hist.empty:
-                print(f"   ✅ Yahoo Finance 일봉: {daily_hist.index[0].strftime('%Y-%m-%d')} ~ {daily_hist.index[-1].strftime('%Y-%m-%d')}")
-                
-                # 일봉을 주봉으로 변환
-                weekly_from_daily = convert_daily_to_weekly(daily_hist, None, stock_code)
-                if weekly_from_daily is not None:
-                    print(f"   ✅ 일봉 데이터로 주봉을 생성했습니다!")
-                    return weekly_from_daily
-                break
-        except Exception as e:
-            print(f"   ❌ {ticker} 일봉 시도 실패: {str(e)[:50]}...")
-            continue
-    
-    # 모든 소스에서 실패
-    print("❌ 주봉 데이터 조회에 실패했습니다.")
-    print("💡 가능한 원인:")
-    print("   - 종목코드가 잘못되었습니다")
-    print("   - 해당 종목이 상장폐지되었습니다")
-    print("   - Yahoo Finance에서 지원하지 않는 종목입니다")
-    return None
-
-def convert_daily_to_weekly(daily_data, existing_weekly_data=None, stock_code=None):
-    """일봉 데이터를 주봉으로 변환 (미완성 주 포함) - 네이버 실시간 데이터 활용"""
     try:
-        # 일봉 데이터를 주별로 그룹화
+        # 데이터베이스 연결
+        print("   🔄 데이터베이스에서 일봉 데이터 조회 중...")
+        db = DatabaseManager()
+        
+        if not db.connect():
+            print("   ❌ 데이터베이스 연결 실패")
+            return None
+        
+        # 5년(260주) 전 날짜 계산 - 실제 최신 거래일 기준으로 설정
+        # 먼저 해당 종목의 최신 거래일을 조회
+        latest_date_query = "SELECT MAX(trade_date) as latest_date FROM daily_data WHERE stock_code = %s"
+        latest_date_result = db.fetch_one(latest_date_query, (stock_code,))
+        
+        if latest_date_result and latest_date_result['latest_date']:
+            end_date = latest_date_result['latest_date']
+            start_date = end_date - timedelta(days=260*7)  # 5년 = 260주 * 7일
+            print(f"   📅 DB 최신 거래일: {end_date}")
+            print(f"   📅 조회 시작일: {start_date}")
+        else:
+            # 최신 거래일이 없으면 현재 날짜 기준으로 설정
+            end_date = datetime.now().date()
+            start_date = end_date - timedelta(days=260*7)
+            print(f"   ⚠️ 최신 거래일을 찾을 수 없어 현재 날짜 기준으로 설정")
+            print(f"   📅 현재 날짜: {end_date}")
+            print(f"   📅 조회 시작일: {start_date}")
+        
+        # daily_data 테이블에서 일봉 데이터 조회
+        query = """
+        SELECT trade_date, open, high, low, close, volume
+        FROM daily_data 
+        WHERE stock_code = %s 
+        AND trade_date >= %s 
+        AND trade_date <= %s
+        ORDER BY trade_date ASC
+        """
+        
+        params = (stock_code, start_date, end_date)
+        daily_data = db.fetch_all(query, params)
+        
+        if daily_data:
+            print(f"✅ DB 일봉 데이터 조회 성공: {len(daily_data)}일의 일봉 거래 데이터를 가져왔습니다.")
+            
+            # 종목명 조회
+            stock_name_query = "SELECT stock_name FROM stocks WHERE stock_code = %s"
+            stock_info = db.fetch_one(stock_name_query, (stock_code,))
+            stock_name = stock_info['stock_name'] if stock_info else stock_code
+            print(f"🏢 종목명: {stock_name}")
+            
+            # 데이터프레임으로 변환
+            df = pd.DataFrame(daily_data)
+            df['trade_date'] = pd.to_datetime(df['trade_date'])
+            df.set_index('trade_date', inplace=True)
+            
+            # 컬럼명을 Yahoo Finance 형식과 맞춤
+            df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+            
+            # Decimal 타입을 float로 변환 (pandas 연산 호환성을 위해)
+            for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
+                df[col] = df[col].astype(float)
+            
+            # 디버깅: 데이터 기간 확인
+            print(f"🔍 데이터 기간 디버깅:")
+            print(f"   요청 기간: 5년 (260주)")
+            print(f"   실제 시작일: {df.index[0].strftime('%Y-%m-%d')}")
+            print(f"   실제 종료일: {df.index[-1].strftime('%Y-%m-%d')}")
+            print(f"   실제 데이터 수: {len(df)}일")
+            
+            # 최신 데이터 신뢰성 검증
+            holiday_manager = KoreanHolidayManager()
+            latest_date = df.index[-1]
+            is_reliable, reliability_reason = validate_weekly_data_reliability(stock_code, latest_date, holiday_manager)
+            
+            if not is_reliable:
+                print(f"   ⚠️ 주봉 데이터 신뢰성 문제: {reliability_reason}")
+                print(f"   💡 보다 정확한 주봉 분석을 위해 장마감 후 재실행을 권장합니다.")
+            else:
+                print(f"   ✅ 주봉 데이터 신뢰성 확인: {reliability_reason}")
+            
+            # 일봉을 주봉으로 변환
+            weekly_data = convert_daily_to_weekly(df, stock_code)
+            
+            if weekly_data is not None:
+                # ✅ 주봉 데이터에 보조지표 계산 추가
+                weekly_data_with_indicators = calculate_technical_indicators(weekly_data.copy())
+                
+                # 주봉 데이터를 weekly_data 테이블에 저장 (보조지표 포함)
+                save_weekly_data_to_db(db, stock_code, weekly_data_with_indicators)
+                print(f"✅ 주봉 데이터(보조지표 포함)를 weekly_data 테이블에 저장했습니다.")
+            
+            db.disconnect()
+            return weekly_data_with_indicators  # ✅ 보조지표가 포함된 데이터 반환
+        else:
+            print(f"   ❌ 일봉 데이터 조회 실패: DB에 데이터가 없습니다")
+            print(f"   💡 {stock_code} 종목의 일봉 데이터를 먼저 수집해주세요.")
+            db.disconnect()
+            return None
+            
+    except Exception as e:
+        print(f"   ❌ DB 일봉 데이터 조회 실패: {str(e)}")
+        try:
+            db.disconnect()
+        except:
+            pass
+        return None
+
+def convert_daily_to_weekly(daily_data, stock_code):
+    """일봉 데이터를 주봉으로 변환 (5년 = 260주) - 한국 공휴일 및 장마감 시간 고려"""
+    try:
+        print(f"   🔄 일봉 데이터를 주봉으로 변환 중...")
+        
+        # 한국 공휴일 관리자 초기화
+        holiday_manager = KoreanHolidayManager()
+        
+        # 현재 시간 및 장 상태 확인
+        current_time = datetime.now()
+        market_status = holiday_manager.get_market_status(current_time)
+        market_status_desc = holiday_manager.get_market_status_description(market_status)
+        
+        print(f"   📅 현재 시간: {current_time.strftime('%Y-%m-%d %H:%M')}")
+        print(f"   🏢 장 상태: {market_status_desc}")
+        
+        # 장중이거나 거래일이 아닌 경우 경고
+        if market_status in ["during_market", "near_market_close"]:
+            print(f"   ⚠️ 현재 장중입니다. 주봉 데이터가 완전하지 않을 수 있습니다.")
+            print(f"   💡 정확한 주봉 데이터를 위해서는 장마감 후(15:30 이후) 분석을 권장합니다.")
+        elif market_status == "non_trading_day":
+            print(f"   📅 오늘은 거래일이 아닙니다. 이전 거래일까지의 데이터로 주봉을 생성합니다.")
+        
+        # 일봉 데이터를 주별로 그룹화 (실제 거래일 기준)
         daily_data_copy = daily_data.copy()
         daily_data_copy.index.name = 'Date'
         
-        # 현재 날짜 확인
-        current_date = datetime.now().date()
+        # 날짜를 정렬
+        daily_data_copy = daily_data_copy.sort_index()
         
-        # 네이버 금융 실시간 데이터 가져오기 (현재 주 업데이트용)
-        naver_current_price = None
-        if stock_code:
-            try:
-                from naver_data_module import get_naver_stock_data
-                naver_result = get_naver_stock_data(stock_code)
-                if naver_result['success']:
-                    naver_current_price = naver_result['current_price']
-                    print(f"   🔄 네이버 실시간 데이터로 현재 주 업데이트: {naver_current_price:,.0f}원")
-            except Exception as e:
-                print(f"   ⚠️ 네이버 실시간 데이터 조회 실패: {str(e)[:30]}...")
-        
-        # 주별로 그룹화 (월요일을 주의 시작으로 가정)
-        daily_data_copy['Week'] = daily_data_copy.index.to_period('W-MON')
-        
+        # 실제 거래일 기준 주봉 그룹화
         weekly_data = []
+        current_week_data = []
+        current_week_start = None
         
-        for week, group in daily_data_copy.groupby('Week'):
-            if len(group) > 0:
-                # 주봉 데이터 계산
-                week_start = group.index[0]
+        for date, row in daily_data_copy.iterrows():
+            # 날짜를 date 객체로 변환
+            if hasattr(date, 'date'):
+                trade_date = date.date()
+            else:
+                trade_date = date
+            
+            # 거래일 확인 (이미 daily_data에는 거래일만 있지만 추가 검증)
+            if not holiday_manager.is_trading_day(trade_date):
+                print(f"   ⚠️ {trade_date}는 거래일이 아닙니다. 건너뜁니다.")
+                continue
+            
+            # 주의 시작일 결정
+            if current_week_start is None:
+                current_week_start = date
+                print(f"   📅 첫 번째 주 시작: {current_week_start.strftime('%Y-%m-%d')}")
+            
+            # 현재 주에 데이터 추가
+            current_week_data.append({
+                'date': date,
+                'trade_date': trade_date,
+                'open': row['Open'],
+                'high': row['High'],
+                'low': row['Low'],
+                'close': row['Close'],
+                'volume': row['Volume']
+            })
+            
+            # 주의 마지막 거래일인지 확인
+            # 다음 거래일이 다음 주에 속하는지 확인
+            next_date = daily_data_copy.index[daily_data_copy.index.get_loc(date) + 1] if daily_data_copy.index.get_loc(date) + 1 < len(daily_data_copy) else None
+            
+            if next_date is None or _is_new_trading_week(current_week_start, next_date, holiday_manager):
+                # ✅ 완성된 주인지 확인 - 미완성 주는 제외
+                if current_week_data and not is_complete_week(current_week_start, current_time):
+                    print(f"   ⚠️ 미완성 주 제외: {current_week_start.strftime('%Y-%m-%d')} 주")
+                    break  # 미완성 주는 생성하지 않고 루프 종료
                 
-                # 미완성 주인지 확인 (현재 주인 경우)
-                is_current_week = False
-                if hasattr(week_start, 'date'):
-                    week_start_date = week_start.date()
-                else:
-                    week_start_date = week_start
-                
-                # 현재 주인지 확인 (월요일부터 현재까지)
-                week_end_date = week_start_date + timedelta(days=6)
-                if week_start_date <= current_date <= week_end_date:
-                    is_current_week = True
-                    print(f"   📅 현재 주 감지: {week_start_date} ~ {week_end_date}")
-                
-                # 현재 주인 경우 실제 마지막 거래일을 날짜로 사용
-                if is_current_week:
-                    # 현재 주의 실제 마지막 거래일 찾기
-                    last_trading_day = group.index[-1]
-                    actual_close = group['Close'].iloc[-1]
+                # 현재 주 완성 - 주봉 데이터 생성 (완성된 주만)
+                if current_week_data:
+                    week_open = current_week_data[0]['open']      # 주 첫 거래일 시가
+                    week_high = max([d['high'] for d in current_week_data])    # 주 최고가
+                    week_low = min([d['low'] for d in current_week_data])      # 주 최저가
+                    week_close = current_week_data[-1]['close']   # 주 마지막 거래일 종가
+                    week_volume = sum([d['volume'] for d in current_week_data]) # 주 총 거래량
                     
-                    # 네이버 실시간 데이터가 있으면 현재 주 종가 업데이트
-                    if naver_current_price is not None:
-                        # 오늘 데이터가 있는지 확인
-                        today_data = group[group.index.date == current_date]
-                        if not today_data.empty:
-                            # 오늘 데이터가 있으면 네이버 실시간 가격으로 업데이트
-                            actual_close = naver_current_price
-                            print(f"      📅 오늘 데이터 포함, 네이버 실시간 가격으로 업데이트: {actual_close:,.0f}원")
-                        else:
-                            # 오늘 데이터가 없어도 네이버 실시간 가격이 마지막 거래일 종가와 다르면 업데이트
-                            if abs(naver_current_price - actual_close) > 0:
-                                actual_close = naver_current_price
-                                print(f"      📅 네이버 실시간 가격으로 현재 주 종가 업데이트: {actual_close:,.0f}원")
-                            else:
-                                print(f"      📅 네이버 실시간 가격과 동일, 마지막 거래일 종가 사용: {actual_close:,.0f}원")
-                    else:
-                        print(f"      📅 현재 주 마지막 거래일: {last_trading_day.strftime('%Y-%m-%d')}, 종가: {actual_close:,.0f}")
+                    weekly_data.append({
+                        'Date': current_week_start,
+                        'Open': week_open,
+                        'High': week_high,
+                        'Low': week_low,
+                        'Close': week_close,
+                        'Volume': week_volume,
+                        'TradingDays': len(current_week_data)  # 해당 주의 거래일 수
+                    })
                     
-                    # 현재 주는 실제 마지막 거래일을 날짜로 사용
-                    weekly_data.append({
-                        'Date': last_trading_day,       # 실제 마지막 거래일
-                        'Open': group['Open'].iloc[0],  # 주 첫날 시가
-                        'High': group['High'].max(),    # 주 최고가
-                        'Low': group['Low'].min(),      # 주 최저가
-                        'Close': actual_close,          # 실제 마지막 거래일 종가 (또는 네이버 실시간)
-                        'Volume': group['Volume'].sum(), # 주 총 거래량
-                        'IsCurrentWeek': is_current_week # 현재 주 여부
-                    })
-                else:
-                    # 완성된 주는 기존 방식
-                    weekly_data.append({
-                        'Date': week_start,
-                        'Open': group['Open'].iloc[0],      # 주 첫날 시가
-                        'High': group['High'].max(),        # 주 최고가
-                        'Low': group['Low'].min(),          # 주 최저가
-                        'Close': group['Close'].iloc[-1],   # 주 마지막날 종가
-                        'Volume': group['Volume'].sum(),    # 주 총 거래량
-                        'IsCurrentWeek': is_current_week    # 현재 주 여부
-                    })
+                    print(f"   📊 완성된 주봉 생성: {current_week_data[0]['trade_date']} ~ {current_week_data[-1]['trade_date']} ({len(current_week_data)}일)")
+                
+                # 다음 주 시작
+                current_week_start = next_date
+                current_week_data = []
         
         if not weekly_data:
             print("   ❌ 주봉 데이터 변환에 실패했습니다.")
@@ -313,37 +280,208 @@ def convert_daily_to_weekly(daily_data, existing_weekly_data=None, stock_code=No
         weekly_df.set_index('Date', inplace=True)
         weekly_df.sort_index(inplace=True)
         
-        # 현재 주가 있는지 확인
-        current_weeks = weekly_df[weekly_df['IsCurrentWeek'] == True]
-        if not current_weeks.empty:
-            print(f"   ✅ 현재 주 포함: {len(current_weeks)}주")
-            for idx, row in current_weeks.iterrows():
-                print(f"      📅 {idx.strftime('%Y-%m-%d')}: {row['Open']:,.0f} → {row['Close']:,.0f}")
+        print(f"   ✅ 완성된 주봉만 변환 완료: {len(weekly_df)}주")
+        print(f"   📅 변환된 주봉 기간: {weekly_df.index[0].strftime('%Y-%m-%d')} ~ {weekly_df.index[-1].strftime('%Y-%m-%d')}")
         
-        # IsCurrentWeek 컬럼 제거 (분석에 불필요)
-        weekly_df = weekly_df.drop('IsCurrentWeek', axis=1)
+        # 거래일 수 통계 출력
+        avg_trading_days = weekly_df['TradingDays'].mean()
+        print(f"   📊 평균 거래일 수: {avg_trading_days:.1f}일/주")
+        print(f"   📊 거래일 수 범위: {weekly_df['TradingDays'].min()}일 ~ {weekly_df['TradingDays'].max()}일")
         
-        # 기존 주봉 데이터가 있는 경우 병합
-        if existing_weekly_data is not None:
-            # 중복 제거하고 병합
-            combined_data = pd.concat([existing_weekly_data, weekly_df])
-            combined_data = combined_data[~combined_data.index.duplicated(keep='last')]
-            combined_data.sort_index(inplace=True)
-            
-            print(f"   📅 기존 주봉: {len(existing_weekly_data)}주 + 신규 주봉: {len(weekly_df)}주 = 총 {len(combined_data)}주")
-            return combined_data
-        else:
-            print(f"   📅 일봉에서 생성된 주봉: {len(weekly_df)}주")
-            return weekly_df
+        # TradingDays 컬럼 제거 (분석에 불필요)
+        weekly_df = weekly_df.drop('TradingDays', axis=1)
+        
+        return weekly_df
             
     except Exception as e:
         print(f"   ❌ 일봉을 주봉으로 변환하는 중 오류 발생: {str(e)}")
         return None
 
+def is_complete_week(week_start_date, current_date):
+    """해당 주가 완성되었는지 확인 (주의 마지막 거래일이 지났는지 확인)"""
+    try:
+        # week_start_date를 date 객체로 변환
+        if hasattr(week_start_date, 'date'):
+            week_start = week_start_date.date()
+        else:
+            week_start = week_start_date
+        
+        # 현재 날짜를 date 객체로 변환
+        if hasattr(current_date, 'date'):
+            current = current_date.date()
+        else:
+            current = current_date
+        
+        # 주의 마지막 날 계산 (주 시작일로부터 6일 후)
+        week_end = week_start + timedelta(days=6)
+        
+        # 현재 날짜가 주의 마지막 날을 지났는지 확인
+        is_complete = current > week_end
+        
+        if not is_complete:
+            print(f"   ⚠️ 미완성 주 감지: {week_start} ~ {week_end} (현재: {current})")
+        
+        return is_complete
+        
+    except Exception as e:
+        print(f"   ❌ 주 완성도 확인 중 오류: {e}")
+        return False
 
+def _is_new_trading_week(week_start, current_date, holiday_manager):
+    """현재 날짜가 새로운 거래 주에 속하는지 확인 (한국 공휴일 고려)"""
+    try:
+        # week_start와 current_date 사이의 일수 계산
+        if hasattr(week_start, 'date'):
+            start_date = week_start.date()
+        else:
+            start_date = week_start
+        
+        if hasattr(current_date, 'date'):
+            current_date_obj = current_date.date()
+        else:
+            current_date_obj = current_date
+        
+        days_diff = (current_date_obj - start_date).days
+        
+        # 7일 이상 차이나면 새로운 주
+        if days_diff >= 7:
+            return True
+        
+        # 월요일이면서 거래일인 경우 새로운 주로 간주 (단, 최소 1일 이상 차이)
+        is_monday = current_date_obj.weekday() == 0  # 월요일 = 0
+        is_trading_day = holiday_manager.is_trading_day(current_date_obj)
+        
+        if is_monday and is_trading_day and days_diff >= 1:
+            return True
+        
+        return False
+        
+    except Exception as e:
+        print(f"   ⚠️ 거래 주 구분 확인 중 오류: {e}")
+        return False
+
+def _is_new_week(week_start, current_date):
+    """현재 날짜가 새로운 주에 속하는지 확인"""
+    try:
+        # week_start와 current_date 사이의 일수 계산
+        days_diff = (current_date - week_start).days
+        
+        # 7일 이상 차이나면 새로운 주
+        if days_diff >= 7:
+            return True
+        
+        # 또는 월요일을 기준으로 새로운 주인지 확인
+        week_start_weekday = week_start.weekday()  # 0=월요일, 6=일요일
+        current_weekday = current_date.weekday()
+        
+        # 월요일(0)부터 시작해서 다음 월요일(0)이 오면 새로운 주
+        if current_weekday == 0 and week_start_weekday != 0:
+            return True
+        
+        return False
+        
+    except Exception as e:
+        print(f"   ⚠️ 주 구분 확인 중 오류: {str(e)}")
+        # 기본적으로 7일 기준으로 처리
+        days_diff = (current_date - week_start).days
+        return days_diff >= 7
+
+def validate_weekly_data_reliability(stock_code, latest_date, holiday_manager):
+    """주봉 데이터 신뢰성 검증 - 장마감 시간 및 최신 데이터 고려"""
+    try:
+        # 현재 시간 기준 장 상태 확인
+        current_time = datetime.now()
+        market_status = holiday_manager.get_market_status(current_time)
+        
+        # 최신 데이터가 오늘인 경우 장마감 여부 확인
+        if isinstance(latest_date, str):
+            latest_date = datetime.strptime(latest_date, '%Y-%m-%d').date()
+        elif hasattr(latest_date, 'date'):
+            latest_date = latest_date.date()
+        
+        today = current_time.date()
+        
+        if latest_date == today:
+            # 오늘 데이터인 경우 장마감 시간 체크
+            if market_status in ["during_market", "near_market_close"]:
+                print(f"   ⚠️ 최신 데이터가 오늘({latest_date})이지만 아직 장중입니다.")
+                print(f"   💡 주봉 데이터의 정확성을 위해 장마감 후(15:30 이후) 분석을 권장합니다.")
+                return False, "장중 데이터 - 주봉 완성되지 않음"
+            elif market_status == "non_trading_day":
+                print(f"   📅 오늘은 거래일이 아닙니다. 이전 거래일 데이터로 주봉을 생성합니다.")
+                return True, "비거래일 - 이전 거래일 데이터 사용"
+            else:
+                print(f"   ✅ 장마감 후 데이터로 주봉 신뢰성이 높습니다.")
+                return True, "장마감 후 데이터 - 높은 신뢰성"
+        else:
+            # 과거 데이터인 경우 신뢰성 높음
+            days_ago = (today - latest_date).days
+            print(f"   📅 최신 데이터가 {days_ago}일 전 데이터입니다. 신뢰성이 높습니다.")
+            return True, f"{days_ago}일 전 데이터 - 높은 신뢰성"
+            
+    except Exception as e:
+        print(f"   ❌ 주봉 데이터 신뢰성 검증 실패: {e}")
+        return False, f"검증 오류: {e}"
+
+def save_weekly_data_to_db(db, stock_code, weekly_data):
+    """주봉 데이터를 weekly_data 테이블에 저장 (보조지표 포함)"""
+    try:
+        print(f"   💾 주봉 데이터(보조지표 포함)를 DB에 저장 중...")
+        
+        # 기존 주봉 데이터 삭제 (해당 종목)
+        delete_query = "DELETE FROM weekly_data WHERE stock_code = %s"
+        db.execute_query(delete_query, (stock_code,))
+        
+        # ✅ 새로운 주봉 데이터 삽입 (보조지표 포함)
+        insert_query = """
+        INSERT INTO weekly_data 
+        (stock_code, week_start, open, high, low, close, volume,
+         ma5, ma20, ma60, rsi, stoch_k, stoch_d, bb_upper, bb_middle, bb_lower)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        
+        params_list = []
+        for date, row in weekly_data.iterrows():
+            params = (
+                stock_code,
+                date.strftime('%Y-%m-%d'),
+                float(row['Open']),
+                float(row['High']),
+                float(row['Low']),
+                float(row['Close']),
+                int(row['Volume']),
+                # ✅ 보조지표 추가
+                float(row.get('MA5', 0)) if pd.notna(row.get('MA5')) else None,
+                float(row.get('MA20', 0)) if pd.notna(row.get('MA20')) else None,
+                float(row.get('MA60', 0)) if pd.notna(row.get('MA60')) else None,
+                float(row.get('RSI', 0)) if pd.notna(row.get('RSI')) else None,
+                float(row.get('Stoch_K', 0)) if pd.notna(row.get('Stoch_K')) else None,
+                float(row.get('Stoch_D', 0)) if pd.notna(row.get('Stoch_D')) else None,
+                float(row.get('BB_Upper', 0)) if pd.notna(row.get('BB_Upper')) else None,
+                float(row.get('BB_Middle', 0)) if pd.notna(row.get('BB_Middle')) else None,
+                float(row.get('BB_Lower', 0)) if pd.notna(row.get('BB_Lower')) else None
+            )
+            params_list.append(params)
+        
+        # 배치 삽입
+        success_count = 0
+        for params in params_list:
+            if db.execute_query(insert_query, params):
+                success_count += 1
+            else:
+                print(f"   ❌ 주봉 데이터 저장 실패: {params[1]}")
+        
+        print(f"   ✅ {success_count}주 주봉 데이터(보조지표 포함) 저장 완료")
+        return success_count > 0
+            
+    except Exception as e:
+        print(f"   ❌ 주봉 데이터 저장 중 오류: {str(e)}")
+        return False
 
 def calculate_technical_indicators(df):
-    """기술적 지표 계산"""
+    """기술적 지표 계산 - 주봉 기준"""
+    print(f"   🔧 주봉 기술적 지표 계산 시작 (데이터 수: {len(df)}주)")
+    
     # 이동평균선 (주간 기준)
     df['MA5'] = df['Close'].rolling(window=5).mean()
     df['MA20'] = df['Close'].rolling(window=20).mean()
@@ -359,7 +497,7 @@ def calculate_technical_indicators(df):
     # %K = (현재가 - 최저가) / (최고가 - 최저가) * 100
     # %D = %K의 3일 이동평균
     # Slow %K = %D
-    # Slow %D = Slow %K의 3일 이동평균
+    # Slow %D = Slow %K의 3주 이동평균
     
     # 14주 기준으로 계산
     period = 14
@@ -379,6 +517,27 @@ def calculate_technical_indicators(df):
     
     # Slow %D = Slow %K의 3주 이동평균
     df['Stoch_D'] = df['Stoch_K'].rolling(window=3).mean()
+    
+    # ✅ RSI (Relative Strength Index) 계산 추가
+    try:
+        # RSI 계산 (14주 기준)
+        rsi_period = 14
+        delta = df['Close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=rsi_period).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=rsi_period).mean()
+        
+        # 0으로 나누기 방지
+        rs = gain / loss.replace(0, np.nan)
+        df['RSI'] = 100 - (100 / (1 + rs))
+        df['RSI'] = df['RSI'].fillna(50)  # NaN 값은 중립값 50으로 설정
+        
+        print(f"   ✅ RSI 계산 완료")
+    except Exception as e:
+        print(f"   ⚠️ RSI 계산 실패: {e}")
+        df['RSI'] = 50.0  # 기본값으로 중립값 설정
+    
+    print(f"   ✅ 주봉 기술적 지표 계산 완료")
+    print(f"   📊 계산된 지표: MA5, MA20, MA60, 볼린저밴드, 스토캐스틱, RSI")
     
     return df
 
@@ -562,29 +721,8 @@ def create_weekly_stock_chart(hist, stock_code):
         os.makedirs(charts_dir)
         print(f"📁 {charts_dir} 폴더를 생성했습니다.")
     
-    # 종목명 가져오기 (yfinance에서) - 코스피/코스닥 자동 구분
-    stock_name = stock_code  # 기본값
-    tickers_to_try = [
-        f"{stock_code}.KS",   # 코스피
-        f"{stock_code}.KQ",   # 코스닥
-    ]
-    
-    for ticker in tickers_to_try:
-        try:
-            stock = yf.Ticker(ticker)
-            stock_info = stock.info
-            
-            # 종목명 우선순위: longName > shortName > 종목코드
-            if 'longName' in stock_info and stock_info['longName'] and stock_info['longName'] != 'N/A':
-                stock_name = stock_info['longName']
-                break
-            elif 'shortName' in stock_info and stock_info['shortName'] and stock_info['shortName'] != 'N/A':
-                # shortName이 종목코드와 같은 경우는 제외
-                if stock_info['shortName'] != stock_code and not stock_info['shortName'].startswith(stock_code):
-                    stock_name = stock_info['shortName']
-                    break
-        except:
-            continue
+    # 종목명 가져오기 (DB에서)
+    stock_name = get_stock_name(stock_code)
     
     # 파일명 생성: weekly_종목명_종목번호_생성일.png
     current_date = datetime.now().strftime("%Y%m%d")
@@ -617,31 +755,29 @@ def create_weekly_stock_chart(hist, stock_code):
     return filepath, df
 
 def get_stock_name(stock_code):
-    """종목코드로 종목명을 가져오는 함수"""
+    """종목코드로 종목명을 가져오는 함수 - DB에서 조회"""
     try:
-        # 코스피/코스닥 자동 구분
-        tickers_to_try = [
-            f"{stock_code}.KS",   # 코스피
-            f"{stock_code}.KQ",   # 코스닥
-        ]
+        # 데이터베이스 연결
+        db = DatabaseManager()
         
-        for ticker in tickers_to_try:
-            try:
-                stock = yf.Ticker(ticker)
-                stock_info = stock.info
-                
-                # 종목명 우선순위: longName > shortName > 종목코드
-                if 'longName' in stock_info and stock_info['longName'] and stock_info['longName'] != 'N/A':
-                    return stock_info['longName']
-                elif 'shortName' in stock_info and stock_info['shortName'] and stock_info['shortName'] != 'N/A':
-                    # shortName이 종목코드와 같은 경우는 제외
-                    if stock_info['shortName'] != stock_code and not stock_info['shortName'].startswith(stock_code):
-                        return stock_info['shortName']
-            except:
-                continue
+        if not db.connect():
+            print(f"   ⚠️ DB 연결 실패로 종목코드를 종목명으로 사용: {stock_code}")
+            return stock_code
         
-        return stock_code  # 기본값
-    except:
+        # stocks 테이블에서 종목명 조회
+        stock_name_query = "SELECT stock_name FROM stocks WHERE stock_code = %s"
+        stock_info = db.fetch_one(stock_name_query, (stock_code,))
+        
+        db.disconnect()
+        
+        if stock_info and stock_info['stock_name']:
+            return stock_info['stock_name']
+        else:
+            print(f"   ⚠️ 종목명을 찾을 수 없어 종목코드를 사용: {stock_code}")
+            return stock_code
+            
+    except Exception as e:
+        print(f"   ⚠️ 종목명 조회 실패: {str(e)}")
         return stock_code
 
 def save_chart_data_to_json(chart_data, stock_code, stock_name):

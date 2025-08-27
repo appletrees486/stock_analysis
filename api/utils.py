@@ -304,33 +304,154 @@ def generate_stock_chart(stock_code: str, chart_type: str) -> str:
     return chart_path
 
 def get_stock_name(stock_code: str) -> str:
-    """종목코드로 종목명 조회"""
+    """종목코드로 종목명 조회 (DB stocks 테이블에서)"""
     try:
-        import yfinance as yf
+        # 데이터베이스에서 종목명 조회
+        from database_config import DatabaseManager
+        db = DatabaseManager()
         
-        # Yahoo Finance에서 종목 정보 조회
-        tickers_to_try = [
-            f"{stock_code}.KS",   # 코스피
-            f"{stock_code}.KQ",   # 코스닥
-        ]
+        if not db.connect():
+            logger.warning(f"DB 연결 실패로 종목코드를 종목명으로 사용: {stock_code}")
+            return stock_code
         
-        for ticker in tickers_to_try:
-            try:
-                stock = yf.Ticker(ticker)
-                stock_info = stock.info
-                
-                # 종목명 우선순위: longName > shortName > 종목코드
-                if 'longName' in stock_info and stock_info['longName'] and stock_info['longName'] != 'N/A':
-                    return stock_info['longName']
-                elif 'shortName' in stock_info and stock_info['shortName'] and stock_info['shortName'] != 'N/A':
-                    if stock_info['shortName'] != stock_code and not stock_info['shortName'].startswith(stock_code):
-                        return stock_info['shortName']
-            except:
-                continue
+        # stocks 테이블에서 종목명 조회
+        query = "SELECT stock_name FROM stocks WHERE stock_code = %s"
+        result = db.execute_query(query, (stock_code,))
         
-        # 종목명을 찾을 수 없으면 종목코드 반환
-        return stock_code
+        db.disconnect()
+        
+        if result and len(result) > 0:
+            stock_name = str(result[0][0])
+            logger.info(f"DB에서 종목명 조회 성공: {stock_code} -> {stock_name}")
+            return stock_name
+        else:
+            logger.warning(f"DB에서 종목명을 찾을 수 없음: {stock_code}")
+            return stock_code
         
     except Exception as e:
         logger.warning(f"종목명 조회 오류: {e}")
         return stock_code 
+
+def get_volume_ranking(date_str: str, limit: int = 50) -> Dict[str, Any]:
+    """특정 날짜의 거래량 상위 종목 조회"""
+    try:
+        logger.info(f"거래량 랭킹 조회 시작: {date_str}, 상위 {limit}개")
+        
+        # 데이터베이스 연결
+        from database_config import DatabaseManager
+        db = DatabaseManager()
+        
+        if not db.connect():
+            raise Exception("데이터베이스 연결에 실패했습니다.")
+        
+        try:
+            # 거래량 상위 종목 조회 (stocks 테이블과 JOIN하여 종목명 포함)
+            query = """
+            SELECT 
+                d.stock_code,
+                s.stock_name,
+                s.market_type,
+                d.volume,
+                d.open,
+                d.high,
+                d.low,
+                d.close,
+                ROUND((d.close - d.open) / d.open * 100, 2) as change_rate
+            FROM daily_data d
+            JOIN stocks s ON d.stock_code = s.stock_code
+            WHERE d.trade_date = %s
+            AND d.volume > 0
+            ORDER BY d.volume DESC
+            LIMIT %s
+            """
+            
+            params = (date_str, limit)
+            results = db.fetch_all(query, params)
+            
+            if not results:
+                logger.warning(f"{date_str} 날짜에 거래량 데이터가 없습니다.")
+                return {
+                    'date': date_str,
+                    'ranking': [],
+                    'total_count': 0,
+                    'message': '해당 날짜에 거래량 데이터가 없습니다.'
+                }
+            
+            # 결과 포맷팅
+            ranking_data = []
+            for i, row in enumerate(results, 1):
+                ranking_data.append({
+                    'rank': i,
+                    'stock_code': row['stock_code'],
+                    'stock_name': row['stock_name'],
+                    'market_type': row['market_type'],
+                    'volume': row['volume'],
+                    'open': float(row['open']),
+                    'high': float(row['high']),
+                    'low': float(row['low']),
+                    'close': float(row['close']),
+                    'change_rate': float(row['change_rate']) if row['change_rate'] is not None else 0.0
+                })
+            
+            logger.info(f"거래량 랭킹 조회 완료: {len(ranking_data)}개 종목")
+            
+            return {
+                'date': date_str,
+                'ranking': ranking_data,
+                'total_count': len(ranking_data),
+                'message': '거래량 랭킹 조회가 완료되었습니다.'
+            }
+            
+        finally:
+            db.disconnect()
+            
+    except Exception as e:
+        logger.error(f"거래량 랭킹 조회 오류: {e}")
+        return {
+            'error': str(e),
+            'date': date_str,
+            'ranking': [],
+            'total_count': 0,
+            'message': f'거래량 랭킹 조회 중 오류가 발생했습니다: {str(e)}'
+        }
+
+def get_available_dates() -> List[str]:
+    """거래량 랭킹을 조회할 수 있는 날짜 목록 반환"""
+    try:
+        logger.info("사용 가능한 날짜 목록 조회 시작")
+        
+        # 데이터베이스 연결
+        from database_config import DatabaseManager
+        db = DatabaseManager()
+        
+        if not db.connect():
+            raise Exception("데이터베이스 연결에 실패했습니다.")
+        
+        try:
+            # daily_data 테이블에서 거래일 목록 조회
+            query = """
+            SELECT DISTINCT trade_date
+            FROM daily_data
+            WHERE volume > 0
+            ORDER BY trade_date DESC
+            LIMIT 30
+            """
+            
+            results = db.fetch_all(query)
+            
+            if not results:
+                logger.warning("거래일 데이터가 없습니다.")
+                return []
+            
+            # 날짜를 문자열로 변환
+            dates = [row['trade_date'].strftime('%Y-%m-%d') for row in results]
+            
+            logger.info(f"사용 가능한 날짜 목록 조회 완료: {len(dates)}개")
+            return dates
+            
+        finally:
+            db.disconnect()
+            
+    except Exception as e:
+        logger.error(f"사용 가능한 날짜 목록 조회 오류: {e}")
+        return [] 
