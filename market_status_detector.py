@@ -199,7 +199,7 @@ class MarketStatusDetector:
             return False, "휴장일"
         
         # 데이터 수집 권장 시간: 장 마감 후 1시간 ~ 다음날 장 시작 전
-        if current_time >= time(16, 30) or current_time < time(8, 0):
+        if current_time >= time(15, 40) or current_time < time(8, 0):
             return True, "데이터 수집 권장 시간"
         elif current_time >= time(9, 0) and current_time <= time(15, 30):
             return False, "장 거래시간 (실시간 데이터 수집 가능)"
