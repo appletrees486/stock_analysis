@@ -47,7 +47,7 @@ jobs:
           echo "🚀 Starting deployment to production server..."
           
           # 프로젝트 디렉토리로 이동
-          cd ${{ secrets.PRODUCTION_PATH }}
+          cd /home/ubuntu/stock_analysis
           
           # Git에서 최신 변경사항 가져오기
           echo "📥 Pulling latest changes from GitHub..."
