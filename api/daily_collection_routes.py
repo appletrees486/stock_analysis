@@ -245,22 +245,38 @@ def run_collection_task():
     try:
         global collection_status
         
+        logger.info("🚀 백그라운드 스레드 시작됨")
         logger.info("수집 작업 시작: 전체 종목을 100개씩 배치로 수집")
         
         # StockDataCollector 임포트 및 초기화
         try:
+            logger.info("📦 StockDataCollector 임포트 시도")
             from stock_data_collector import StockDataCollector
+            logger.info("✅ StockDataCollector 임포트 성공")
+            
+            logger.info("🔧 StockDataCollector 초기화 시도")
             collector = StockDataCollector()
+            logger.info("✅ StockDataCollector 초기화 성공")
             
             # 콜백 함수 설정
+            logger.info("🔗 콜백 함수 설정 중")
             collector.set_progress_callback(update_progress)
             collector.set_stats_callback(update_stats)
+            logger.info("✅ 콜백 함수 설정 완료")
             
         except ImportError as e:
-            logger.error(f"StockDataCollector 임포트 실패: {e}")
+            logger.error(f"❌ StockDataCollector 임포트 실패: {e}")
             collection_status.update({
                 'status': 'error',
                 'error_message': f'StockDataCollector 모듈을 찾을 수 없습니다: {e}'
+            })
+            return
+        except Exception as e:
+            logger.error(f"❌ StockDataCollector 초기화 실패: {e}")
+            logger.error(traceback.format_exc())
+            collection_status.update({
+                'status': 'error',
+                'error_message': f'StockDataCollector 초기화 실패: {e}'
             })
             return
         
