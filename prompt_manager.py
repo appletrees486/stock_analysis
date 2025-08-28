@@ -135,6 +135,8 @@ class PromptManager:
     
     def get_prompt(self, chart_type: str, version: str = None) -> str:
         """차트 유형에 따른 프롬프트 반환"""
+        conn = None
+        cursor = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor(dictionary=True)
@@ -234,6 +236,8 @@ class PromptManager:
     
     def update_prompt(self, chart_type: str, content: str, version: str = None, created_by: str = "system") -> bool:
         """프롬프트 업데이트"""
+        conn = None
+        cursor = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -300,6 +304,8 @@ class PromptManager:
     
     def get_prompt_versions(self, chart_type: str) -> List[Dict[str, Any]]:
         """프롬프트 버전 목록 조회"""
+        conn = None
+        cursor = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor(dictionary=True)
@@ -343,6 +349,8 @@ class PromptManager:
     
     def delete_prompt_version(self, prompt_id: int) -> bool:
         """프롬프트 버전 삭제 (실제 삭제하지 않고 비활성화)"""
+        conn = None
+        cursor = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()

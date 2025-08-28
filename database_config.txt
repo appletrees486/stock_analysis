@@ -1,0 +1,8 @@
+# 데이터베이스 설정 파일
+# 생성일시: 2025-08-28
+
+host=localhost
+port=3306
+user=root
+password=1234
+database=stock_analysis
