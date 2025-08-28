@@ -46,12 +46,12 @@ class DatabaseManager:
             if file_config:
                 config.update(file_config)
         
-        # MySQL 8.0 auth_socket 문제 해결: 대안 사용자 생성
-        if config['host'] == 'localhost' and config['user'] == 'root':
-            # root 사용자 대신 대안 사용자 사용
-            logging.warning("⚠️ root 사용자 auth_socket 문제로 인해 대안 설정 적용")
-            config['user'] = 'stockapp'
-            config['password'] = '1234'
+        # MySQL 8.0 auth_socket 문제 해결: 일단 원래 설정 유지
+        # if config['host'] == 'localhost' and config['user'] == 'root':
+        #     # root 사용자 대신 대안 사용자 사용
+        #     logging.warning("⚠️ root 사용자 auth_socket 문제로 인해 대안 설정 적용")
+        #     config['user'] = 'stockapp'
+        #     config['password'] = '1234'
         
         return config
     
