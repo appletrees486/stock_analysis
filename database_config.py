@@ -99,6 +99,8 @@ class DatabaseManager:
             return True
         except Error as e:
             logging.error(f"❌ MySQL 연결 실패: {e}")
+            logging.warning("⚠️ 데이터베이스 없이 애플리케이션을 계속 실행합니다")
+            # DB 연결 실패해도 애플리케이션은 계속 실행
             return False
     
     def disconnect(self):
