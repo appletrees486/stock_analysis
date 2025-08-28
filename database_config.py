@@ -29,15 +29,62 @@ class DatabaseManager:
     
     def _load_config(self):
         """데이터베이스 설정 로드"""
-        return {
+        # 환경변수에서 설정 로드
+        config = {
             'host': os.getenv('DB_HOST', 'localhost'),
             'user': os.getenv('DB_USER', 'root'),
             'password': os.getenv('DB_PASSWORD', '1234'),
-            'port': os.getenv('DB_PORT', 3306),
+            'port': int(os.getenv('DB_PORT', 3306)),
             'database': os.getenv('DB_NAME', 'stock_analysis'),
             'charset': 'utf8mb4',
             'autocommit': True
         }
+        
+        # 환경변수가 없으면 파일에서 로드
+        if config['host'] == 'localhost' and config['user'] == 'root':
+            file_config = self._load_from_file()
+            if file_config:
+                config.update(file_config)
+        
+        # MySQL 8.0 auth_socket 문제 해결을 위한 추가 설정
+        config['auth_plugin'] = 'mysql_native_password'
+        
+        return config
+    
+    def _load_from_file(self):
+        """database_config.txt 파일에서 설정 로드"""
+        try:
+            config_file = 'database_config.txt'
+            if os.path.exists(config_file):
+                config = {}
+                with open(config_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith('#') and '=' in line:
+                            key, value = line.split('=', 1)
+                            key = key.strip()
+                            value = value.strip()
+                            
+                            if key == 'host':
+                                config['host'] = value
+                            elif key == 'port':
+                                config['port'] = int(value)
+                            elif key == 'user':
+                                config['user'] = value
+                            elif key == 'password':
+                                config['password'] = value
+                            elif key == 'database':
+                                config['database'] = value
+                
+                logging.info(f"✅ 데이터베이스 설정 파일에서 로드: {config_file}")
+                return config
+            else:
+                logging.warning(f"⚠️ 데이터베이스 설정 파일이 없습니다: {config_file}")
+                
+        except Exception as e:
+            logging.error(f"⚠️ 데이터베이스 설정 파일 로드 오류: {e}")
+        
+        return None
     
     def connect(self):
         """데이터베이스 연결"""
