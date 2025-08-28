@@ -1623,17 +1623,21 @@ class StockDataCollector:
             logging.error(f"❌ 배치 수집 상태 업데이트 중 예외 발생: {e}")
             return False
 
-    def collect_all_stocks(self):
+    def collect_all_stocks(self, auto_confirm=False):
         """모든 종목 데이터 수집 (수집 시간 최적화 포함)"""
         logging.info("🚀 전체 종목 데이터 수집 시작 (시장 상태 기반 최적화)")
         logging.info("="*60)
         
-        # 수집 시간 최적화 확인
-        if not self.is_optimal_collection_time():
-            response = input("권장 시간이 아닙니다. 계속 진행하시겠습니까? (y/N): ")
-            if response.lower() != 'y':
-                logging.info("사용자에 의해 수집이 중단되었습니다.")
-                return 0, 0
+        # 웹 인터페이스에서 호출 시에는 시간 체크 건너뛰기
+        if not auto_confirm:
+            # 수집 시간 최적화 확인 (명령줄에서만)
+            if not self.is_optimal_collection_time():
+                response = input("권장 시간이 아닙니다. 계속 진행하시겠습니까? (y/N): ")
+                if response.lower() != 'y':
+                    logging.info("사용자에 의해 수집이 중단되었습니다.")
+                    return 0, 0
+        else:
+            logging.info("🌐 웹 인터페이스에서 호출됨 - 시간 제한 없이 바로 수집을 시작합니다.")
         
         # 모든 종목 코드 조회
         all_stocks = self.get_all_stock_codes()

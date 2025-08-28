@@ -266,7 +266,7 @@ def run_collection_task():
         
         # 전체 종목 수집 (자동으로 초기/증분 판단)
         logger.info("전체 종목 수집 시작")
-        success, failed = collector.collect_all_stocks()
+        success, failed = collector.collect_all_stocks(auto_confirm=True)
         
         # 결과 처리
         total = success + failed
