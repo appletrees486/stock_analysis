@@ -31,7 +31,7 @@ jobs:
   deploy:
     needs: test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'  # CI/CD 재활성화 - 스왑 파일로 안전
+    if: false  # EMERGENCY: 완전 비활성화 - 스왑 파일에도 서버 다운 발생
     timeout-minutes: 20
     
     steps:

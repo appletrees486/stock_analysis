@@ -1,0 +1,118 @@
+name: Hybrid Deploy System (Build in Cloud, Deploy to Server)
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-and-package:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.9
+    
+    - name: Install dependencies and create package
+      run: |
+        python -m pip install --upgrade pip
+        # 필요한 패키지만 설치 (GitHub Actions에서)
+        pip install flask==2.3.0 requests==2.28.0 APScheduler==3.10.0
+        
+        # 의존성 정보 저장
+        pip freeze > deployed_requirements.txt
+        
+        # 코드 패키지 생성
+        tar -czf deployment_package.tar.gz \
+          --exclude='.git' \
+          --exclude='__pycache__' \
+          --exclude='*.pyc' \
+          --exclude='venv' \
+          --exclude='node_modules' \
+          .
+    
+    - name: Upload deployment package
+      uses: actions/upload-artifact@v3
+      with:
+        name: deployment-package
+        path: |
+          deployment_package.tar.gz
+          deployed_requirements.txt
+
+  deploy-to-server:
+    needs: build-and-package
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Download deployment package
+      uses: actions/download-artifact@v3
+      with:
+        name: deployment-package
+    
+    - name: Deploy to Production Server (Package Only)
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.PRODUCTION_HOST }}
+        username: ${{ secrets.PRODUCTION_USER }}
+        key: ${{ secrets.PRODUCTION_SSH_KEY }}
+        port: ${{ secrets.PRODUCTION_PORT }}
+        script: |
+          echo "🚀 하이브리드 배포 시작 (패키지 전송 방식)"
+          
+          # 배포 디렉토리 준비
+          mkdir -p ~/deployment_temp
+          cd ~/deployment_temp
+          
+          # 기존 패키지 정리
+          rm -f deployment_package.tar.gz deployed_requirements.txt
+    
+    - name: Upload deployment files
+      uses: appleboy/scp-action@v0.1.4
+      with:
+        host: ${{ secrets.PRODUCTION_HOST }}
+        username: ${{ secrets.PRODUCTION_USER }}
+        key: ${{ secrets.PRODUCTION_SSH_KEY }}
+        port: ${{ secrets.PRODUCTION_PORT }}
+        source: "deployment_package.tar.gz,deployed_requirements.txt"
+        target: "~/deployment_temp/"
+    
+    - name: Extract and deploy
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.PRODUCTION_HOST }}
+        username: ${{ secrets.PRODUCTION_USER }}
+        key: ${{ secrets.PRODUCTION_SSH_KEY }}
+        port: ${{ secrets.PRODUCTION_PORT }}
+        script: |
+          cd ~/deployment_temp
+          
+          # 애플리케이션 중지
+          pkill -f "python.*app.py" || echo "No running process"
+          
+          # 코드 백업
+          cp -r ~/stock_analysis ~/stock_analysis_backup_$(date +%Y%m%d_%H%M%S) || true
+          
+          # 새 코드 배포 (압축 해제만)
+          cd ~/stock_analysis
+          tar -xzf ~/deployment_temp/deployment_package.tar.gz
+          
+          # 가상환경에서 애플리케이션 재시작 (기존 패키지 사용)
+          source venv/bin/activate
+          export PYTHONHASHSEED=0
+          export PYTHONOPTIMIZE=1
+          ulimit -v 400000
+          
+          nohup python app.py > app.log 2>&1 &
+          
+          sleep 5
+          
+          if pgrep -f "python.*app.py" > /dev/null; then
+            echo "✅ 하이브리드 배포 성공!"
+            echo "📦 GitHub Actions에서 빌드, 서버는 실행만"
+          else
+            echo "❌ 배포 실패"
+            tail -20 app.log
+          fi

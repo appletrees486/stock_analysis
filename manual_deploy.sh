@@ -53,10 +53,18 @@ ssh -i "$SSH_KEY" "$SERVER_USER@$SERVER_HOST" "
     pkill -f 'python.*app.py' || echo '실행 중인 프로세스 없음'
     sleep 3
     
-    # 메모리 제한으로 새 프로세스 시작
-    echo '새 애플리케이션 시작 중...'
+    # 메모리 효율적인 새 프로세스 시작
+    echo '새 애플리케이션 시작 중 (1GB 메모리 최적화 모드)...'
     source venv/bin/activate
-    ulimit -v 500000  # 500MB 가상 메모리 제한
+    
+    # 메모리 사용량 최적화 설정
+    export PYTHONHASHSEED=0  # Python 해시 시드 고정으로 메모리 절약
+    export PYTHONUNBUFFERED=1  # 버퍼링 비활성화
+    ulimit -v 350000  # 350MB 가상 메모리 제한 (더 엄격하게)
+    
+    # 가비지 컬렉션 최적화
+    export PYTHONOPTIMIZE=1
+    
     nohup python app.py > app.log 2>&1 &
     
     sleep 5
