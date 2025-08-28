@@ -152,31 +152,45 @@ def start_collection():
 
 @daily_collection_bp.route('/api/daily-collection/stop', methods=['POST'])
 def stop_collection():
-    """일일 시세 수집 중지"""
+    """일일 시세 수집 중지 (DB + 메모리 상태 모두 업데이트)"""
     try:
         global collection_status
         
-        if collection_status['status'] != 'running':
-            return jsonify({
-                'success': False,
-                'error': '현재 실행 중인 수집 작업이 없습니다.'
-            }), 400
+        # DB 기반 작업 중지 (우선 처리)
+        if job_manager and collection_status.get('job_id'):
+            job_id = collection_status['job_id']
+            logger.info(f"🛑 DB 작업 중지 시도: Job ID={job_id}")
+            
+            if job_manager.cancel_job(job_id):
+                logger.info(f"✅ DB 작업 중지 성공: Job ID={job_id}")
+            else:
+                logger.warning(f"⚠️ DB 작업 중지 실패: Job ID={job_id}")
         
-        # 상태 업데이트
+        # 실행 중인 모든 작업 강제 중지 (추가 안전장치)
+        if job_manager:
+            running_job = job_manager.get_running_job('DAILY_COLLECTION')
+            if running_job:
+                logger.info(f"🔍 실행 중인 작업 발견: Job ID={running_job['id']}")
+                if job_manager.cancel_job(running_job['id']):
+                    logger.info(f"✅ 실행 중인 작업 중지 완료: Job ID={running_job['id']}")
+        
+        # 메모리 기반 상태 업데이트
         collection_status.update({
             'status': 'idle',
-            'end_time': datetime.now()
+            'end_time': datetime.now(),
+            'job_id': None  # job_id 초기화
         })
         
-        logger.info("일일 시세 수집이 중지되었습니다.")
+        logger.info("✅ 일일 시세 수집이 완전히 중지되었습니다 (DB + 메모리 상태 모두 업데이트)")
         
         return jsonify({
             'success': True,
-            'message': '수집이 중지되었습니다.'
+            'message': '수집이 완전히 중지되었습니다.'
         })
         
     except Exception as e:
-        logger.error(f"수집 중지 중 오류: {e}")
+        logger.error(f"❌ 수집 중지 중 오류: {e}")
+        logger.error(traceback.format_exc())
         return jsonify({
             'success': False,
             'error': f'수집 중지 중 오류가 발생했습니다: {str(e)}'
