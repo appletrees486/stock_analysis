@@ -54,9 +54,13 @@ jobs:
           git fetch origin
           git reset --hard origin/main
           
-          # Python 의존성 업데이트 (필수 패키지만)
+          # Python 의존성 업데이트 (웹 애플리케이션 실행용 최소 패키지)
           echo "📦 Installing essential Python dependencies..."
-          pip install --user flask==2.3.0 pandas==1.5.0 numpy==1.21.0 requests==2.28.0 mysql-connector-python==8.0.0 APScheduler==3.10.0
+          pip install --user flask==2.3.0 pandas==1.5.0 numpy==1.21.0 requests==2.28.0 APScheduler==3.10.0
+          
+          # MySQL 패키지는 별도로 설치 (버전 호환성)
+          echo "📦 Installing MySQL connector..."
+          pip install --user mysql-connector-python || echo "MySQL connector installation failed, continuing..."
           
           # 기존 프로세스 종료 (graceful shutdown)
           echo "🛑 Stopping existing application..."
