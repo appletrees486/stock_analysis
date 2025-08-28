@@ -31,7 +31,7 @@ jobs:
   deploy:
     needs: test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: false  # CI/CD 완전 비활성화 - 서버 보호 모드
     timeout-minutes: 15
     
     steps:
