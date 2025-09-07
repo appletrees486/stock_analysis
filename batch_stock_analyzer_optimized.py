@@ -218,8 +218,22 @@ def create_chart_fast(stock_code: str, chart_type_en: str) -> tuple[bool, object
             hist = module.get_stock_data(stock_code)
             if hist is not None and not hist.empty:
                 module.analyze_stock_data(hist, stock_code)
-                module.create_stock_chart(hist, stock_code)
-                return True, hist
+                chart_result = module.create_stock_chart(hist, stock_code)
+                if chart_result is not None and len(chart_result) == 2:
+                    # chart_result는 (chart_path, stock_name) 튜플
+                    chart_path, stock_name = chart_result
+                    # additional_info를 빈 딕셔너리로 설정 (AI 분석에 필요한 정보)
+                    additional_info = {
+                        "chart_path": chart_path,
+                        "stock_name": stock_name
+                    }
+                    return True, (hist, additional_info)
+                elif chart_result is not None:
+                    # 기존 방식 호환성 유지
+                    return True, hist
+                else:
+                    print(f"   ❌ {stock_code}: 차트 생성 실패")
+                    return False, None
             else:
                 print(f"   ❌ {stock_code}: 데이터가 없거나 비어있습니다.")
                 return False, None
@@ -227,8 +241,12 @@ def create_chart_fast(stock_code: str, chart_type_en: str) -> tuple[bool, object
             hist = module.get_weekly_stock_data(stock_code)
             if hist is not None and not hist.empty:
                 module.analyze_weekly_stock_data(hist, stock_code)
-                module.create_weekly_stock_chart(hist, stock_code)
-                return True, hist
+                chart_result = module.create_weekly_stock_chart(hist, stock_code)
+                if chart_result is not None:
+                    return True, hist
+                else:
+                    print(f"   ❌ {stock_code}: 주봉 차트 생성 실패")
+                    return False, None
             else:
                 print(f"   ❌ {stock_code}: 주봉 데이터가 없거나 비어있습니다.")
                 return False, None
@@ -236,8 +254,12 @@ def create_chart_fast(stock_code: str, chart_type_en: str) -> tuple[bool, object
             hist = module.get_monthly_stock_data(stock_code)
             if hist is not None and not hist.empty:
                 module.analyze_monthly_stock_data(hist, stock_code)
-                module.create_monthly_stock_chart(hist, stock_code)
-                return True, hist
+                chart_result = module.create_monthly_stock_chart(hist, stock_code)
+                if chart_result is not None:
+                    return True, hist
+                else:
+                    print(f"   ❌ {stock_code}: 월봉 차트 생성 실패")
+                    return False, None
             else:
                 print(f"   ❌ {stock_code}: 월봉 데이터가 없거나 비어있습니다.")
                 return False, None
@@ -245,9 +267,12 @@ def create_chart_fast(stock_code: str, chart_type_en: str) -> tuple[bool, object
         return False, None
     except Exception as e:
         print(f"   ❌ {stock_code} 차트 생성 오류: {str(e)}")
+        import traceback
+        print(f"   상세 오류:")
+        traceback.print_exc()
         return False, None
 
-def run_ai_analysis_fast(stock_name: str, stock_code: str, chart_type: str, chart_type_en: str, chart_data=None) -> bool:
+def run_ai_analysis_fast(stock_name: str, stock_code: str, chart_type: str, chart_type_en: str, chart_data=None, batch_id=None, additional_info=None) -> bool:
     """고속 AI 분석"""
     try:
         charts_dir = f"{chart_type_en}_charts"
@@ -317,13 +342,32 @@ def run_ai_analysis_fast(stock_name: str, stock_code: str, chart_type: str, char
         print(f"📁 이미지 경로: {image_path}")
         print(f"📊 차트 유형: {chart_type}")
         
-        # 차트 데이터가 있는 경우 AI 분석에 전달 (DB에서 조회한 한글 종목명 사용)
+        # additional_info에서 종목명 우선 사용
+        final_stock_name = db_stock_name
+        if additional_info and "stock_name" in additional_info:
+            final_stock_name = additional_info["stock_name"]
+            print(f"✅ additional_info에서 종목명 사용: {final_stock_name}")
+        
+        # 차트 데이터가 있는 경우 AI 분석에 전달
         if chart_data is not None:
             print(f"📊 차트 데이터 포함하여 분석")
-            result = analyzer.analyze_chart_image(image_path, db_stock_name, chart_type, chart_data)
+            print(f"📊 additional_info: {additional_info}")
+            result = analyzer.analyze_chart_image(
+                image_path, 
+                final_stock_name, 
+                chart_type, 
+                chart_data=chart_data,
+                additional_info=additional_info
+            )
         else:
             print(f"📊 차트 데이터 없이 분석")
-            result = analyzer.analyze_chart_image(image_path, db_stock_name, chart_type)
+            print(f"📊 additional_info: {additional_info}")
+            result = analyzer.analyze_chart_image(
+                image_path, 
+                final_stock_name, 
+                chart_type, 
+                additional_info=additional_info
+            )
         
         if result:
             print(f"✅ AI 분석 성공")
@@ -335,8 +379,13 @@ def run_ai_analysis_fast(stock_name: str, stock_code: str, chart_type: str, char
             
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             
-            json_path = os.path.join(output_dir, f"analysis_{chart_type_en}_{stock_code}_{timestamp}.json")
-            doc_path = os.path.join(output_dir, f"analysis_{chart_type_en}_{stock_code}_{timestamp}.docx")
+            # 배치 ID가 있으면 파일명에 포함
+            if batch_id:
+                json_path = os.path.join(output_dir, f"analysis_{chart_type_en}_{stock_code}_{timestamp}_{batch_id}.json")
+                doc_path = os.path.join(output_dir, f"analysis_{chart_type_en}_{stock_code}_{timestamp}_{batch_id}.docx")
+            else:
+                json_path = os.path.join(output_dir, f"analysis_{chart_type_en}_{stock_code}_{timestamp}.json")
+                doc_path = os.path.join(output_dir, f"analysis_{chart_type_en}_{stock_code}_{timestamp}.docx")
             
             print(f"💾 JSON 파일 저장: {json_path}")
             try:
@@ -348,7 +397,7 @@ def run_ai_analysis_fast(stock_name: str, stock_code: str, chart_type: str, char
             
             print(f"💾 DOCX 파일 생성: {doc_path}")
             try:
-                doc_success = analyzer.create_word_document(result, image_path, doc_path, chart_type)
+                doc_success = analyzer.create_word_document_hybrid(result, image_path, doc_path, chart_type)
                 print(f"   DOCX 생성 결과: {doc_success}")
             except Exception as e:
                 print(f"   ❌ DOCX 생성 중 오류: {e}")
@@ -369,7 +418,7 @@ def run_ai_analysis_fast(stock_name: str, stock_code: str, chart_type: str, char
         traceback.print_exc()
         return False
 
-def analyze_single_stock_fast(stock_input: str, chart_type: str, chart_type_en: str, tracker: FastProgressTracker) -> Dict:
+def analyze_single_stock_fast(stock_input: str, chart_type: str, chart_type_en: str, tracker: FastProgressTracker, batch_id=None) -> Dict:
     """고속 단일 종목 분석"""
     result = {
         "stock_input": stock_input,
@@ -390,8 +439,16 @@ def analyze_single_stock_fast(stock_input: str, chart_type: str, chart_type_en: 
         if chart_success:
             result["chart_created"] = True
             
-            # AI 분석 (차트 데이터 포함)
-            ai_success = run_ai_analysis_fast(stock_input, stock_code, chart_type, chart_type_en, chart_data)
+            # 추가 정보 처리
+            additional_info = None
+            if isinstance(chart_data, tuple) and len(chart_data) == 2:
+                # 새로운 형식: (hist, additional_info)
+                hist_data, additional_info = chart_data
+                chart_data = hist_data
+            # 기존 형식: hist만 반환된 경우
+            
+            # AI 분석 (차트 데이터 + 추가 정보 포함)
+            ai_success = run_ai_analysis_fast(stock_input, stock_code, chart_type, chart_type_en, chart_data, batch_id, additional_info)
             if ai_success:
                 result["ai_analysis_done"] = True
                 result["success"] = True

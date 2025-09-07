@@ -399,7 +399,7 @@ class AIChartAnalyzer:
                 self.config_manager = UnifiedConfigManager(db_config)
                 self.max_retries = self.config_manager.get_system_config('max_retry_count', 3)
                 self.timeout = self.config_manager.get_system_config('analysis_timeout', 300)
-                self.max_image_size = self.config_manager.get_system_config('chart_image_max_size', 2000)
+                self.max_image_size = self.config_manager.get_system_config('chart_image_max_size', 1500)
                 print("✅ DB에서 시스템 설정을 로드했습니다.")
             except Exception as e:
                 print(f"⚠️ DB에서 시스템 설정 로드 실패: {e}")
@@ -446,7 +446,7 @@ class AIChartAnalyzer:
         """기본 설정값 설정"""
         self.max_retries = 3
         self.timeout = 300
-        self.max_image_size = 2000
+        self.max_image_size = 1500
         print("⚠️ 기본 설정값을 사용합니다.")
 
     def encode_image_to_base64(self, image_path: str) -> str:
@@ -468,7 +468,7 @@ class AIChartAnalyzer:
 
     def analyze_chart_image(self, image_path: str, stock_name: str = "", chart_type: str = "일봉", chart_data: Optional[pd.DataFrame] = None, 
                            json_data_path: str = "", csv_data_path: str = "", text_summary_path: str = "", 
-                           enable_summary_analysis: bool = False) -> Optional[Dict[str, Any]]:
+                           enable_summary_analysis: bool = False, additional_info: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
         """
         차트 이미지를 AI로 분석 (하이브리드 버전 - 개별 + 요약 분석 동시 지원)
         
@@ -492,6 +492,11 @@ class AIChartAnalyzer:
             # 분석 시작 시간 기록
             start_time = time.time()
             
+            # additional_info에서 종목명 우선 사용
+            if additional_info and "stock_name" in additional_info:
+                stock_name = additional_info["stock_name"]
+                print(f"✅ additional_info에서 종목명 사용: {stock_name}")
+            
             # 파일명에서 종목정보 추출
             filename = os.path.basename(image_path)
             extracted_stock_name, extracted_stock_code = self.stock_mapper.extract_stock_info_from_filename(filename)
@@ -500,8 +505,9 @@ class AIChartAnalyzer:
             if extracted_stock_code and extracted_stock_code != "000000":
                 mapped_name = self.stock_mapper.get_stock_name(extracted_stock_code)
                 if mapped_name != extracted_stock_code:  # DB에서 한글 종목명을 찾은 경우
-                    stock_name = mapped_name
-                    print(f"✅ DB에서 한글 종목명 조회 성공: {extracted_stock_code} -> {stock_name}")
+                    if not stock_name:  # additional_info에 종목명이 없는 경우에만 DB에서 조회한 이름 사용
+                        stock_name = mapped_name
+                    print(f"✅ DB에서 한글 종목명 조회 성공: {extracted_stock_code} -> {mapped_name}")
                 else:
                     # DB에서 찾지 못한 경우 처리
                     if not stock_name:  # 기존 종목명이 없는 경우에만 파일명 사용
@@ -773,6 +779,7 @@ class AIChartAnalyzer:
                                         analysis_result["종목정보"]["종목명"] = stock_name
                                     if "종목번호" not in analysis_result["종목정보"]:
                                         analysis_result["종목정보"]["종목번호"] = extracted_stock_code
+                                    
                                 else:
                                     # 종목정보 섹션이 없는 경우 생성
                                     analysis_result["종목정보"] = {
@@ -781,6 +788,14 @@ class AIChartAnalyzer:
                                         "분석일시": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                         "차트유형": chart_type
                                     }
+                                    
+                                
+                                
+                                # 테스트용 항목 추가 (JSON 생성 과정 개입 테스트)
+                                analysis_result["테스트"] = "test"
+                                
+                                # 하이브리드 방식: 원본 AI 응답 저장
+                                analysis_result["original_ai_response"] = response.text
                                 
                                 print(f"✅ JSON 파싱 성공 (시도 {attempt + 1})")
                                 
@@ -808,7 +823,9 @@ class AIChartAnalyzer:
                                     continue
                                 else:
                                     print(f"❌ 모든 시도 실패. 마지막 응답: {response.text}")
-                                    return self._create_fallback_result(stock_name, chart_type, response.text, "JSON 파싱 실패", extracted_stock_code)
+                                    fallback_result = self._create_fallback_result(stock_name, chart_type, response.text, "JSON 파싱 실패", extracted_stock_code, chart_data)
+                                    fallback_result["original_ai_response"] = response.text
+                                    return fallback_result
                         else:
                             print(f"⚠️ AI 응답이 JSON 형식이 아닙니다 (시도 {attempt + 1})")
                             if attempt < max_retries - 1:
@@ -817,7 +834,9 @@ class AIChartAnalyzer:
                                 continue
                             else:
                                 print(f"❌ 모든 시도 실패. 마지막 응답: {response.text}")
-                                return self._create_fallback_result(stock_name, chart_type, response.text, "JSON 형식 아님", extracted_stock_code)
+                                fallback_result = self._create_fallback_result(stock_name, chart_type, response.text, "JSON 형식 아님", extracted_stock_code, chart_data)
+                                fallback_result["original_ai_response"] = response.text
+                                return fallback_result
                     else:
                         print(f"❌ AI 분석 응답이 없습니다 (시도 {attempt + 1})")
                         if attempt < max_retries - 1:
@@ -874,6 +893,10 @@ class AIChartAnalyzer:
             # 개별 분석 결과를 요약 프롬프트에 추가
             summary_prompt += f"\n\n**개별 분석 결과:**\n{json.dumps(individual_result, ensure_ascii=False, indent=2)}\n\n"
             summary_prompt += "위 개별 분석 결과를 바탕으로 핵심 포인트를 요약하고 투자 관점에서의 시사점을 제시해주세요."
+            
+            # 개별 분석 JSON 파일 경로 추가
+            if "individual_analysis_file" in individual_result:
+                summary_prompt += f"\n\n**개별 분석 JSON 파일:** {individual_result['individual_analysis_file']}\n"
             
             # 추가 데이터 파일들 로드 및 프롬프트에 추가 (기존 로직 재사용)
             additional_data_info = self._load_additional_data_files(json_data_path, csv_data_path, text_summary_path)
@@ -996,21 +1019,354 @@ class AIChartAnalyzer:
         
         return json.loads(json_text)
     
-    def _create_fallback_result(self, stock_name: str, chart_type: str, ai_response: str, error_type: str, stock_code: str = "000000") -> Dict[str, Any]:
+    def _convert_structured_data_to_text(self, structured_data: Dict[str, Any]) -> str:
+        """
+        구조화된 JSON 데이터를 텍스트로 변환 (하이브리드 방식용)
+        
+        Args:
+            structured_data (Dict[str, Any]): 구조화된 분석 결과
+            
+        Returns:
+            str: 텍스트 형태의 분석 결과
+        """
+        try:
+            text_parts = []
+            
+            # 종목 정보
+            if "종목정보" in structured_data:
+                info = structured_data["종목정보"]
+                text_parts.append(f"📊 종목 정보")
+                text_parts.append(f"• 종목명: {info.get('종목명', 'N/A')}")
+                text_parts.append(f"• 종목번호: {info.get('종목번호', 'N/A')}")
+                text_parts.append(f"• 분석일시: {info.get('분석일시', 'N/A')}")
+                text_parts.append(f"• 차트유형: {info.get('차트유형', 'N/A')}")
+                text_parts.append("")
+            
+            # 종합 분석 점수
+            if "종합분석점수" in structured_data:
+                score = structured_data["종합분석점수"]
+                text_parts.append(f"📈 종합 분석 점수")
+                text_parts.append(f"• 점수: {score.get('점수', 'N/A')}/100")
+                text_parts.append(f"• 요약: {score.get('요약', 'N/A')}")
+                text_parts.append("")
+            
+            # 차트 유형별 봉 정보
+            if "오늘의일봉" in structured_data:
+                candle = structured_data["오늘의일봉"]
+                text_parts.append(f"📊 오늘의 일봉 요약")
+                text_parts.append(f"• 종가: {candle.get('종가', 'N/A')}원")
+                text_parts.append(f"• 등락률: {candle.get('등락률', 'N/A')}%")
+                text_parts.append(f"• 거래량: {candle.get('거래량', 'N/A')}주")
+                text_parts.append(f"• 주요 특징: {candle.get('주요특징', 'N/A')}")
+                text_parts.append("")
+            elif "이번주봉" in structured_data:
+                candle = structured_data["이번주봉"]
+                text_parts.append(f"📊 이번 주 봉 요약")
+                text_parts.append(f"• 종가: {candle.get('종가', 'N/A')}원")
+                text_parts.append(f"• 등락률: {candle.get('등락률', 'N/A')}%")
+                text_parts.append(f"• 거래량: {candle.get('거래량', 'N/A')}주")
+                text_parts.append(f"• 주요 특징: {candle.get('주요특징', 'N/A')}")
+                text_parts.append("")
+            elif "이번월봉" in structured_data:
+                candle = structured_data["이번월봉"]
+                text_parts.append(f"📊 이번 월봉 요약")
+                text_parts.append(f"• 종가: {candle.get('종가', 'N/A')}원")
+                text_parts.append(f"• 등락률: {candle.get('등락률', 'N/A')}%")
+                text_parts.append(f"• 거래량: {candle.get('거래량', 'N/A')}주")
+                text_parts.append(f"• 주요 특징: {candle.get('주요특징', 'N/A')}")
+                text_parts.append("")
+            
+            # 핵심 기술적 지표
+            if "핵심기술적지표" in structured_data:
+                tech = structured_data["핵심기술적지표"]
+                text_parts.append(f"🔍 핵심 기술적 분석 지표")
+                for key, value in tech.items():
+                    text_parts.append(f"• {key}: {value}")
+                text_parts.append("")
+            
+            # 세부 분석
+            if "세부분석" in structured_data:
+                detail = structured_data["세부분석"]
+                text_parts.append(f"📈 세부 분석")
+                for section, content in detail.items():
+                    text_parts.append(f"📊 {section}")
+                    if isinstance(content, dict):
+                        for key, value in content.items():
+                            text_parts.append(f"  • {key}: {value}")
+                    else:
+                        text_parts.append(f"  • {content}")
+                text_parts.append("")
+            
+            # 투자 아이디어
+            if "단기투자아이디어" in structured_data:
+                idea = structured_data["단기투자아이디어"]
+                text_parts.append(f"💡 단기 투자 아이디어")
+                for key, value in idea.items():
+                    text_parts.append(f"• {key}: {value}")
+                text_parts.append("")
+            elif "중기투자아이디어" in structured_data:
+                idea = structured_data["중기투자아이디어"]
+                text_parts.append(f"💡 중기 투자 아이디어")
+                for key, value in idea.items():
+                    text_parts.append(f"• {key}: {value}")
+                text_parts.append("")
+            elif "장기투자아이디어" in structured_data:
+                idea = structured_data["장기투자아이디어"]
+                text_parts.append(f"💡 장기 투자 아이디어")
+                for key, value in idea.items():
+                    text_parts.append(f"• {key}: {value}")
+                text_parts.append("")
+            
+            return "\n".join(text_parts)
+            
+        except Exception as e:
+            print(f"⚠️ 구조화된 데이터를 텍스트로 변환 중 오류: {e}")
+            return str(structured_data)
+
+    def _parse_markdown_to_word(self, text: str, doc) -> None:
+        """
+        마크다운 텍스트를 Word 문서 형식으로 파싱하여 추가
+        
+        Args:
+            text (str): 마크다운 형태의 텍스트
+            doc: Word 문서 객체
+        """
+        try:
+            import re
+            
+            # **내용** 형태를 볼드체로 변환하는 정규식
+            bold_pattern = r'\*\*(.*?)\*\*'
+            
+            # 줄바꿈으로 분리
+            lines = text.split('\n')
+            
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # **내용** 패턴을 찾아서 볼드체로 변환
+                if re.search(bold_pattern, line):
+                    # 볼드체가 포함된 줄 처리
+                    para = doc.add_paragraph()
+                    
+                    # **내용** 패턴으로 분할
+                    parts = re.split(bold_pattern, line)
+                    
+                    for i, part in enumerate(parts):
+                        if i % 2 == 0:
+                            # 일반 텍스트
+                            if part:
+                                run = para.add_run(part)
+                                run.font.name = '맑은 고딕'
+                                run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                        else:
+                            # 볼드체 텍스트
+                            if part:
+                                run = para.add_run(part)
+                                run.font.name = '맑은 고딕'
+                                run.bold = True
+                                run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                else:
+                    # 볼드체가 없는 일반 줄 처리
+                    if line.startswith('📊') or line.startswith('📈') or line.startswith('📉') or line.startswith('💡') or line.startswith('🔍') or line.startswith('⚠️') or line.startswith('✅'):
+                        para = doc.add_heading(line, level=2)
+                    elif line.startswith('•') or line.startswith('-') or line.startswith('*'):
+                        para = doc.add_paragraph(line)
+                    else:
+                        para = doc.add_paragraph(line)
+                    
+                    # 한글 폰트 적용
+                    for run in para.runs:
+                        run.font.name = '맑은 고딕'
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                        
+        except Exception as e:
+            print(f"⚠️ 마크다운 파싱 중 오류: {e}")
+            # 오류 발생 시 일반 텍스트로 처리
+            para = doc.add_paragraph(text)
+            for run in para.runs:
+                run.font.name = '맑은 고딕'
+                run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+
+    def create_word_document_hybrid(self, result: Dict[str, Any], chart_image_path: str, output_path: str, chart_type: str = "일봉") -> bool:
+        """
+        하이브리드 방식으로 분석 결과를 Word 문서로 생성 (개별 종목용)
+        AI 피드백을 그대로 저장하여 프롬프트 변경에 유연하게 대응
+        
+        Args:
+            result (Dict[str, Any]): 분석 결과 (JSON 파싱된 구조화 데이터 또는 원본 AI 응답)
+            chart_image_path (str): 차트 이미지 경로
+            output_path (str): 저장할 Word 파일 경로
+            chart_type (str): 차트 유형 (일봉/주봉/월봉)
+            
+        Returns:
+            bool: 저장 성공 여부
+        """
+        try:
+            # 출력 디렉토리 생성
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            
+            # Word 문서 생성
+            doc = Document()
+            
+            # 한글 폰트 설정을 위한 스타일 설정
+            from docx.oxml.ns import qn
+            
+            # 제목 설정 (개별 분석 리포트)
+            title = doc.add_heading('주식 차트 분석 리포트', 0)
+            title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            # 제목에 한글 폰트 적용
+            for run in title.runs:
+                run.font.name = '맑은 고딕'
+                run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                run.font.size = Pt(14)
+            
+            # 종목 정보 (파일명에서 추출)
+            heading1 = doc.add_heading('종목 정보', level=1)
+            for run in heading1.runs:
+                run.font.name = '맑은 고딕'
+                run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+            
+            # 파일명에서 종목 정보 추출
+            filename = os.path.basename(output_path)
+            stock_name, stock_code = self.stock_mapper.extract_stock_info_from_filename(filename)
+            
+            # 종목 정보 테이블 생성
+            table = doc.add_table(rows=2, cols=4)
+            table.style = 'Table Grid'
+            
+            # 헤더 행 설정
+            header_cells = table.rows[0].cells
+            header_cells[0].text = '종목명'
+            header_cells[1].text = '종목번호'
+            header_cells[2].text = '분석일시'
+            header_cells[3].text = '차트유형'
+            
+            # 데이터 행 설정
+            data_cells = table.rows[1].cells
+            data_cells[0].text = stock_name
+            data_cells[1].text = stock_code
+            # 날짜 형식을 YY-MM-DD (ddd) HH 형태로 변경
+            now = datetime.now()
+            weekday_korean = ['월', '화', '수', '목', '금', '토', '일']
+            formatted_date = f"{now.strftime('%y.%m.%d')}({weekday_korean[now.weekday()]}) {now.strftime('%H')}시"
+            data_cells[2].text = formatted_date
+            data_cells[3].text = chart_type
+            
+            # 테이블 전체에 한글 폰트 적용
+            for row in table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        for run in paragraph.runs:
+                            run.font.name = '맑은 고딕'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+            
+            # 차트 이미지 추가
+            heading2 = doc.add_heading('차트 이미지', level=1)
+            for run in heading2.runs:
+                run.font.name = '맑은 고딕'
+                run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+            
+            if os.path.exists(chart_image_path):
+                doc.add_picture(chart_image_path, width=Inches(6))
+                doc.add_paragraph()
+            
+            
+            # AI 분석 결과 (하이브리드 방식: AI 피드백을 그대로 저장)
+            heading_analysis = doc.add_heading(f'{stock_name} 차트 분석 결과', level=1)
+            for run in heading_analysis.runs:
+                run.font.name = '맑은 고딕'
+                run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+            
+            # AI 응답 처리 (JSON 파싱 없이 원본 텍스트 그대로 저장)
+            ai_response = ""
+            print(f"🔍 DOCX 생성 디버깅: result 타입 = {type(result)}")
+            if isinstance(result, dict):
+                print(f"🔍 DOCX 생성 디버깅: result 키들 = {list(result.keys())}")
+                # JSON 파싱된 결과인 경우 원본 AI 응답 추출 시도
+                if "AI분석결과" in result:
+                    ai_response = result["AI분석결과"]
+                    print(f"🔍 DOCX 생성 디버깅: AI분석결과 찾음, 길이 = {len(ai_response)}")
+                elif "original_ai_response" in result:
+                    ai_response = result["original_ai_response"]
+                    print(f"🔍 DOCX 생성 디버깅: original_ai_response 찾음, 길이 = {len(ai_response)}")
+                elif "ai_response" in result:
+                    ai_response = result["ai_response"]
+                    print(f"🔍 DOCX 생성 디버깅: ai_response 찾음, 길이 = {len(ai_response)}")
+                else:
+                    # 구조화된 데이터를 텍스트로 변환
+                    ai_response = self._convert_structured_data_to_text(result)
+                    print(f"🔍 DOCX 생성 디버깅: 구조화된 데이터 변환, 길이 = {len(ai_response)}")
+            elif isinstance(result, str):
+                # 문자열인 경우 그대로 사용
+                ai_response = result
+                print(f"🔍 DOCX 생성 디버깅: 문자열 결과, 길이 = {len(ai_response)}")
+            else:
+                ai_response = str(result)
+                print(f"🔍 DOCX 생성 디버깅: 기타 타입 변환, 길이 = {len(ai_response)}")
+            
+            print(f"🔍 DOCX 생성 디버깅: 최종 ai_response 길이 = {len(ai_response)}")
+            
+            # AI 응답을 워드 문서에 추가 (마크다운 파싱 적용)
+            if ai_response:
+                # JSON 코드 블록 제거 (있는 경우)
+                cleaned_response = ai_response.strip()
+                if cleaned_response.startswith('```json'):
+                    cleaned_response = cleaned_response[7:]
+                elif cleaned_response.startswith('```'):
+                    cleaned_response = cleaned_response[3:]
+                if cleaned_response.endswith('```'):
+                    cleaned_response = cleaned_response[:-3]
+                cleaned_response = cleaned_response.strip()
+                
+                # 마크다운 파싱을 통해 Word 문서에 추가
+                self._parse_markdown_to_word(cleaned_response, doc)
+            else:
+                # AI 응답이 없는 경우
+                para = doc.add_paragraph("AI 분석 결과가 없습니다.")
+                for run in para.runs:
+                    run.font.name = '맑은 고딕'
+                    run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+            
+            # 문서 저장
+            doc.save(output_path)
+            print(f"📄 하이브리드 방식 Word 문서 저장 완료: {output_path}")
+            return True
+            
+        except Exception as e:
+            print(f"❌ 하이브리드 방식 Word 문서 생성 중 오류: {e}")
+            return False
+
+    def _create_fallback_result(self, stock_name: str, chart_type: str, ai_response: str, error_type: str, stock_code: str = "000000", chart_data: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
         """JSON 파싱 실패 시 대체 결과 생성"""
+        
         # 무조건 stocks 테이블에서 종목명 조회 (통일된 처리)
         if stock_code and stock_code != "000000":
             mapped_name = self.stock_mapper.get_stock_name(stock_code)
             if mapped_name != stock_code:  # DB에서 한글 종목명을 찾은 경우
                 stock_name = mapped_name
-                print(f"✅ fallback 결과에서 DB 종목명 사용: {stock_code} -> {stock_name}")
             else:
                 # DB에서도 찾지 못한 경우 종목코드를 종목명으로 사용
                 stock_name = f"알 수 없음 ({stock_code})"
-                print(f"⚠️ DB에서 종목명을 찾지 못함: {stock_code}")
         else:
             stock_name = "알 수 없음"
         
+        
+        result = {
+            "종목정보": {
+                "종목명": stock_name,
+                "종목번호": stock_code,
+                "분석일시": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "차트유형": chart_type,
+                "파싱상태": error_type
+            },
+            "AI분석결과": ai_response
+        }
+        return result
+
+    def _create_basic_fallback_result(self, stock_name: str, chart_type: str, ai_response: str, error_type: str, stock_code: str = "000000") -> Dict[str, Any]:
+        """기본 fallback 결과 생성"""
         return {
             "종목정보": {
                 "종목명": stock_name,
@@ -1021,6 +1377,9 @@ class AIChartAnalyzer:
             },
             "AI분석결과": ai_response
         }
+
+
+
 
     def save_analysis_result(self, result: Dict[str, Any], output_path: str) -> bool:
         """
@@ -1071,13 +1430,14 @@ class AIChartAnalyzer:
             # 한글 폰트 설정을 위한 스타일 설정
             from docx.oxml.ns import qn
             
-            # 제목 설정
-            title = doc.add_heading(f'AI 주식 차트 분석 통합 리포트 ({chart_type})', 0)
+            # 제목 설정 (통합 리포트)
+            title = doc.add_heading(f'주식 차트 분석 통합 리포트 ({chart_type})', 0)
             title.alignment = WD_ALIGN_PARAGRAPH.CENTER
             # 제목에 한글 폰트 적용
             for run in title.runs:
                 run.font.name = '맑은 고딕'
                 run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                run.font.size = Pt(14)
             
             # 분석 요약 정보
             heading_summary = doc.add_heading('분석 요약', level=1)
@@ -1132,6 +1492,7 @@ class AIChartAnalyzer:
                     
                     doc.add_picture(image_path, width=Inches(6))
                     doc.add_paragraph()
+                
                 
                 # 종합 분석 점수
                 if "종합분석점수" in result:
@@ -1257,7 +1618,6 @@ class AIChartAnalyzer:
                 stock_info = result.get("종목정보", {})
                 stock_name = stock_info.get("종목명", "알 수 없음")
                 stock_code = stock_info.get("종목번호", "000000")
-                
                 summary_item = {
                     "종목명": stock_name,
                     "종목번호": stock_code
@@ -1312,10 +1672,11 @@ class AIChartAnalyzer:
 
     def create_word_document(self, result: Dict[str, Any], chart_image_path: str, output_path: str, chart_type: str = "일봉") -> bool:
         """
-        분석 결과를 Word 문서로 생성 (개별 종목용)
+        분석 결과를 Word 문서로 생성 (개별 종목용) - 하이브리드 방식
+        AI 피드백을 그대로 저장하여 프롬프트 변경에 유연하게 대응
         
         Args:
-            result (Dict[str, Any]): 분석 결과
+            result (Dict[str, Any]): 분석 결과 (JSON 파싱된 구조화 데이터 또는 원본 AI 응답)
             chart_image_path (str): 차트 이미지 경로
             output_path (str): 저장할 Word 파일 경로
             chart_type (str): 차트 유형 (일봉/주봉/월봉)
@@ -1323,6 +1684,7 @@ class AIChartAnalyzer:
         Returns:
             bool: 저장 성공 여부
         """
+        print(f"🔍 create_word_document 함수 호출됨: {output_path}")
         try:
             # 출력 디렉토리 생성
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -1333,31 +1695,54 @@ class AIChartAnalyzer:
             # 한글 폰트 설정을 위한 스타일 설정
             from docx.oxml.ns import qn
             
-            # 제목 설정
-            title = doc.add_heading('AI 주식 차트 분석 리포트', 0)
+            # 제목 설정 (개별 분석 리포트)
+            title = doc.add_heading('주식 차트 분석 리포트', 0)
             title.alignment = WD_ALIGN_PARAGRAPH.CENTER
             # 제목에 한글 폰트 적용
             for run in title.runs:
                 run.font.name = '맑은 고딕'
                 run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                run.font.size = Pt(14)
             
-            # 종목 정보
+            # 종목 정보 (파일명에서 추출)
             heading1 = doc.add_heading('종목 정보', level=1)
             for run in heading1.runs:
                 run.font.name = '맑은 고딕'
                 run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
             
-            if "종목정보" in result:
-                info = result["종목정보"]
-                p1 = doc.add_paragraph(f"종목명: {info.get('종목명', 'N/A')}")
-                p2 = doc.add_paragraph(f"종목번호: {info.get('종목번호', 'N/A')}")
-                p3 = doc.add_paragraph(f"분석일시: {info.get('분석일시', 'N/A')}")
-                p4 = doc.add_paragraph(f"차트유형: {info.get('차트유형', 'N/A')}")
-                # 한글 폰트 적용
-                for p in [p1, p2, p3, p4]:
-                    for run in p.runs:
-                        run.font.name = '맑은 고딕'
-                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+            # 파일명에서 종목 정보 추출
+            filename = os.path.basename(output_path)
+            stock_name, stock_code = self.stock_mapper.extract_stock_info_from_filename(filename)
+            
+            # 종목 정보 테이블 생성
+            table = doc.add_table(rows=2, cols=4)
+            table.style = 'Table Grid'
+            
+            # 헤더 행 설정
+            header_cells = table.rows[0].cells
+            header_cells[0].text = '종목명'
+            header_cells[1].text = '종목번호'
+            header_cells[2].text = '분석일시'
+            header_cells[3].text = '차트유형'
+            
+            # 데이터 행 설정
+            data_cells = table.rows[1].cells
+            data_cells[0].text = stock_name
+            data_cells[1].text = stock_code
+            # 날짜 형식을 YY-MM-DD (ddd) HH 형태로 변경
+            now = datetime.now()
+            weekday_korean = ['월', '화', '수', '목', '금', '토', '일']
+            formatted_date = f"{now.strftime('%y.%m.%d')}({weekday_korean[now.weekday()]}) {now.strftime('%H')}시"
+            data_cells[2].text = formatted_date
+            data_cells[3].text = chart_type
+            
+            # 테이블 전체에 한글 폰트 적용
+            for row in table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        for run in paragraph.runs:
+                            run.font.name = '맑은 고딕'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
             
             # 종합 분석 점수
             if "종합분석점수" in result:
@@ -1638,6 +2023,8 @@ class AIChartAnalyzer:
             
         except Exception as e:
             print(f"❌ Word 문서 생성 중 오류: {e}")
+            import traceback
+            traceback.print_exc()
             return False
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
             
@@ -1647,13 +2034,14 @@ class AIChartAnalyzer:
             # 한글 폰트 설정을 위한 스타일 설정
             from docx.oxml.ns import qn
             
-            # 제목 설정
-            title = doc.add_heading('AI 주식 차트 분석 리포트', 0)
+            # 제목 설정 (개별 분석 리포트)
+            title = doc.add_heading('주식 차트 분석 리포트', 0)
             title.alignment = WD_ALIGN_PARAGRAPH.CENTER
             # 제목에 한글 폰트 적용
             for run in title.runs:
                 run.font.name = '맑은 고딕'
                 run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                run.font.size = Pt(14)
             
             # 종목 정보
             heading1 = doc.add_heading('종목 정보', level=1)
@@ -2411,6 +2799,18 @@ def main():
                 result = analyzer.analyze_chart_image(file_path, "", selected_chart_type)
             
             if result:
+                # 개별 분석 결과에 JSON 파일 경로 추가
+                stock_info = result.get("종목정보", {})
+                stock_name = stock_info.get("종목명", "unknown")
+                stock_code = stock_info.get("종목번호", "000000")
+                
+                # 개별 분석 JSON 파일 경로 생성
+                individual_json_filename = f"individual_analysis_{selected_chart_type}_{stock_name}_{stock_code}_{timestamp}.json"
+                individual_json_path = os.path.join(output_dir, individual_json_filename)
+                
+                # 개별 분석 결과에 JSON 파일 경로 추가
+                result["individual_analysis_file"] = individual_json_path
+                
                 analysis_results.append(result)
                 chart_image_paths.append(file_path)
                 print(f"✅ 분석 완료: {os.path.basename(file_path)}")
@@ -2429,6 +2829,17 @@ def main():
             # 통합 Word 문서 저장
             doc_filename = f"consolidated_analysis_{selected_chart_type}_{timestamp}.docx"
             doc_path = os.path.join(output_dir, doc_filename)
+            
+            # 개별 분석 JSON 파일들 저장
+            print(f"💾 개별 분석 JSON 파일들 저장 중...")
+            for result in analysis_results:
+                individual_json_path = result.get("individual_analysis_file", "")
+                if individual_json_path:
+                    json_success = analyzer.save_analysis_result(result, individual_json_path)
+                    if json_success:
+                        print(f"✅ 개별 분석 JSON 저장: {os.path.basename(individual_json_path)}")
+                    else:
+                        print(f"❌ 개별 분석 JSON 저장 실패: {os.path.basename(individual_json_path)}")
             
             # 통합 Word 문서 생성
             doc_success = analyzer.create_consolidated_word_document(
@@ -2525,12 +2936,18 @@ def main():
         doc_filename = f"analysis_{chart_type}_{stock_name}_{stock_code}_{timestamp}.docx"
         doc_path = os.path.join(output_dir, doc_filename)
         
-        # Word 문서 생성
-        doc_success = analyzer.create_word_document(result, image_path, doc_path, chart_type)
+        # JSON 파일 저장 (개별 분석 결과)
+        json_filename = f"individual_analysis_{chart_type}_{stock_name}_{stock_code}_{timestamp}.json"
+        json_path = os.path.join(output_dir, json_filename)
+        json_success = analyzer.save_analysis_result(result, json_path)
         
-        if doc_success:
+        # Word 문서 생성 (하이브리드 방식)
+        doc_success = analyzer.create_word_document_hybrid(result, image_path, doc_path, chart_type)
+        
+        if doc_success and json_success:
             print("\n✅ AI 차트 분석이 완료되었습니다!")
             print(f"📄 Word 문서 파일: {doc_path}")
+            print(f"📊 JSON 분석 결과: {json_path}")
             
             # 주요 결과 출력
             if "종합분석점수" in result:
@@ -2633,8 +3050,8 @@ def analyze_single_chart_with_data(image_path: str, json_data_path: str = "", cs
         doc_filename = f"analysis_{chart_type}_{stock_name}_{stock_code}_{timestamp}.docx"
         doc_path = os.path.join(output_dir, doc_filename)
         
-        # Word 문서 생성
-        doc_success = analyzer.create_word_document(result, image_path, doc_path, chart_type)
+        # Word 문서 생성 (하이브리드 방식)
+        doc_success = analyzer.create_word_document_hybrid(result, image_path, doc_path, chart_type)
         
         if doc_success:
             print("\n✅ AI 차트 분석이 완료되었습니다!")
@@ -2660,6 +3077,14 @@ class SummaryFileGenerator:
             db_config (dict): 데이터베이스 설정
         """
         self.db_config = db_config
+        
+        # 종목명 매퍼 초기화 (DB 기반)
+        try:
+            self.stock_mapper = StockNameMapper(db_config)
+            print("✅ 종목명 매퍼 초기화 완료")
+        except Exception as e:
+            print(f"⚠️ 종목명 매퍼 초기화 실패: {e}")
+            self.stock_mapper = None
         
         # 프롬프트 관리자 초기화
         if db_config:
@@ -2837,52 +3262,32 @@ class SummaryFileGenerator:
                 "종목별요약": []
             }
             
-            # 각 종목별 핵심 정보 추출
+            # 각 종목별 핵심 정보 추출 (하이브리드 방식: 파일명에서 기본 정보만 추출)
             for result in analysis_results:
                 try:
-                    stock_info = result.get("종목정보", {})
-                    stock_name = stock_info.get("종목명", "알 수 없음")
-                    stock_code = stock_info.get("종목번호", "000000")
+                    # 파일 정보에서 종목 정보 추출
+                    file_info = result.get("_file_info", {})
+                    file_name = file_info.get("file_name", "")
+                    
+                    # 파일명에서 종목 정보 추출
+                    stock_name, stock_code = self.stock_mapper.extract_stock_info_from_filename(file_name)
                     
                     summary_item = {
                         "종목명": stock_name,
                         "종목번호": stock_code,
-                        "분석일시": stock_info.get("분석일시", "N/A")
+                        "분석일시": file_info.get("loaded_at", "N/A"),
+                        "파일명": file_name
                     }
                     
-                    # 차트 유형별 주요 정보 추출 (한글 차트 타입 사용)
-                    if chart_type_kr == "일봉" and "오늘의일봉" in result:
-                        candle_data = result["오늘의일봉"]
-                        summary_item["주요정보"] = {
-                            "종가": candle_data.get("종가", "N/A"),
-                            "등락률": candle_data.get("등락률", "N/A"),
-                            "거래량": candle_data.get("거래량", "N/A")
-                        }
-                    elif chart_type_kr == "주봉" and "이번주봉" in result:
-                        candle_data = result["이번주봉"]
-                        summary_item["주요정보"] = {
-                            "종가": candle_data.get("종가", "N/A"),
-                            "등락률": candle_data.get("등락률", "N/A"),
-                            "거래량": candle_data.get("거래량", "N/A")
-                        }
-                    elif chart_type_kr == "월봉" and "이번월봉" in result:
-                        candle_data = result["이번월봉"]
-                        summary_item["주요정보"] = {
-                            "종가": candle_data.get("종가", "N/A"),
-                            "등락률": candle_data.get("등락률", "N/A"),
-                            "거래량": candle_data.get("거래량", "N/A")
-                        }
+                    # 하이브리드 방식: 상세 정보는 개별 워드 파일에서 확인하도록 안내
+                    summary_item["주요정보"] = {
+                        "상세분석": "개별 워드 파일에서 확인 가능",
+                        "파일경로": file_info.get("file_path", "N/A"),
+                        "개별분석JSON": result.get("individual_analysis_file", "N/A")
+                    }
                     
-                    # 투자 아이디어 추출 (한글 차트 타입 사용)
-                    if chart_type_kr == "일봉" and "단기투자아이디어" in result:
-                        idea = result["단기투자아이디어"]
-                        summary_item["투자아이디어"] = idea.get("매매시그널", "N/A")
-                    elif chart_type_kr == "주봉" and "중기투자아이디어" in result:
-                        idea = result["중기투자아이디어"]
-                        summary_item["투자아이디어"] = idea.get("매매시그널", "N/A")
-                    elif chart_type_kr == "월봉" and "장기투자아이디어" in result:
-                        idea = result["장기투자아이디어"]
-                        summary_item["투자아이디어"] = idea.get("투자전략", "N/A")
+                    # 투자 아이디어도 개별 워드 파일에서 확인하도록 안내
+                    summary_item["투자아이디어"] = "개별 워드 파일에서 확인 가능"
                     
                     summary_data["종목별요약"].append(summary_item)
                     
@@ -2890,11 +3295,48 @@ class SummaryFileGenerator:
                     print(f"⚠️ 종목별 요약 추출 실패: {e}")
                     continue
             
-            # AI 요약 분석 실행
+            # AI 요약 분석 실행 (하이브리드 방식: 개별 분석 텍스트를 직접 요약)
             if self.analyzer:
-                # 요약 프롬프트에 데이터 추가
-                formatted_prompt = summary_prompt + f"\n\n분석 데이터:\n{json.dumps(summary_data, ensure_ascii=False, indent=2)}\n\n"
-                formatted_prompt += "위 데이터를 바탕으로 전체적인 시장 동향과 주요 투자 포인트를 요약해주세요."
+                # 개별 분석 결과에서 AI 응답 텍스트 수집
+                individual_analysis_texts = []
+                for result in analysis_results:
+                    try:
+                        # AI 응답 텍스트 추출
+                        ai_response = ""
+                        if isinstance(result, dict):
+                            if "original_ai_response" in result:
+                                ai_response = result["original_ai_response"]
+                            elif "ai_response" in result:
+                                ai_response = result["ai_response"]
+                            else:
+                                # 구조화된 데이터를 텍스트로 변환
+                                ai_response = self._convert_structured_data_to_text(result)
+                        elif isinstance(result, str):
+                            ai_response = result
+                        else:
+                            ai_response = str(result)
+                        
+                        if ai_response:
+                            # 파일 정보 추가
+                            file_info = result.get("_file_info", {})
+                            file_name = file_info.get("file_name", "unknown")
+                            stock_name, stock_code = self.stock_mapper.extract_stock_info_from_filename(file_name)
+                            
+                            individual_analysis_texts.append(f"=== {stock_name} ({stock_code}) ===\n{ai_response}\n")
+                            
+                    except Exception as e:
+                        print(f"⚠️ 개별 분석 텍스트 추출 실패: {e}")
+                        continue
+                
+                # 요약 프롬프트에 개별 분석 텍스트 추가
+                if individual_analysis_texts:
+                    all_analysis_text = "\n".join(individual_analysis_texts)
+                    formatted_prompt = summary_prompt + f"\n\n개별 분석 결과들:\n{all_analysis_text}\n\n"
+                    formatted_prompt += "위 개별 분석 결과들을 바탕으로 전체적인 시장 동향과 주요 투자 포인트를 요약해주세요."
+                else:
+                    # 개별 분석 텍스트가 없는 경우 기본 데이터 사용
+                    formatted_prompt = summary_prompt + f"\n\n분석 데이터:\n{json.dumps(summary_data, ensure_ascii=False, indent=2)}\n\n"
+                    formatted_prompt += "위 데이터를 바탕으로 전체적인 시장 동향과 주요 투자 포인트를 요약해주세요."
                 
                 # AI 텍스트 분석 실행
                 ai_result = self.analyzer.analyze_text_with_prompt(formatted_prompt)
@@ -2910,7 +3352,7 @@ class SummaryFileGenerator:
                         },
                         "market_summary": ai_result,
                         "stock_details": summary_data["종목별요약"],
-                        "raw_analysis_count": len(analysis_results)
+                        "raw_analysis_count": len(analysis_results),
                     }
                     
                     print(f"✅ {chart_type_kr} 통합 요약 생성 완료")
@@ -3049,17 +3491,187 @@ class SummaryFileGenerator:
             for run in title.runs:
                 run.font.name = '맑은 고딕'
                 run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                run.font.size = Pt(14)
             
-            # 요약 개요
+            # 요약 개요 테이블 생성
             doc.add_heading('📊 분석 개요', level=1)
-            doc.add_paragraph(f'• 차트 유형: {chart_type}')
-            doc.add_paragraph(f'• 분석 종목 수: {total_stocks}개')
-            doc.add_paragraph(f'• 생성일시: {generated_at}')
+            
+            # 분석 개요 테이블 생성
+            table = doc.add_table(rows=2, cols=3)
+            table.style = 'Table Grid'
+            
+            # 헤더 행 설정
+            header_cells = table.rows[0].cells
+            header_cells[0].text = '차트 유형'
+            header_cells[1].text = '분석 종목 수'
+            header_cells[2].text = '생성일시'
+            
+            # 데이터 행 설정
+            data_cells = table.rows[1].cells
+            data_cells[0].text = chart_type
+            data_cells[1].text = f'{total_stocks}개'
+            # 날짜 형식을 YY-MM-DD (ddd) HH 형태로 변경
+            now = datetime.now()
+            weekday_korean = ['월', '화', '수', '목', '금', '토', '일']
+            formatted_date = f"{now.strftime('%y.%m.%d')}({weekday_korean[now.weekday()]}) {now.strftime('%H')}시"
+            data_cells[2].text = formatted_date
+            
+            # 테이블 전체에 한글 폰트 적용
+            for row in table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        for run in paragraph.runs:
+                            run.font.name = '맑은 고딕'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+            
+            # 분석 개요 설명 추가 (일봉 분석에만 적용)
+            if chart_type == "일봉":
+                # summary_daily에서 최신거래일 정보 추출
+                latest_trading_date = None
+                formatted_date_desc = "최근 거래일 기준"  # 기본값
+                
+                # summary_daily JSON 파일에서 market_summary의 분석_결과에서 최신거래일 추출
+                analysis_result = ""
+                
+                # summary_daily JSON 파일 경로 찾기
+                try:
+                    # consolidated_result에서 summary_daily 파일 경로 추출
+                    summary_meta = consolidated_result.get("summary_meta", {})
+                    generated_at = summary_meta.get("generated_at", "")
+                    
+                    if generated_at:
+                        # generated_at에서 날짜 부분 추출하여 summary_daily 파일 경로 생성
+                        date_part = generated_at.split()[0].replace("-", "")
+                        time_part = generated_at.split()[1].replace(":", "")[:6]
+                        
+                        # summary_daily 파일 경로 패턴: summary_daily_YYYYMMDD_HHMMSS.json
+                        summary_file_pattern = f"summary_daily_{date_part}_{time_part}.json"
+                        
+                        # results 폴더에서 summary_daily 파일 찾기
+                        import glob
+                        results_dir = "results"
+                        summary_files = glob.glob(f"{results_dir}/**/summary_daily_*.json", recursive=True)
+                        
+                        # 가장 최근 파일 찾기
+                        if summary_files:
+                            latest_summary_file = max(summary_files, key=os.path.getctime)
+                            
+                            # JSON 파일 읽기
+                            with open(latest_summary_file, 'r', encoding='utf-8') as f:
+                                summary_data = json.load(f)
+                                market_summary = summary_data.get("market_summary", {})
+                                analysis_result = market_summary.get("분석_결과", "")
+                                print(f"✅ summary_daily 파일에서 분석_결과 추출: {latest_summary_file}")
+                        else:
+                            print("⚠️ summary_daily JSON 파일을 찾을 수 없습니다.")
+                    else:
+                        print("⚠️ generated_at 정보가 없어 summary_daily 파일을 찾을 수 없습니다.")
+                        
+                except Exception as e:
+                    print(f"⚠️ summary_daily 파일 읽기 실패: {e}")
+                    analysis_result = ""
+                
+                # "(최근거래일: YYYY-MM-DD)" 패턴에서 날짜 추출
+                import re
+                pattern = r"\(최근거래일: (\d{4})-(\d{1,2})-(\d{1,2})\)"
+                match = re.search(pattern, analysis_result)
+                
+                if match:
+                    year, month, day = match.groups()
+                    try:
+                        # YYYY-MM-DD 형식으로 변환
+                        latest_trading_date = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+                    except:
+                        pass
+                
+                if latest_trading_date:
+                    try:
+                        # 최신거래일에서 날짜 추출 (YYYY-MM-DD 형식)
+                        analysis_date = datetime.strptime(latest_trading_date, "%Y-%m-%d")
+                        formatted_date_desc = f"{analysis_date.strftime('%m')}월 {analysis_date.strftime('%d')}일"
+                    except:
+                        # 파싱 실패 시 기본값 유지
+                        formatted_date_desc = "최근 거래일 기준"
+                # latest_trading_date가 없으면 이미 기본값 "최근 거래일 기준"이 설정되어 있음
+                
+                overview_desc = f"{formatted_date_desc} 거래량 기준 상위 50개 종목의 일봉 차트를 분석한 결과, 특이사항을 나타낸 종목은 아래와 같습니다. 핵심내용만 요약하여 제공해드리고, 자세한 내용은 첨부파일의 개별 종목별 차트분석 결과를 참고하시기 바랍니다."
+                
+                para_desc = doc.add_paragraph(overview_desc)
+                for run in para_desc.runs:
+                    run.font.name = '맑은 고딕'
+                    run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+            
+            # 마크다운 파싱 함수 정의
+            def _parse_markdown_to_word(text: str, doc) -> None:
+                """
+                마크다운 텍스트를 Word 문서 형식으로 파싱하여 추가
+                
+                Args:
+                    text (str): 마크다운 형태의 텍스트
+                    doc: Word 문서 객체
+                """
+                try:
+                    import re
+                    
+                    # **내용** 형태를 볼드체로 변환하는 정규식
+                    bold_pattern = r'\*\*(.*?)\*\*'
+                    
+                    # 줄바꿈으로 분리
+                    lines = text.split('\n')
+                    
+                    for line in lines:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        
+                        # **내용** 패턴을 찾아서 볼드체로 변환
+                        if re.search(bold_pattern, line):
+                            # 볼드체가 포함된 줄 처리
+                            para = doc.add_paragraph()
+                            
+                            # **내용** 패턴으로 분할
+                            parts = re.split(bold_pattern, line)
+                            
+                            for i, part in enumerate(parts):
+                                if i % 2 == 0:
+                                    # 일반 텍스트
+                                    if part:
+                                        run = para.add_run(part)
+                                        run.font.name = '맑은 고딕'
+                                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                                else:
+                                    # 볼드체 텍스트
+                                    if part:
+                                        run = para.add_run(part)
+                                        run.font.name = '맑은 고딕'
+                                        run.bold = True
+                                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                        else:
+                            # 볼드체가 없는 일반 줄 처리
+                            if line.startswith('📊') or line.startswith('📈') or line.startswith('📉') or line.startswith('💡') or line.startswith('🔍') or line.startswith('⚠️') or line.startswith('✅'):
+                                para = doc.add_heading(line, level=2)
+                            elif line.startswith('•') or line.startswith('-') or line.startswith('*'):
+                                para = doc.add_paragraph(line)
+                            else:
+                                para = doc.add_paragraph(line)
+                            
+                            # 한글 폰트 적용
+                            for run in para.runs:
+                                run.font.name = '맑은 고딕'
+                                run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                                
+                except Exception as e:
+                    print(f"⚠️ 마크다운 파싱 중 오류: {e}")
+                    # 오류 발생 시 일반 텍스트로 처리
+                    para = doc.add_paragraph(text)
+                    for run in para.runs:
+                        run.font.name = '맑은 고딕'
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
             
             # AI 시장 요약
             market_summary = consolidated_result.get("market_summary", {})
             if market_summary:
-                doc.add_heading('🤖 AI 시장 분석 요약', level=1)
+                doc.add_heading('🤖 시장 분석 요약', level=1)
                 
                 analysis_result = market_summary.get("분석_결과", "")
                 if analysis_result:
@@ -3134,64 +3746,45 @@ class SummaryFileGenerator:
                                     run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
                                     
                         except json.JSONDecodeError:
-                            # JSON 파싱 실패 시 원본 텍스트를 줄바꿈으로 처리
-                            lines = cleaned_analysis.split('\n')
-                            for line in lines:
-                                line = line.strip()
-                                if line:
-                                    para = doc.add_paragraph(line)
-                                    for run in para.runs:
-                                        run.font.name = '맑은 고딕'
-                                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                            # JSON 파싱 실패 시 마크다운 파싱 적용
+                            _parse_markdown_to_word(cleaned_analysis, doc)
                     else:
-                        # JSON이 아닌 경우 기존 로직 사용
-                        lines = cleaned_analysis.split('\n')
-                        for line in lines:
-                            line = line.strip()
-                            if line:
-                                if line.startswith('📈') or line.startswith('📉') or line.startswith('🌍') or line.startswith('💼'):
-                                    # 섹션 헤더인 경우
-                                    doc.add_heading(line, level=2)
-                                elif line.startswith('•') or line.startswith('-'):
-                                    # 리스트 항목인 경우
-                                    doc.add_paragraph(line)
-                                else:
-                                    # 일반 텍스트인 경우
-                                    doc.add_paragraph(line)
+                        # JSON이 아닌 경우 마크다운 파싱 적용
+                        _parse_markdown_to_word(cleaned_analysis, doc)
                 else:
                     doc.add_paragraph("AI 분석 결과가 없습니다.")
             
-            # 종목별 상세 정보 (상위 10개만)
-            stock_details = consolidated_result.get("stock_details", [])
-            if stock_details:
-                doc.add_heading('📈 주요 종목별 분석 결과 (상위 10개)', level=1)
-                
-                for i, stock in enumerate(stock_details[:10], 1):
-                    stock_name = stock.get("종목명", "N/A")
-                    stock_code = stock.get("종목번호", "N/A")
-                    
-                    doc.add_heading(f'{i}. {stock_name} ({stock_code})', level=2)
-                    
-                    # 주요 정보
-                    main_info = stock.get("주요정보", {})
-                    if main_info:
-                        doc.add_paragraph('📊 주요 지표:')
-                        for key, value in main_info.items():
-                            doc.add_paragraph(f'   • {key}: {value}')
-                    
-                    # 투자 아이디어
-                    investment_idea = stock.get("투자아이디어", "N/A")
-                    if investment_idea != "N/A":
-                        doc.add_paragraph(f'💡 투자 아이디어: {investment_idea}')
-                    
-                    # 구분선 추가 (마지막 종목 제외)
-                    if i < min(len(stock_details), 10):
-                        doc.add_paragraph('─' * 50)
+            # 종목별 상세 정보 (상위 10개만) - 주석 처리됨
+            # stock_details = consolidated_result.get("stock_details", [])
+            # if stock_details:
+            #     doc.add_heading('📈 주요 종목별 분석 결과 (상위 10개)', level=1)
+            #     
+            #     for i, stock in enumerate(stock_details[:10], 1):
+            #         stock_name = stock.get("종목명", "N/A")
+            #         stock_code = stock.get("종목번호", "N/A")
+            #         
+            #         doc.add_heading(f'{i}. {stock_name} ({stock_code})', level=2)
+            #         
+            #         # 주요 정보
+            #         main_info = stock.get("주요정보", {})
+            #         if main_info:
+            #             doc.add_paragraph('📊 주요 지표:')
+            #             for key, value in main_info.items():
+            #                 doc.add_paragraph(f'   • {key}: {value}')
+            #         
+            #         # 투자 아이디어
+            #         investment_idea = stock.get("투자아이디어", "N/A")
+            #         if investment_idea != "N/A":
+            #             doc.add_paragraph(f'💡 투자 아이디어: {investment_idea}')
+            #         
+            #         # 구분선 추가 (마지막 종목 제외)
+            #         if i < min(len(stock_details), 10):
+            #             doc.add_paragraph('─' * 50)
             
             # 통계 정보
-            doc.add_heading('📊 분석 통계', level=1)
-            doc.add_paragraph(f'• 총 분석 파일 수: {consolidated_result.get("raw_analysis_count", 0)}개')
-            doc.add_paragraph(f'• 요약 방법: {meta.get("summary_method", "N/A")}')
+            # doc.add_heading('📊 분석 통계', level=1)
+            # doc.add_paragraph(f'• 총 분석 파일 수: {consolidated_result.get("raw_analysis_count", 0)}개')
+            # doc.add_paragraph(f'• 요약 방법: {meta.get("summary_method", "N/A")}')
             
             # 한글 폰트 적용 (모든 단락)
             for paragraph in doc.paragraphs:
@@ -3276,6 +3869,66 @@ class SummaryFileGenerator:
         except Exception as e:
             print(f"❌ 전체 요약 생성 중 오류: {e}")
             return {}
+
+    def create_consolidated_summary_from_files(self, chart_type: str, file_paths: list) -> Optional[Dict[str, str]]:
+        """
+        특정 파일들로부터 요약 분석 실행
+        
+        Args:
+            chart_type (str): 차트 유형 ("daily", "weekly", "monthly")
+            file_paths (list): 분석할 JSON 파일 경로들
+            
+        Returns:
+            Optional[Dict[str, str]]: 생성된 파일 경로들 {"json_path": "...", "docx_path": "..."}
+        """
+        try:
+            print(f"🔍 {chart_type} 특정 파일들로 요약 분석 중... (파일 수: {len(file_paths)})")
+            
+            if not file_paths:
+                print(f"⚠️ 분석할 파일이 없습니다.")
+                return None
+            
+            # 1. 파일 경로들을 차트 유형별로 그룹화
+            chart_results = {chart_type: file_paths}
+            
+            # 2. 분석 결과 로딩
+            print(f"📄 분석 결과 로딩 중: {len(file_paths)}개 파일")
+            analysis_data = self.load_analysis_results(file_paths)
+            if not analysis_data:
+                print(f"❌ 분석 결과 로딩 실패")
+                return None
+            
+            print(f"✅ 분석 결과 로딩 완료: {len(analysis_data)}개 성공")
+            
+            # 3. 통합 요약 생성
+            print(f"🤖 {chart_type} 통합 요약 생성 중...")
+            summary_result = self.generate_consolidated_summary(analysis_data, chart_type)
+            
+            if summary_result:
+                print(f"✅ {chart_type} 통합 요약 생성 완료")
+                
+                # 4. 파일 저장
+                print(f"💾 요약 파일 저장 중...")
+                json_path, docx_path, success = self.save_summary_files(summary_result, chart_type)
+                
+                if success:
+                    print(f"✅ 요약 파일 저장 완료")
+                    return {
+                        "json_path": json_path,
+                        "docx_path": docx_path
+                    }
+                else:
+                    print(f"❌ 요약 파일 저장 실패")
+                    return None
+            else:
+                print(f"❌ {chart_type} 통합 요약 생성 실패")
+                return None
+                
+        except Exception as e:
+            print(f"❌ {chart_type} 요약 분석 중 오류: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
 
     def create_consolidated_summary_by_type(self, chart_type: str) -> Optional[Dict[str, str]]:
         """
@@ -3408,18 +4061,45 @@ def create_consolidated_analysis(analysis_results: list, chart_type: str) -> dic
         successful_count = 0
         
         for result in analysis_results:
-            if result.get("success", False):
+            # 개별 분석 결과에서 성공 여부 확인
+            success = False
+            if isinstance(result, dict):
+                # 종합분석점수가 있으면 성공으로 간주
+                if "종합분석점수" in result:
+                    success = True
+                # 또는 success 키가 있으면 그 값 사용
+                elif "success" in result:
+                    success = result["success"]
+            
+            if success:
                 successful_count += 1
-                score = result.get("analysis_score", 0)
+                
+                # 분석 점수 추출
+                score = 0
+                if "종합분석점수" in result:
+                    score_info = result["종합분석점수"]
+                    if isinstance(score_info, dict):
+                        score = score_info.get("점수", 0)
+                    else:
+                        score = score_info
+                elif "analysis_score" in result:
+                    score = result["analysis_score"]
+                
                 total_score += score
+                
+                # 종목 정보 추출
+                stock_info = result.get("종목정보", {})
+                stock_code = stock_info.get("종목번호", result.get("stock_code", "000000"))
+                stock_name = stock_info.get("종목명", result.get("stock_name", "unknown"))
                 
                 # AI 분석 데이터가 있는 경우 포함
                 individual_result = {
-                    "stock_code": result.get("stock_code"),
-                    "stock_name": result.get("stock_name", ""),
+                    "stock_code": stock_code,
+                    "stock_name": stock_name,
                     "analysis_score": score,
                     "success": True,
-                    "timestamp": result.get("timestamp", "")
+                    "timestamp": result.get("timestamp", datetime.now().isoformat()),
+                    "individual_analysis_file": result.get("individual_analysis_file", "")
                 }
                 
                 if "ai_analysis_data" in result:
@@ -3428,13 +4108,18 @@ def create_consolidated_analysis(analysis_results: list, chart_type: str) -> dic
                 consolidated_result["individual_results"].append(individual_result)
             else:
                 # 실패한 경우
+                stock_info = result.get("종목정보", {}) if isinstance(result, dict) else {}
+                stock_code = stock_info.get("종목번호", result.get("stock_code", "000000")) if isinstance(result, dict) else "000000"
+                stock_name = stock_info.get("종목명", result.get("stock_name", "unknown")) if isinstance(result, dict) else "unknown"
+                
                 consolidated_result["individual_results"].append({
-                    "stock_code": result.get("stock_code"),
-                    "stock_name": result.get("stock_name", ""),
+                    "stock_code": stock_code,
+                    "stock_name": stock_name,
                     "analysis_score": 0,
                     "success": False,
-                    "error": result.get("error", ""),
-                    "timestamp": result.get("timestamp", "")
+                    "error": result.get("error", "분석 실패") if isinstance(result, dict) else "분석 실패",
+                    "timestamp": result.get("timestamp", datetime.now().isoformat()) if isinstance(result, dict) else datetime.now().isoformat(),
+                    "individual_analysis_file": result.get("individual_analysis_file", "") if isinstance(result, dict) else ""
                 })
         
         # 요약 통계 업데이트
@@ -3475,6 +4160,7 @@ def create_consolidated_word_document(consolidated_result: dict, chart_type: str
         for run in title.runs:
             run.font.name = '맑은 고딕'
             run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+            run.font.size = Pt(14)
         
         # 분석 개요
         doc.add_heading('📊 분석 개요', level=1)
@@ -3531,6 +4217,7 @@ def create_summary_document(consolidated_result: dict, chart_type: str, output_p
     Returns:
         bool: 생성 성공 여부
     """
+    
     try:
         from docx import Document
         from docx.shared import Inches, Pt
@@ -3545,6 +4232,7 @@ def create_summary_document(consolidated_result: dict, chart_type: str, output_p
         for run in title.runs:
             run.font.name = '맑은 고딕'
             run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+            run.font.size = Pt(14)
         
         # 분석 개요
         doc.add_heading('📊 분석 개요', level=1)

@@ -1,0 +1,10 @@
+[33m0901c81[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m Fix: 중지 버튼에서 DB 상태도 함께 업데이트하도록 개선
+[33mb10d5ad[m Debug: 백그라운드 수집 작업 로그 강화
+[33mf3e2350[m Fix: 웹 인터페이스에서 장중 시간 체크 건너뛰기 및 수집 작업 정리 스크립트 추가
+[33m10a9f38[m 자동 사용자 변환 기능 비활성화 - root 사용자 설정 유지
+[33me3baae9[m DB 연결 실패 시에도 애플리케이션 계속 실행하도록 개선
+[33mec3c834[m MySQL auth_socket 우회를 위한 대안 사용자 설정 및 생성 스크립트 추가
+[33ma9d74be[m MySQL auth_socket 문제 해결을 위한 데이터베이스 설정 개선
+[33ma9ad8ca[m Test safe code-only deployment system
+[33m4ccb8a3[m Complete CI/CD alternative solutions for free server environment
+[33mff24dc9[m Enable CI/CD with 1GB swap file for safe deployment

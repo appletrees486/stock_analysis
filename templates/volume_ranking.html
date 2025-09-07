@@ -733,7 +733,8 @@
             const periodText = currentPeriod === 'daily' ? '일간' : currentPeriod === 'weekly' ? '주간' : '월간';
             const rankingText = currentRankingType === 'volume' ? '거래량' : '거래률';
             const dateText = getCurrentDateText();
-            const filename = `${periodText}_${rankingText}_랭킹_${dateText}.txt`;
+            const periodRange = getSelectedPeriodRange();
+            const filename = `${periodRange}_${periodText}_${rankingText}_랭킹_${dateText}.txt`;
             
             // txt 파일 생성 및 다운로드
             const content = stockCodes.join('\n');
@@ -749,6 +750,54 @@
             URL.revokeObjectURL(url);
             
             showMessage(`${stockCodes.length}개 종목 코드가 포함된 파일이 다운로드되었습니다.`, 'success');
+        }
+        
+        // 선택된 기간 범위 텍스트 생성
+        function getSelectedPeriodRange() {
+            if (currentPeriod === 'daily') {
+                // 일간: 선택된 날짜 (예: 9월2일)
+                const dateInput = document.getElementById('dailyDate');
+                if (dateInput && dateInput.value) {
+                    const date = new Date(dateInput.value);
+                    const month = date.getMonth() + 1;
+                    const day = date.getDate();
+                    return `${month}월${day}일`;
+                }
+                return '일간';
+            } else if (currentPeriod === 'weekly') {
+                // 주간: 시작일_종료일 (예: 9월2일_9월6일)
+                const weekInput = document.getElementById('weeklyDate');
+                if (weekInput && weekInput.value) {
+                    const year = parseInt(weekInput.value.substring(0, 4));
+                    const week = parseInt(weekInput.value.substring(6));
+                    
+                    // 주의 시작일 계산 (월요일)
+                    const startDate = new Date(year, 0, 1);
+                    const dayOfWeek = startDate.getDay();
+                    const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+                    const firstMonday = new Date(year, 0, 1 + (7 - daysToMonday));
+                    const startOfWeek = new Date(firstMonday.getTime() + (week - 1) * 7 * 24 * 60 * 60 * 1000);
+                    const endOfWeek = new Date(startOfWeek.getTime() + 6 * 24 * 60 * 60 * 1000);
+                    
+                    const startMonth = startOfWeek.getMonth() + 1;
+                    const startDay = startOfWeek.getDate();
+                    const endMonth = endOfWeek.getMonth() + 1;
+                    const endDay = endOfWeek.getDate();
+                    
+                    return `${startMonth}월${startDay}일_${endMonth}월${endDay}일`;
+                }
+                return '주간';
+            } else if (currentPeriod === 'monthly') {
+                // 월간: 조회월 (예: 9월)
+                const monthInput = document.getElementById('monthlyDate');
+                if (monthInput && monthInput.value) {
+                    const year = parseInt(monthInput.value.substring(0, 4));
+                    const month = parseInt(monthInput.value.substring(5, 7));
+                    return `${month}월`;
+                }
+                return '월간';
+            }
+            return '';
         }
         
         // 현재 날짜 텍스트 생성

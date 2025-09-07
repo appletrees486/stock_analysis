@@ -133,9 +133,12 @@ class StockDataCollector:
     def get_all_stock_codes(self):
         """데이터베이스에서 모든 종목 코드 조회"""
         try:
-            if not self.db.connect():
-                logging.error("데이터베이스 연결 실패")
-                return []
+            # DB 연결 상태 확인 (이미 연결되어 있어야 함)
+            if not self.db.is_connected():
+                logging.warning("⚠️ DB 연결이 끊어져 있습니다. 재연결 시도...")
+                if not self.db.connect():
+                    logging.error("데이터베이스 연결 실패")
+                    return []
             
             query = "SELECT stock_code, stock_name FROM stocks WHERE is_active = TRUE ORDER BY stock_code"
             result = self.db.fetch_all(query)
@@ -152,14 +155,18 @@ class StockDataCollector:
             logging.error(f"종목 코드 조회 실패: {e}")
             return []
         finally:
-            self.db.disconnect()
+            # DB 연결은 배치 단위로 관리하므로 여기서는 해제하지 않음
+            pass
     
     def get_stock_by_code(self, stock_code):
         """특정 종목 코드로 종목 정보 조회"""
         try:
-            if not self.db.connect():
-                logging.error("데이터베이스 연결 실패")
-                return None
+            # DB 연결 상태 확인 (이미 연결되어 있어야 함)
+            if not self.db.is_connected():
+                logging.warning("⚠️ DB 연결이 끊어져 있습니다. 재연결 시도...")
+                if not self.db.connect():
+                    logging.error("데이터베이스 연결 실패")
+                    return None
             
             query = "SELECT stock_code, stock_name FROM stocks WHERE stock_code = %s AND is_active = TRUE"
             result = self.db.fetch_one(query, (stock_code,))
@@ -176,7 +183,8 @@ class StockDataCollector:
             logging.error(f"종목 {stock_code} 정보 조회 실패: {e}")
             return None
         finally:
-            self.db.disconnect()
+            # DB 연결은 배치 단위로 관리하므로 여기서는 해제하지 않음
+            pass
 
     def calculate_technical_indicators(self, df):
         """기술적 지표 계산"""
@@ -280,9 +288,12 @@ class StockDataCollector:
     def get_last_collected_date(self, stock_code):
         """특정 종목의 마지막 수집 날짜 조회 - daily_data 테이블 우선 확인"""
         try:
-            if not self.db.connect():
-                logging.error("데이터베이스 연결 실패")
-                return None
+            # DB 연결 상태 확인 (이미 연결되어 있어야 함)
+            if not self.db.is_connected():
+                logging.warning("⚠️ DB 연결이 끊어져 있습니다. 재연결 시도...")
+                if not self.db.connect():
+                    logging.error("데이터베이스 연결 실패")
+                    return None
             
             # 1. daily_data 테이블에서 실제 데이터 확인 (우선순위)
             daily_query = """
@@ -325,13 +336,17 @@ class StockDataCollector:
             logging.error(f"{stock_code} 마지막 수집 날짜 조회 실패: {e}")
             return None
         finally:
-            self.db.disconnect()
+            # DB 연결은 배치 단위로 관리하므로 여기서는 해제하지 않음
+            pass
     
     def get_last_collection_timestamp(self, stock_code):
         """마지막 수집 시간 정보 조회 (전일 데이터 품질 검증용)"""
         try:
-            if not self.db.connect():
-                return None
+            # DB 연결 상태 확인 (이미 연결되어 있어야 함)
+            if not self.db.is_connected():
+                logging.warning("⚠️ DB 연결이 끊어져 있습니다. 재연결 시도...")
+                if not self.db.connect():
+                    return None
             
             query = """
             SELECT last_collected_timestamp, last_collected_date
@@ -351,7 +366,8 @@ class StockDataCollector:
             logging.error(f"수집 시간 정보 조회 실패: {e}")
             return None
         finally:
-            self.db.disconnect()
+            # DB 연결은 배치 단위로 관리하므로 여기서는 해제하지 않음
+            pass
     
     def is_intraday_collection(self, collection_info):
         """장중에 수집된 데이터인지 확인"""
@@ -642,8 +658,14 @@ class StockDataCollector:
             # PyKrx로 증분 데이터 조회 (최적화된 방식)
             try:
                 # 1차 시도: 개별 종목 조회
+                # start_date가 문자열인 경우 datetime으로 변환
+                if isinstance(start_date, str):
+                    start_date_obj = datetime.strptime(start_date, '%Y%m%d')
+                else:
+                    start_date_obj = start_date
+                
                 hist = stock.get_market_ohlcv_by_date(
-                    fromdate=start_date.strftime('%Y%m%d'),
+                    fromdate=start_date_obj.strftime('%Y%m%d'),
                     todate=end_date.strftime('%Y%m%d'),
                     ticker=stock_code
                 )
@@ -673,7 +695,7 @@ class StockDataCollector:
                 
                 # 개별 종목 증분 데이터 조회 (PyKrx의 권장 방식)
                 market_data = stock.get_market_ohlcv_by_date(
-                    fromdate=start_date.strftime('%Y%m%d'),
+                    fromdate=start_date_obj.strftime('%Y%m%d'),
                     todate=end_date.strftime('%Y%m%d'),
                     ticker=stock_code
                 )
@@ -705,10 +727,11 @@ class StockDataCollector:
         """종목의 시장 구분 반환 (KOSPI/KOSDAQ) - 성능 최적화"""
         try:
             # 1차 시도: 데이터베이스에서 시장 구분 조회
-            if self.db.connect():
+            # DB 연결 상태 확인 (이미 연결되어 있어야 함)
+            if self.db.is_connected():
                 query = "SELECT market_type FROM stocks WHERE stock_code = %s"
                 result = self.db.fetch_one(query, (stock_code,))
-                self.db.disconnect()
+                # DB 연결은 배치 단위로 관리하므로 여기서는 해제하지 않음
                 
                 if result and result['market_type']:
                     return result['market_type']
@@ -835,12 +858,18 @@ class StockDataCollector:
     def save_daily_data(self, stock_code, hist_data):
         """일봉 데이터와 유통주식수, 시가총액을 함께 데이터베이스에 저장"""
         try:
-            if hist_data is None or hist_data.empty:
+            if hist_data is None:
+                logging.warning(f"⚠️ {stock_code} hist_data가 None입니다")
+                return False
+            if hist_data.empty:
+                logging.warning(f"⚠️ {stock_code} hist_data가 비어있습니다")
                 return False
             
-            # 데이터베이스 연결
-            if not self.db.connect():
-                return False
+            # DB 연결 상태 확인 (이미 연결되어 있어야 함)
+            if not self.db.is_connected():
+                logging.warning("⚠️ DB 연결이 끊어져 있습니다. 재연결 시도...")
+                if not self.db.connect():
+                    return False
             
             # 유통주식수 정보 조회 (PyKrx에서)
             shares_info = self.get_stock_shares_info_from_pykrx(stock_code, "")
@@ -860,6 +889,8 @@ class StockDataCollector:
             """
             
             daily_data = []
+            logging.info(f"📊 {stock_code} 데이터 처리 시작: {len(hist_data)}행")
+            
             for date, row in hist_data.iterrows():
                 # NaN 값 처리
                 open_price = row['Open'] if pd.notna(row['Open']) else None
@@ -903,31 +934,40 @@ class StockDataCollector:
                     market_cap
                 ))
             
-            if daily_data and self.db.execute_many(daily_insert_sql, daily_data):
-                logging.info(f"✅ {stock_code} 일봉 데이터 {len(daily_data)}개 저장 완료")
+            if daily_data:
+                logging.info(f"📊 {stock_code} 저장할 데이터: {len(daily_data)}개")
+                for i, data in enumerate(daily_data[:3]):  # 처음 3개만 로그 출력
+                    logging.info(f"  데이터 {i+1}: {data}")
                 
-                # 유통주식수 정보가 있으면 stock_shares_history에도 저장
-                if shares_info and total_shares > 0:
-                    self.update_stock_shares_history_direct(stock_code, total_shares, market_cap)
-                    logging.info(f"✅ {stock_code} 유통주식수 정보 저장 완료: {total_shares:,}주, 시가총액 {market_cap:,}")
-                
-                # 기술적 지표 계산 및 저장
-                df_with_indicators = self.calculate_technical_indicators(hist_data.copy())
-                self.save_technical_indicators(stock_code, df_with_indicators)
-                
-                # 수집 상태 업데이트
-                self.update_collection_status(stock_code, hist_data)
-                
-                return True
+                if self.db.execute_many(daily_insert_sql, daily_data):
+                    logging.info(f"✅ {stock_code} 일봉 데이터 {len(daily_data)}개 저장 완료")
+                    
+                    # 유통주식수 정보가 있으면 stock_shares_history에도 저장
+                    if shares_info and total_shares > 0:
+                        self.update_stock_shares_history_direct(stock_code, total_shares, market_cap)
+                        logging.info(f"✅ {stock_code} 유통주식수 정보 저장 완료: {total_shares:,}주, 시가총액 {market_cap:,}")
+                    
+                    # 기술적 지표 계산 및 저장
+                    df_with_indicators = self.calculate_technical_indicators(hist_data.copy())
+                    self.save_technical_indicators(stock_code, df_with_indicators)
+                    
+                    # 수집 상태 업데이트
+                    self.update_collection_status(stock_code, hist_data)
+                    
+                    return True
+                else:
+                    logging.error(f"❌ {stock_code} 일봉 데이터 저장 실패 - execute_many 반환값이 False")
+                    return False
             else:
-                logging.error(f"❌ {stock_code} 일봉 데이터 저장 실패")
+                logging.warning(f"⚠️ {stock_code} 저장할 데이터가 없습니다")
                 return False
                 
         except Exception as e:
             logging.error(f"{stock_code} 일봉 데이터 저장 중 오류: {e}")
             return False
         finally:
-            self.db.disconnect()
+            # DB 연결은 배치 단위로 관리하므로 여기서는 해제하지 않음
+            pass
     
     def save_technical_indicators(self, stock_code, df_with_indicators):
         """기술적 지표를 데이터베이스에 저장"""
@@ -1067,12 +1107,8 @@ class StockDataCollector:
                     continue  # 재시도
                 return False, stock_code
             finally:
-                # DB 연결이 남아있을 수 있으므로 명시적으로 해제
-                try:
-                    if hasattr(self.db, 'connection') and self.db.connection:
-                        self.db.disconnect()
-                except:
-                    pass
+                # DB 연결은 배치 단위로 관리하므로 여기서는 해제하지 않음
+                pass
         
         # 모든 재시도 실패
         logging.error(f"❌ {stock_code} ({stock_name}): 최대 재시도 횟수 초과")
@@ -1170,9 +1206,11 @@ class StockDataCollector:
         
         # 배치 시작 시 DB 연결 한 번만 (재시도 로직 포함)
         max_db_retries = 3
+        db_connected = False
         for db_attempt in range(max_db_retries):
             try:
                 if self.db.connect():
+                    db_connected = True
                     break
                 else:
                     logging.warning(f"⚠️ 배치 {batch_num} DB 연결 시도 {db_attempt + 1}/{max_db_retries} 실패")
@@ -1188,7 +1226,12 @@ class StockDataCollector:
                 else:
                     return 0, len(stock_batch)
         
+        if not db_connected:
+            logging.error(f"❌ 배치 {batch_num} DB 연결 실패")
+            return 0, len(stock_batch)
+        
         try:
+            logging.info(f"🔄 배치 {batch_num} 처리 시작 - 전체 try-catch 블록 진입")
             success_count = 0
             failed_count = 0
             skipped_count = 0  # 건너뛴 종목 카운트 추가
@@ -1202,7 +1245,12 @@ class StockDataCollector:
             batch_technical_data = []
             batch_status_data = []
             
+            logging.info(f"🔄 배치 {batch_num} 종목 처리 루프 시작 - {len(stock_batch)}개 종목 처리 예정")
+            
             for i, (stock_code, stock_name) in enumerate(stock_batch, 1):
+                # 매 10개 종목마다 상세 로그 출력
+                if i % 10 == 0 or i == 1:
+                    logging.info(f"🔄 배치 {batch_num} [{i}/{len(stock_batch)}] 처리 중 - 현재 종목: {stock_code} ({stock_name})")
                 logging.info(f"📊 [{i}/{len(stock_batch)}] {stock_code} ({stock_name}) 데이터 수집 중...")
                 
                 try:
@@ -1245,6 +1293,13 @@ class StockDataCollector:
                     delay = self.delay_between_requests + random.uniform(0.05, 0.2)
                     time.sleep(delay)
                     
+                    # DB 연결 상태 주기적 확인 (10개 종목마다)
+                    if i % 10 == 0:
+                        if self.db.is_connected():
+                            logging.info(f"✅ 배치 {batch_num} [{i}/{len(stock_batch)}] DB 연결 상태 정상")
+                        else:
+                            logging.warning(f"⚠️ 배치 {batch_num} [{i}/{len(stock_batch)}] DB 연결 끊어짐 감지")
+                    
                 except Exception as e:
                     logging.error(f"❌ {stock_code} ({stock_name}) 처리 중 오류: {e}")
                     failed_count += 1
@@ -1257,16 +1312,38 @@ class StockDataCollector:
                         logging.warning("⚠️ 연결 오류 감지! 10초 대기 후 계속...")
                         time.sleep(10)
             
-            # 배치 단위로 데이터베이스에 저장 (오류 처리 강화)
-            logging.info(f"💾 배치 {batch_num} 데이터베이스 저장 시작...")
+            # 배치 처리 루프 완료 로깅
+            logging.info(f"🔄 배치 {batch_num} 종목 처리 루프 완료 - 저장 단계로 진행")
+            logging.info(f"🔄 배치 {batch_num} 배치 데이터 현황:")
             logging.info(f"   📊 일봉 데이터: {len(batch_daily_data)}개")
             logging.info(f"   📊 기술적 지표: {len(batch_technical_data)}개")
             logging.info(f"   📊 수집 상태: {len(batch_status_data)}개")
+            logging.info(f"   📊 성공: {success_count}개, 실패: {failed_count}개, 건너뜀: {skipped_count}개")
+            
+            # 배치 단위로 데이터베이스에 저장 (오류 처리 강화)
+            logging.info(f"💾 배치 {batch_num} 데이터베이스 저장 시작...")
+            logging.info(f"💾 배치 {batch_num} 저장 전 DB 연결 상태 확인 중...")
+            
+            # DB 연결 상태 재확인
+            if not self.db.is_connected():
+                logging.warning(f"⚠️ 배치 {batch_num} 저장 전 DB 연결이 끊어져 있습니다. 재연결 시도...")
+                if not self.db.connect():
+                    logging.error(f"❌ 배치 {batch_num} 저장 전 DB 재연결 실패")
+                    return 0, len(stock_batch)
+                else:
+                    logging.info(f"✅ 배치 {batch_num} 저장 전 DB 재연결 성공")
+            else:
+                logging.info(f"✅ 배치 {batch_num} 저장 전 DB 연결 상태 정상")
             
             if batch_daily_data:
                 try:
-                    logging.info(f"💾 일봉 데이터 저장 중... ({len(batch_daily_data)}개)")
-                    if self.save_batch_daily_data(batch_daily_data):
+                    logging.info(f"💾 배치 {batch_num} 일봉 데이터 저장 시작... ({len(batch_daily_data)}개)")
+                    logging.info(f"💾 배치 {batch_num} 저장할 데이터 샘플: {batch_daily_data[0] if batch_daily_data else 'None'}")
+                    
+                    save_result = self.save_batch_daily_data(batch_daily_data)
+                    logging.info(f"💾 배치 {batch_num} save_batch_daily_data 결과: {save_result}")
+                    
+                    if save_result:
                         logging.info(f"✅ 배치 {batch_num} 일봉 데이터 {len(batch_daily_data)}개 저장 완료")
                     else:
                         logging.error(f"❌ 배치 {batch_num} 일봉 데이터 저장 실패")
@@ -1275,6 +1352,8 @@ class StockDataCollector:
                         success_count -= len(batch_daily_data)
                 except Exception as e:
                     logging.error(f"❌ 배치 {batch_num} 일봉 데이터 저장 중 예외 발생: {e}")
+                    import traceback
+                    logging.error(f"❌ 배치 {batch_num} 상세 오류: {traceback.format_exc()}")
                     failed_count += len(batch_daily_data)
                     success_count -= len(batch_daily_data)
             else:
@@ -1304,7 +1383,7 @@ class StockDataCollector:
             logging.info(f"✅ 성공: {success_count}개, ❌ 실패: {failed_count}개, ⏭️ 건너뜀: {skipped_count}개")
             logging.info("="*60)
             
-            # 진행률 및 통계 업데이트 콜백 호출
+            # 진행률 및 통계 업데이트 콜백 호출 (DB 연결 없이)
             try:
                 # 전체 진행률 업데이트 (실제 데이터로 계산)
                 if hasattr(self, 'progress_callback') and self.progress_callback:
@@ -1463,11 +1542,14 @@ class StockDataCollector:
     def save_batch_daily_data(self, batch_daily_data):
         """배치 단위로 일봉 데이터 저장 - 오류 처리 강화"""
         try:
+            logging.info(f"💾 save_batch_daily_data 함수 진입 - 데이터 개수: {len(batch_daily_data) if batch_daily_data else 0}")
+            
             if not batch_daily_data:
                 logging.info("📝 배치 일봉 데이터가 없습니다.")
                 return True
             
             logging.info(f"💾 일봉 데이터 저장 시작: {len(batch_daily_data)}개")
+            logging.info(f"💾 첫 번째 데이터 샘플: {batch_daily_data[0] if batch_daily_data else 'None'}")
             
             # 데이터 유효성 검증
             valid_data = []
@@ -1506,8 +1588,12 @@ class StockDataCollector:
             updated_at = CURRENT_TIMESTAMP
             """
             
-            logging.info(f"💾 데이터베이스에 저장 중...")
+            logging.info(f"💾 데이터베이스에 저장 중... (SQL: {daily_insert_sql[:100]}...)")
+            logging.info(f"💾 저장할 데이터 개수: {len(valid_data)}개")
+            logging.info(f"💾 DB 연결 상태: {self.db.is_connected()}")
+            
             result = self.db.execute_many(daily_insert_sql, valid_data)
+            logging.info(f"💾 execute_many 결과: {result}")
             
             if result:
                 logging.info(f"✅ 배치 일봉 데이터 {len(valid_data)}개 저장 성공")
@@ -1709,16 +1795,15 @@ class StockDataCollector:
                 logging.info(f"✅ {stock_code} ({stock_name}) 데이터 + 유통주식수 수집 완료")
                 
                 # 수집된 일봉 데이터 수 확인
-                if self.db.connect():
-                    try:
+                try:
+                    # DB 연결 상태 확인 (이미 연결되어 있어야 함)
+                    if self.db.is_connected():
                         count_query = "SELECT COUNT(*) as count FROM daily_data WHERE stock_code = %s"
                         count_result = self.db.fetch_one(count_query, (stock_code,))
                         if count_result:
                             logging.info(f"📊 수집된 일봉 데이터: {count_result['count']}일")
-                    except Exception as e:
-                        logging.warning(f"⚠️ 데이터 수 확인 중 오류: {e}")
-                    finally:
-                        self.db.disconnect()
+                except Exception as e:
+                    logging.warning(f"⚠️ 데이터 수 확인 중 오류: {e}")
                 
                 return True, 1  # 성공
             else:
@@ -1952,9 +2037,12 @@ class StockDataCollector:
         """기존 stock_shares_history에 있는 데이터로 빠른 업데이트"""
         logging.info("기존 데이터로 빠른 업데이트 중...")
         
-        if not self.db.connect():
-            logging.error("데이터베이스 연결 실패")
-            return 0
+        # DB 연결 상태 확인 (이미 연결되어 있어야 함)
+        if not self.db.is_connected():
+            logging.warning("⚠️ DB 연결이 끊어져 있습니다. 재연결 시도...")
+            if not self.db.connect():
+                logging.error("데이터베이스 연결 실패")
+                return 0
         
         try:
             # stock_shares_history에 데이터가 있는 종목들 조회
@@ -2035,15 +2123,19 @@ class StockDataCollector:
             logging.error(f"빠른 업데이트 중 오류: {e}")
             return 0
         finally:
-            self.db.disconnect()
+            # DB 연결은 배치 단위로 관리하므로 여기서는 해제하지 않음
+            pass
     
     def _collect_new_shares_from_yahoo(self, all_stocks, batch_size):
         """stock_shares_history에 없는 새로운 종목들을 PyKrx에서 수집 (성능 최적화)"""
         logging.info("새로운 종목 PyKrx에서 수집 중...")
         
-        if not self.db.connect():
-            logging.error("데이터베이스 연결 실패")
-            return 0
+        # DB 연결 상태 확인 (이미 연결되어 있어야 함)
+        if not self.db.is_connected():
+            logging.warning("⚠️ DB 연결이 끊어져 있습니다. 재연결 시도...")
+            if not self.db.connect():
+                logging.error("데이터베이스 연결 실패")
+                return 0
         
         try:
             # 이미 stock_shares_history에 있는 종목들 조회
@@ -2131,14 +2223,18 @@ class StockDataCollector:
             logging.error(f"새로운 종목 수집 중 오류: {e}")
             return 0
         finally:
-            self.db.disconnect()
+            # DB 연결은 배치 단위로 관리하므로 여기서는 해제하지 않음
+            pass
 
     def update_stock_shares_history(self, stock_data: Dict[str, Any]) -> bool:
         """stock_shares_history 테이블에 유통주식수 정보 추가"""
         try:
-            if not self.db.connect():
-                logging.error("❌ 데이터베이스 연결 실패")
-                return False
+            # DB 연결 상태 확인 (이미 연결되어 있어야 함)
+            if not self.db.is_connected():
+                logging.warning("⚠️ DB 연결이 끊어져 있습니다. 재연결 시도...")
+                if not self.db.connect():
+                    logging.error("❌ 데이터베이스 연결 실패")
+                    return False
             
             # 오늘 날짜로 유통주식수 히스토리 추가
             today = datetime.now().date()
@@ -2175,9 +2271,12 @@ class StockDataCollector:
     def update_stock_shares_history_direct(self, stock_code: str, total_shares: int, market_cap: float = 0) -> bool:
         """stock_shares_history 테이블에 유통주식수 정보 직접 추가 (개별 매개변수용)"""
         try:
-            if not self.db.connect():
-                logging.error("❌ 데이터베이스 연결 실패")
-                return False
+            # DB 연결 상태 확인 (이미 연결되어 있어야 함)
+            if not self.db.is_connected():
+                logging.warning("⚠️ DB 연결이 끊어져 있습니다. 재연결 시도...")
+                if not self.db.connect():
+                    logging.error("❌ 데이터베이스 연결 실패")
+                    return False
             
             # 오늘 날짜로 유통주식수 히스토리 추가
             today = datetime.now().date()
@@ -2214,9 +2313,12 @@ class StockDataCollector:
     def update_daily_data_shares(self, stock_code: str, total_shares: int, market_cap: float = 0) -> bool:
         """daily_data 테이블의 outstanding_shares와 market_cap 업데이트"""
         try:
-            if not self.db.connect():
-                logging.error("❌ 데이터베이스 연결 실패")
-                return False
+            # DB 연결 상태 확인 (이미 연결되어 있어야 함)
+            if not self.db.is_connected():
+                logging.warning("⚠️ DB 연결이 끊어져 있습니다. 재연결 시도...")
+                if not self.db.connect():
+                    logging.error("❌ 데이터베이스 연결 실패")
+                    return False
             
             # 해당 종목의 모든 daily_data 레코드의 outstanding_shares와 market_cap 업데이트
             update_query = """
@@ -2278,6 +2380,7 @@ class StockDataCollector:
             hist_data = self.get_stock_data(stock_code, stock_name)
             
             if hist_data is not None:
+                logging.info(f"📊 {stock_code} ({stock_name}) 수집된 데이터: {len(hist_data)}일")
                 # 2. 일봉 데이터 저장 (기존 로직 유지)
                 if self.save_daily_data(stock_code, hist_data):
                     logging.info(f"✅ {stock_code} ({stock_name}) 일봉 데이터 수집 완료")
@@ -2295,28 +2398,18 @@ class StockDataCollector:
                         if shares_data:
                             # 4. stock_shares_history 업데이트
                             if self.update_stock_shares_history(shares_data):
-                                # 5. daily_data의 outstanding_shares와 market_cap 업데이트
+                                # 5. daily_data의 유통주식수 정보 업데이트
                                 self.update_daily_data_shares(stock_code, shares_data['total_shares'], shares_data['market_cap'])
-                                logging.info(f"✅ {stock_code} ({stock_name}) 유통주식수 정보 업데이트 완료")
-                                
-                                # 6. 과거 데이터에도 유통주식수 적용
-                                if not hist_data.empty:
-                                    start_date = hist_data.index[0].strftime('%Y-%m-%d')
-                                    end_date = hist_data.index[-1].strftime('%Y-%m-%d')
-                                    self.collect_historical_shares_data_pykrx(stock_code, market_type, start_date, end_date)
+                                logging.info(f"✅ {stock_code} ({stock_name}) 유통주식수 정보 업데이트 완료: {shares_data['total_shares']:,}주")
                             else:
                                 logging.warning(f"⚠️ {stock_code} ({stock_name}) 유통주식수 히스토리 업데이트 실패")
                         else:
-                            logging.warning(f"⚠️ {stock_code} ({stock_name}) 유통주식수 정보 수집 실패")
+                            logging.warning(f"⚠️ {stock_code} ({stock_name}) 유통주식수 정보 조회 실패")
                             
                     except Exception as e:
-                        logging.warning(f"⚠️ {stock_code} ({stock_name}) 유통주식수 처리 중 오류: {e}")
-                        # 유통주식수 수집 실패는 일봉 데이터 수집 성공에 영향을 주지 않음
+                        logging.warning(f"⚠️ {stock_code} ({stock_name}) 유통주식수 정보 처리 중 오류: {e}")
                     
                     return True
-                else:
-                    logging.error(f"❌ {stock_code} ({stock_name}) 데이터베이스 저장 실패")
-                    return False
             elif hist_data is None:
                 # 이미 최신 데이터이거나 데이터가 없는 경우
                 logging.info(f"✅ {stock_code} ({stock_name}) 이미 최신 데이터이거나 수집할 데이터가 없습니다.")
@@ -2332,14 +2425,14 @@ class StockDataCollector:
                     if shares_data:
                         if self.update_stock_shares_history(shares_data):
                             self.update_daily_data_shares(stock_code, shares_data['total_shares'], shares_data['market_cap'])
-                            logging.info(f"✅ {stock_code} ({stock_name}) 유통주식수만 업데이트 완료")
+                            logging.info(f"✅ {stock_code} ({stock_name}) 유통주식수 정보 업데이트 완료: {shares_data['total_shares']:,}주")
                         else:
-                            logging.warning(f"⚠️ {stock_code} ({stock_name}) 유통주식수 업데이트 실패")
+                            logging.warning(f"⚠️ {stock_code} ({stock_name}) 유통주식수 히스토리 업데이트 실패")
                     else:
-                        logging.warning(f"⚠️ {stock_code} ({stock_name}) 유통주식수 정보 수집 실패")
+                        logging.warning(f"⚠️ {stock_code} ({stock_name}) 유통주식수 정보 조회 실패")
                         
                 except Exception as e:
-                    logging.warning(f"⚠️ {stock_code} ({stock_name}) 유통주식수 처리 중 오류: {e}")
+                    logging.warning(f"⚠️ {stock_code} ({stock_name}) 유통주식수 정보 처리 중 오류: {e}")
                 
                 return True
             else:

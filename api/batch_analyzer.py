@@ -100,8 +100,12 @@ class BatchAnalyzer:
                     
                     logger.info(f"배치 분석 시작: {stock_code}, 차트타입={chart_type}, 차트타입_en={chart_type_en}")
                     
+                    # FastProgressTracker 인스턴스 생성
+                    from batch_stock_analyzer_optimized import FastProgressTracker
+                    tracker = FastProgressTracker(1)
+                    
                     batch_result = analyze_single_stock_fast(
-                        stock_code, chart_type, chart_type_en, None
+                        stock_code, chart_type, chart_type_en, tracker, batch_id
                     )
                     
                     logger.info(f"배치 분석 결과: {batch_result}")
@@ -146,7 +150,9 @@ class BatchAnalyzer:
                                         'detailed_analysis': f'{stock_code} 종목의 {chart_type} 차트 분석이 성공적으로 완료되었습니다.',
                                         'timestamp': datetime.now().isoformat(),
                                         'ai_analysis_file': latest_json,
-                                        'ai_analysis_data': ai_analysis_result
+                                        'ai_analysis_data': ai_analysis_result,
+                                        'success': True,
+                                        'ai_analysis_done': True
                                     }
                                     logger.info(f"AI 분석 결과 로드 성공: {latest_json}")
                                 except Exception as e:
@@ -158,7 +164,9 @@ class BatchAnalyzer:
                                         'analysis_score': 75,
                                         'summary': f'{stock_code} 종목 분석이 완료되었습니다.',
                                         'detailed_analysis': f'{stock_code} 종목의 {chart_type} 차트 분석이 성공적으로 완료되었습니다.',
-                                        'timestamp': datetime.now().isoformat()
+                                        'timestamp': datetime.now().isoformat(),
+                                        'success': True,
+                                        'ai_analysis_done': False
                                     }
                             else:
                                 logger.warning(f"종목 {stock_code}의 AI 분석 결과 파일을 찾을 수 없습니다")
@@ -169,7 +177,9 @@ class BatchAnalyzer:
                                     'analysis_score': 75,
                                     'summary': f'{stock_code} 종목 분석이 완료되었습니다.',
                                     'detailed_analysis': f'{stock_code} 종목의 {chart_type} 차트 분석이 성공적으로 완료되었습니다.',
-                                    'timestamp': datetime.now().isoformat()
+                                    'timestamp': datetime.now().isoformat(),
+                                    'success': True,
+                                    'ai_analysis_done': False
                                 }
                         else:
                             logger.warning(f"AI 분석 결과 폴더가 존재하지 않습니다: {ai_results_dir}")
@@ -180,7 +190,9 @@ class BatchAnalyzer:
                                 'analysis_score': 75,
                                 'summary': f'{stock_code} 종목 분석이 완료되었습니다.',
                                 'detailed_analysis': f'{stock_code} 종목의 {chart_type} 차트 분석이 성공적으로 완료되었습니다.',
-                                'timestamp': datetime.now().isoformat()
+                                'timestamp': datetime.now().isoformat(),
+                                'success': True,
+                                'ai_analysis_done': False
                             }
                     else:
                         logger.error(f"종목 {stock_code} 분석 실패: {batch_result.get('error', '알 수 없는 오류')}")
@@ -192,7 +204,9 @@ class BatchAnalyzer:
                             'analysis_score': 0,
                             'summary': f'분석 실패: {batch_result.get("error", "알 수 없는 오류")}',
                             'detailed_analysis': f'종목 {stock_code} 분석 중 오류가 발생했습니다. 오류: {batch_result.get("error", "알 수 없는 오류")}',
-                            'timestamp': datetime.now().isoformat()
+                            'timestamp': datetime.now().isoformat(),
+                            'success': False,
+                            'ai_analysis_done': False
                         }
                     
                     # 결과에 메타데이터 추가
@@ -237,7 +251,78 @@ class BatchAnalyzer:
             summary_files = None
             try:
                 logger.info(f"요약 분석 시작: batch_id={batch_id}, chart_type={chart_type}")
-                summary_files = self._create_summary_analysis(chart_type)
+                # 배치 결과에서 성공한 종목들의 파일 경로 추출
+                successful_stocks = []
+                logger.info(f"배치 ID: {batch_id}")
+                logger.info(f"배치 결과 키들: {list(self.batch_results.keys())}")
+                
+                if batch_id in self.batch_results:
+                    batch_results = self.batch_results[batch_id]
+                    logger.info(f"배치 결과에서 파일 경로 추출 중: {len(batch_results)}개 결과")
+                    logger.info(f"배치 결과 전체: {batch_results}")
+                    
+                    for i, result in enumerate(batch_results):
+                        logger.info(f"배치 결과 {i+1} 검토: {result}")
+                        logger.info(f"  - success: {result.get('success', 'NOT_FOUND')}")
+                        logger.info(f"  - ai_analysis_done: {result.get('ai_analysis_done', 'NOT_FOUND')}")
+                        logger.info(f"  - stock_code: {result.get('stock_code', 'NOT_FOUND')}")
+                        
+                        if result.get('success', False) and result.get('ai_analysis_done', False):
+                            stock_code = result.get('stock_code')
+                            logger.info(f"성공한 종목 발견: {stock_code}")
+                            if stock_code:
+                                # 배치 ID를 포함한 파일명으로 검색 (더 정확한 방법)
+                                # 차트 유형을 영문으로 변환
+                                chart_type_en = {
+                                    "일봉": "daily",
+                                    "주봉": "weekly", 
+                                    "월봉": "monthly"
+                                }.get(chart_type, chart_type.lower())
+                                
+                                batch_pattern = f"ai_analysis_results/analysis_{chart_type_en}_{stock_code}_*_{batch_id}.json"
+                                import glob
+                                batch_files = glob.glob(batch_pattern)
+                                logger.info(f"배치 ID 패턴 검색: {batch_pattern}")
+                                logger.info(f"찾은 배치 파일들: {batch_files}")
+                                
+                                if batch_files:
+                                    # 배치 ID가 포함된 파일이 있으면 사용
+                                    latest_file = max(batch_files, key=os.path.getctime)
+                                    successful_stocks.append(latest_file)
+                                    logger.info(f"배치 ID 파일 선택: {latest_file}")
+                                else:
+                                    # 배치 ID가 포함된 파일이 없으면 시간 기반으로 검색
+                                    json_file = f"ai_analysis_results/analysis_{chart_type}_{stock_code}_*.json"
+                                    matching_files = glob.glob(json_file)
+                                    if matching_files:
+                                        # 배치 시작 시간 이후에 생성된 파일만 선택
+                                        batch_start_time = self.batch_status.get(batch_id, {}).get('start_time')
+                                        if batch_start_time:
+                                            batch_start_dt = datetime.fromisoformat(batch_start_time.replace('Z', '+00:00'))
+                                            recent_files = []
+                                            for file_path in matching_files:
+                                                file_time = datetime.fromtimestamp(os.path.getctime(file_path))
+                                                if file_time >= batch_start_dt:
+                                                    recent_files.append(file_path)
+                                            
+                                            if recent_files:
+                                                # 가장 최근 파일 선택
+                                                latest_file = max(recent_files, key=os.path.getctime)
+                                                successful_stocks.append(latest_file)
+                                                logger.info(f"시간 기반 파일 선택: {latest_file}")
+                                            else:
+                                                logger.warning(f"배치 시작 시간 이후 파일 없음: {stock_code}")
+                                        else:
+                                            # 배치 시작 시간이 없으면 가장 최근 파일 선택 (기존 방식)
+                                            latest_file = max(matching_files, key=os.path.getctime)
+                                            successful_stocks.append(latest_file)
+                                            logger.info(f"최근 파일 선택: {latest_file}")
+                
+                logger.info(f"추출된 성공 파일 수: {len(successful_stocks)}")
+                for file_path in successful_stocks:
+                    logger.info(f"  - {file_path}")
+                
+                summary_files = self._create_summary_analysis(chart_type, successful_stocks)
                 logger.info(f"요약 분석 완료: batch_id={batch_id}")
             except Exception as e:
                 logger.error(f"요약 분석 중 오류: {e}")
@@ -840,13 +925,40 @@ class BatchAnalyzer:
             for run in title.runs:
                 run.font.name = '맑은 고딕'
                 run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                run.font.size = Pt(14)
             
-            # 분석 개요
+            # 분석 개요 테이블 생성
             doc.add_heading('📊 분석 개요', level=1)
+            
+            # 분석 개요 테이블 생성
+            table = doc.add_table(rows=2, cols=3)
+            table.style = 'Table Grid'
+            
+            # 헤더 행 설정
+            header_cells = table.rows[0].cells
+            header_cells[0].text = '차트 유형'
+            header_cells[1].text = '분석 종목 수'
+            header_cells[2].text = '생성일시'
+            
+            # 데이터 행 설정
+            data_cells = table.rows[1].cells
             metadata = total_analysis_result.get("metadata", {})
-            doc.add_paragraph(f'• 차트 유형: {metadata.get("chart_type", "N/A")}')
-            doc.add_paragraph(f'• 총 분석 종목 수: {metadata.get("total_stocks", 0)}개')
-            doc.add_paragraph(f'• 생성일시: {metadata.get("created_at", "N/A")}')
+            data_cells[0].text = metadata.get("chart_type", "N/A")
+            data_cells[1].text = f'{metadata.get("total_stocks", 0)}개'
+            # 날짜 형식을 YY-MM-DD (ddd) HH 형태로 변경
+            from datetime import datetime
+            now = datetime.now()
+            weekday_korean = ['월', '화', '수', '목', '금', '토', '일']
+            formatted_date = f"{now.strftime('%y.%m.%d')}({weekday_korean[now.weekday()]}) {now.strftime('%H')}시"
+            data_cells[2].text = formatted_date
+            
+            # 테이블 전체에 한글 폰트 적용
+            for row in table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        for run in paragraph.runs:
+                            run.font.name = '맑은 고딕'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
             
             # 종목별 분석 결과 (개별 분석 결과와 동일한 구조)
             doc.add_heading('📈 종목별 상세 분석 결과', level=1)
@@ -854,14 +966,14 @@ class BatchAnalyzer:
             consolidated_analysis = total_analysis_result.get("consolidated_analysis", {})
             
             for i, (stock_code, stock_data) in enumerate(consolidated_analysis.items(), 1):
-                # 종목 정보
+                # 종목 정보 (total_analysis JSON 구조에 맞게 수정)
                 stock_info = stock_data.get("종목정보", {})
                 stock_name = stock_info.get("종목명", f"종목{i}")
                 analysis_time = stock_info.get("분석일시", "N/A")
                 
                 # 종목 구분선 (첫 번째 종목이 아닌 경우)
                 if i > 1:
-                    doc.add_paragraph("=" * 80)
+                    doc.add_paragraph("─" * 50)
                 
                 # 종목 제목 (개별 분석 결과와 동일한 레벨)
                 heading_stock = doc.add_heading(f'{i}. {stock_name} ({stock_code})', level=1)
@@ -869,17 +981,39 @@ class BatchAnalyzer:
                     run.font.name = '맑은 고딕'
                     run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
                 
-                # 종목별 기본 정보 (개별 분석 결과와 동일한 구조)
-                p_info1 = doc.add_paragraph(f"종목명: {stock_name}")
-                p_info2 = doc.add_paragraph(f"종목번호: {stock_code}")
-                p_info3 = doc.add_paragraph(f"분석일시: {analysis_time}")
-                p_info4 = doc.add_paragraph(f"차트유형: {chart_type}")
+                # 종목 정보 테이블 생성 (개별 분석 결과와 동일한 구조)
+                table = doc.add_table(rows=2, cols=4)
+                table.style = 'Table Grid'
                 
-                # 한글 폰트 적용
-                for p in [p_info1, p_info2, p_info3, p_info4]:
-                    for run in p.runs:
-                        run.font.name = '맑은 고딕'
-                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                # 헤더 행 설정
+                header_cells = table.rows[0].cells
+                header_cells[0].text = '종목명'
+                header_cells[1].text = '종목번호'
+                header_cells[2].text = '분석일시'
+                header_cells[3].text = '차트유형'
+                
+                # 데이터 행 설정
+                data_cells = table.rows[1].cells
+                data_cells[0].text = stock_name
+                data_cells[1].text = stock_code
+                # 분석일시 사용 (없으면 현재 시간)
+                if analysis_time and analysis_time != "N/A":
+                    data_cells[2].text = analysis_time
+                else:
+                    from datetime import datetime
+                    now = datetime.now()
+                    weekday_korean = ['월', '화', '수', '목', '금', '토', '일']
+                    formatted_date = f"{now.strftime('%y.%m.%d')}({weekday_korean[now.weekday()]}) {now.strftime('%H')}시"
+                    data_cells[2].text = formatted_date
+                data_cells[3].text = chart_type
+                
+                # 테이블 전체에 한글 폰트 적용
+                for row in table.rows:
+                    for cell in row.cells:
+                        for paragraph in cell.paragraphs:
+                            for run in paragraph.runs:
+                                run.font.name = '맑은 고딕'
+                                run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
                 
                 # 차트 이미지 추가
                 chart_image_path = None
@@ -937,6 +1071,24 @@ class BatchAnalyzer:
                     doc.add_picture(chart_image_path, width=Inches(6))
                     doc.add_paragraph()
                     logger.info(f"차트 이미지 추가: {stock_code} - {chart_image_path}")
+                    
+                    # 일봉 차트인 경우 거래대금 정보 추가
+                    if chart_type == "일봉" and "종목정보" in stock_data:
+                        trading_info = stock_data["종목정보"]
+                        total_trading_amount = trading_info.get("총거래대금")
+                        trading_rank = trading_info.get("거래대금순위")
+                        
+                        if total_trading_amount and trading_rank:
+                            # 억원 단위로 변환 (10000000000원 = 100억원)
+                            amount_in_hundred_millions = total_trading_amount / 100000000
+                            
+                            trading_desc = f"위 주식의 일일 거래대금은 {amount_in_hundred_millions:.0f}억원으로 전체 종목중 상위 {trading_rank}위를 차지하여 분석 대상에 포함되었습니다."
+                            
+                            para_trading = doc.add_paragraph(trading_desc)
+                            for run in para_trading.runs:
+                                run.font.name = '맑은 고딕'
+                                run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                            doc.add_paragraph()
                 else:
                     # 차트 이미지가 없는 경우 안내 메시지 추가
                     heading_chart = doc.add_heading('차트 이미지', level=1)
@@ -1216,7 +1368,7 @@ class BatchAnalyzer:
                             run.font.name = '맑은 고딕'
                             run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
                 
-                # 투자 아이디어 (개별 분석 결과와 동일한 구조)
+                # 투자 아이디어 (total_analysis JSON 구조에 맞게 수정)
                 if chart_type == "일봉" and "단기투자아이디어" in stock_data:
                     heading_idea = doc.add_heading('단기 투자 아이디어', level=1)
                     for run in heading_idea.runs:
@@ -1273,6 +1425,25 @@ class BatchAnalyzer:
                         for run in p.runs:
                             run.font.name = '맑은 고딕'
                             run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                
+                # AI 분석 결과 추가 (total_analysis JSON 구조에 맞게 수정)
+                if "AI분석결과" in stock_data:
+                    # AI 분석 결과 제목 (종목명 포함)
+                    heading_analysis = doc.add_heading(f'{stock_name} 차트 분석 결과', level=1)
+                    for run in heading_analysis.runs:
+                        run.font.name = '맑은 고딕'
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                    
+                    # AI 분석 결과를 마크다운 파싱하여 추가
+                    ai_analysis_result = stock_data.get("AI분석결과", "")
+                    if ai_analysis_result:
+                        self._parse_markdown_to_word(ai_analysis_result, doc)
+                    else:
+                        # AI 분석 결과가 없는 경우
+                        para = doc.add_paragraph("AI 분석 결과가 없습니다.")
+                        for run in para.runs:
+                            run.font.name = '맑은 고딕'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
             
             # 문서 저장
             doc.save(output_path)
@@ -1283,12 +1454,95 @@ class BatchAnalyzer:
             logger.error(f"Total Analysis DOCX 생성 중 오류: {e}")
             return False
     
-    def _create_summary_analysis(self, chart_type: str) -> dict:
+    def _parse_markdown_to_word(self, text: str, doc) -> None:
+        """
+        마크다운 텍스트를 Word 문서 형식으로 파싱하여 추가
+        
+        Args:
+            text (str): 마크다운 형태의 텍스트
+            doc: Word 문서 객체
+        """
+        try:
+            import re
+            from docx.oxml.ns import qn
+            
+            # **내용** 형태를 볼드체로 변환하는 정규식
+            bold_pattern = r'\*\*(.*?)\*\*'
+            
+            # 줄바꿈으로 분리
+            lines = text.split('\n')
+            
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # **내용** 패턴을 찾아서 볼드체로 변환
+                if re.search(bold_pattern, line):
+                    # 볼드체가 포함된 줄 처리
+                    para = doc.add_paragraph()
+                    
+                    # **내용** 패턴으로 분할
+                    parts = re.split(bold_pattern, line)
+                    
+                    for i, part in enumerate(parts):
+                        if i % 2 == 0:
+                            # 일반 텍스트
+                            if part:
+                                run = para.add_run(part)
+                                run.font.name = '맑은 고딕'
+                                run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                        else:
+                            # 볼드체 텍스트
+                            if part:
+                                run = para.add_run(part)
+                                run.font.name = '맑은 고딕'
+                                run.bold = True
+                                run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                else:
+                    # 볼드체가 없는 일반 줄 처리
+                    if line.startswith('###'):
+                        # ### 헤더 처리 (### 제거하고 제목으로 변환)
+                        heading_text = line.replace('###', '').strip()
+                        if heading_text:
+                            para = doc.add_heading(heading_text, level=3)
+                    elif line.startswith('##'):
+                        # ## 헤더 처리 (## 제거하고 제목으로 변환)
+                        heading_text = line.replace('##', '').strip()
+                        if heading_text:
+                            para = doc.add_heading(heading_text, level=2)
+                    elif line.startswith('#'):
+                        # # 헤더 처리 (# 제거하고 제목으로 변환)
+                        heading_text = line.replace('#', '').strip()
+                        if heading_text:
+                            para = doc.add_heading(heading_text, level=1)
+                    elif line.startswith('📊') or line.startswith('📈') or line.startswith('📉') or line.startswith('💡') or line.startswith('🔍') or line.startswith('⚠️') or line.startswith('✅'):
+                        para = doc.add_heading(line, level=2)
+                    elif line.startswith('•') or line.startswith('-') or line.startswith('*'):
+                        para = doc.add_paragraph(line)
+                    else:
+                        para = doc.add_paragraph(line)
+                    
+                    # 한글 폰트 적용
+                    for run in para.runs:
+                        run.font.name = '맑은 고딕'
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                        
+        except Exception as e:
+            logger.error(f"⚠️ 마크다운 파싱 중 오류: {e}")
+            # 오류 발생 시 일반 텍스트로 처리
+            para = doc.add_paragraph(text)
+            for run in para.runs:
+                run.font.name = '맑은 고딕'
+                run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+    
+    def _create_summary_analysis(self, chart_type: str, specific_files: list = None) -> dict:
         """
         배치 분석 완료 후 요약 분석 실행
         
         Args:
             chart_type (str): 차트 유형 (한글)
+            specific_files (list): 특정 파일 경로들 (None이면 전체 폴더 스캔)
             
         Returns:
             dict: 생성된 요약 파일 정보 {"json_path": "...", "docx_path": "..."}
@@ -1315,7 +1569,12 @@ class BatchAnalyzer:
             summary_generator = SummaryFileGenerator(db_config)
             
             # 통합 요약 파일 생성 (차트 유형별)
-            result = summary_generator.create_consolidated_summary_by_type(chart_type_en)
+            if specific_files:
+                # 특정 파일들만 사용하여 요약 생성
+                result = summary_generator.create_consolidated_summary_from_files(chart_type_en, specific_files)
+            else:
+                # 전체 폴더 스캔하여 요약 생성 (기존 방식)
+                result = summary_generator.create_consolidated_summary_by_type(chart_type_en)
             
             if result:
                 logger.info(f"요약 분석 완료: chart_type={chart_type}")
