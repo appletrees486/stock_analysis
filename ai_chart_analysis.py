@@ -788,6 +788,12 @@ class AIChartAnalyzer:
                                         "분석일시": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                         "차트유형": chart_type
                                     }
+                                
+                                # 거래정보 추가 (JSON 파싱 성공)
+                                # AI 응답이 JSON 형식으로 정상 파싱된 경우에만 실행됨
+                                # 현재는 AI 응답이 JSON 형식이 아니어서 이 경로는 거의 실행되지 않음
+                                # 향후 AI 응답 개선 시 자동으로 작동하도록 유지
+                                analysis_result = self._add_trading_info_to_result(analysis_result, extracted_stock_code, "json파싱성공")
                                     
                                 
                                 
@@ -1363,11 +1369,217 @@ class AIChartAnalyzer:
             },
             "AI분석결과": ai_response
         }
+        
+        # 거래정보 추가 (JSON 파싱 실패)
+        # AI 응답이 JSON 형식이 아니거나 파싱에 실패한 경우 실행됨
+        # 현재 가장 많이 사용되는 경로 (AI 응답이 JSON 형식이 아니기 때문)
+        # 거래일, 총거래대금, 순위 정보를 DB에서 조회하여 추가
+        result = self._add_trading_info_to_result(result, stock_code, "파싱실패")
+        
+        return result
+
+    def _get_trading_info_from_db(self, stock_code: str) -> Dict[str, Any]:
+        """
+        DB에서 거래일, 거래대금, 순위 정보 조회
+        
+        Args:
+            stock_code (str): 종목코드 (6자리)
+            
+        Returns:
+            Dict[str, Any]: 거래정보 딕셔너리
+                - 거래일: 최신 거래일 (YYYY-MM-DD 형식)
+                - 총거래대금: 거래량 × 종가 (원 단위, 천단위 구분자 포함)
+                - 순위: 거래량 기준 순위 (N위 형식)
+                
+        Note:
+            - 거래대금 계산: 거래량 × 종가
+            - 순위 계산: 거래량 기준 내림차순 정렬
+            - DB 연결 실패 시 모든 값이 "N/A"로 반환
+        """
+        try:
+            from database_config import DatabaseManager
+            db = DatabaseManager()
+            
+            if not db.connect():
+                print(f"⚠️ DB 연결 실패 - 거래정보 조회 불가")
+                return {
+                    "거래일": "N/A",
+                    "총거래대금": "N/A", 
+                    "순위": "N/A"
+                }
+            
+            # 1. 해당 종목의 최신 거래일 조회
+            # daily_data 테이블에서 해당 종목의 가장 최근 거래일을 찾음
+            latest_date_query = "SELECT MAX(trade_date) as latest_date FROM daily_data WHERE stock_code = %s"
+            latest_date_result = db.fetch_one(latest_date_query, (stock_code,))
+            
+            if not latest_date_result or not latest_date_result['latest_date']:
+                print(f"⚠️ {stock_code} 종목의 거래 데이터를 찾을 수 없음")
+                db.disconnect()
+                return {
+                    "거래일": "N/A",
+                    "총거래대금": "N/A", 
+                    "순위": "N/A"
+                }
+            
+            latest_date = latest_date_result['latest_date']
+            print(f"📅 {stock_code} 최신 거래일: {latest_date}")
+            
+            # 2. 해당 거래일의 거래대금 계산 (거래량 × 종가)
+            # 먼저 중복 데이터 확인 (같은 종목, 같은 날짜에 여러 레코드가 있는지 체크)
+            duplicate_check_query = """
+            SELECT COUNT(*) as count, SUM(volume) as total_volume, AVG(close) as avg_close
+            FROM daily_data 
+            WHERE stock_code = %s AND trade_date = %s
+            """
+            duplicate_data = db.fetch_one(duplicate_check_query, (stock_code, latest_date))
+            
+            if duplicate_data and duplicate_data['count'] > 1:
+                print(f"⚠️ {stock_code} {latest_date}에 중복 데이터 발견: {duplicate_data['count']}개 레코드")
+                print(f"   총 거래량: {duplicate_data['total_volume']:,.0f}")
+                print(f"   평균 종가: {duplicate_data['avg_close']:,.0f}")
+            
+            # 거래 데이터 조회 (중복 시 거래량이 가장 큰 레코드 선택)
+            trading_amount_query = """
+            SELECT volume, close, open, high, low
+            FROM daily_data 
+            WHERE stock_code = %s AND trade_date = %s
+            ORDER BY volume DESC
+            LIMIT 1
+            """
+            trading_data = db.fetch_one(trading_amount_query, (stock_code, latest_date))
+            
+            if not trading_data:
+                print(f"⚠️ {stock_code} {latest_date} 거래 데이터 없음")
+                db.disconnect()
+                return {
+                    "거래일": latest_date.strftime("%Y-%m-%d"),
+                    "총거래대금": "N/A", 
+                    "순위": "N/A"
+                }
+            
+            # 거래대금 계산
+            # DB에서 가져온 데이터를 float로 변환 (Decimal 타입 대응)
+            volume = float(trading_data['volume']) if trading_data['volume'] else 0
+            close_price = float(trading_data['close']) if trading_data['close'] else 0
+            open_price = float(trading_data['open']) if trading_data['open'] else 0
+            high_price = float(trading_data['high']) if trading_data['high'] else 0
+            low_price = float(trading_data['low']) if trading_data['low'] else 0
+            
+            # 여러 거래대금 계산 방식 시도 (디버깅 목적)
+            total_amount_close = volume * close_price  # 종가 기준 (현재 사용)
+            avg_price = (open_price + high_price + low_price + close_price) / 4  # 평균가 계산
+            total_amount_avg = volume * avg_price  # 평균가 기준
+            
+            print(f"💰 {stock_code} 거래대금 계산:")
+            print(f"   거래량: {volume:,.0f}주")
+            print(f"   종가: {close_price:,.0f}원")
+            print(f"   평균가: {avg_price:,.0f}원")
+            print(f"   거래대금(종가기준): {total_amount_close:,.0f}원")
+            print(f"   거래대금(평균가기준): {total_amount_avg:,.0f}원")
+            
+            # 종가 기준으로 사용 (기존 방식 유지)
+            # 거래대금 = 거래량 × 종가
+            total_amount = total_amount_close
+            
+            # 3. 해당 거래일 기준 거래량 순위 계산
+            # 같은 거래일의 모든 종목을 거래량 내림차순으로 정렬하여 순위 계산
+            ranking_query = """
+            SELECT stock_code, volume
+            FROM daily_data 
+            WHERE trade_date = %s
+            ORDER BY volume DESC
+            """
+            all_trading_data = db.fetch_all(ranking_query, (latest_date,))
+            
+            if not all_trading_data:
+                print(f"⚠️ {latest_date} 전체 거래 데이터 없음")
+                db.disconnect()
+                return {
+                    "거래일": latest_date.strftime("%Y-%m-%d"),
+                    "총거래대금": f"{total_amount:,.0f}",
+                    "순위": "N/A"
+                }
+            
+            # 순위 계산 (거래량 기준)
+            # 거래량 내림차순으로 정렬된 리스트에서 해당 종목의 위치를 찾아 순위 결정
+            ranking = 1
+            for i, row in enumerate(all_trading_data):
+                if str(row['stock_code']) == str(stock_code):
+                    ranking = i + 1  # 1부터 시작하는 순위
+                    break
+            
+            print(f"🏆 {stock_code} 순위: {ranking}위 (총 {len(all_trading_data)}개 종목 중)")
+            
+            db.disconnect()
+            
+            return {
+                "거래일": latest_date.strftime("%Y-%m-%d"),
+                "총거래대금": f"{total_amount:,.0f}",
+                "순위": f"{ranking}위"
+            }
+            
+        except Exception as e:
+            print(f"❌ 거래정보 조회 중 오류: {e}")
+            try:
+                db.disconnect()
+            except:
+                pass
+            return {
+                "거래일": "N/A",
+                "총거래대금": "N/A", 
+                "순위": "N/A"
+            }
+    
+    def _add_trading_info_to_result(self, result: Dict[str, Any], stock_code: str, result_type: str) -> Dict[str, Any]:
+        """
+        결과에 거래일, 거래대금, 순위 정보 추가
+        
+        Args:
+            result (Dict[str, Any]): 기존 결과 딕셔너리
+            stock_code (str): 종목코드 (6자리)
+            result_type (str): 결과 타입 구분값
+                - "json파싱성공": AI 응답이 JSON으로 정상 파싱된 경우
+                - "파싱실패": AI 응답이 JSON 형식이 아니거나 파싱 실패한 경우 (현재 주로 사용)
+                - "fallback": 기본 fallback 결과 생성 시
+                
+        Returns:
+            Dict[str, Any]: 거래정보가 추가된 결과 딕셔너리
+            
+        Note:
+            - 종목정보 섹션에 거래일, 총거래대금, 순위, 타입 필드 추가
+            - DB 조회 실패 시 모든 값이 "N/A"로 설정
+            - result_type은 디버깅 및 유지보수 목적으로 사용
+        """
+        try:
+            # 거래정보 조회
+            trading_info = self._get_trading_info_from_db(stock_code)
+            
+            # 종목정보 섹션이 있는지 확인
+            if "종목정보" in result:
+                # 기존 종목정보에 추가
+                result["종목정보"]["거래일"] = trading_info["거래일"]
+                result["종목정보"]["총거래대금"] = trading_info["총거래대금"]
+                result["종목정보"]["순위"] = trading_info["순위"]
+                result["종목정보"]["타입"] = result_type
+                print(f"✅ 거래정보 추가 완료 ({result_type}): {trading_info}")
+            else:
+                print(f"⚠️ 종목정보 섹션이 없어 거래정보를 추가할 수 없음")
+                
+        except Exception as e:
+            print(f"❌ 거래정보 추가 중 오류: {e}")
+            # 오류 발생 시에도 기본값 추가
+            if "종목정보" in result:
+                result["종목정보"]["거래일"] = "N/A"
+                result["종목정보"]["총거래대금"] = "N/A"
+                result["종목정보"]["순위"] = "N/A"
+                result["종목정보"]["타입"] = result_type
+        
         return result
 
     def _create_basic_fallback_result(self, stock_name: str, chart_type: str, ai_response: str, error_type: str, stock_code: str = "000000") -> Dict[str, Any]:
         """기본 fallback 결과 생성"""
-        return {
+        result = {
             "종목정보": {
                 "종목명": stock_name,
                 "종목번호": stock_code,
@@ -1377,6 +1589,14 @@ class AIChartAnalyzer:
             },
             "AI분석결과": ai_response
         }
+        
+        # 거래정보 추가 (기본 fallback)
+        # 기본 fallback 결과 생성 시 실행됨
+        # 현재는 거의 사용되지 않지만 향후 확장성을 위해 유지
+        # 거래일, 총거래대금, 순위 정보를 DB에서 조회하여 추가
+        result = self._add_trading_info_to_result(result, stock_code, "fallback")
+        
+        return result
 
 
 
