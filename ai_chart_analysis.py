@@ -2838,6 +2838,9 @@ class SummaryFileGenerator:
                 print(f"❌ {chart_type_kr} 요약 프롬프트를 찾을 수 없습니다")
                 return None
             
+            # 거래일 추출 (첫 번째 유효한 거래일 사용)
+            trading_date = self._extract_trading_date_from_results(analysis_results)
+            
             # 분석 결과 요약 데이터 준비
             summary_data = {
                 "분석종목수": len(analysis_results),
@@ -2931,6 +2934,7 @@ class SummaryFileGenerator:
                         "summary_meta": {
                             "chart_type": chart_type_kr,
                             "total_stocks": len(analysis_results),
+                            "trading_date": trading_date,
                             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                             "summary_method": "AI_요약_프롬프트"
                         },
@@ -2949,6 +2953,7 @@ class SummaryFileGenerator:
                 "summary_meta": {
                     "chart_type": chart_type_kr,
                     "total_stocks": len(analysis_results),
+                    "trading_date": trading_date,
                     "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "summary_method": "기본_요약"
                 },
@@ -2967,6 +2972,37 @@ class SummaryFileGenerator:
         except Exception as e:
             print(f"❌ 통합 요약 생성 중 오류: {e}")
             return None
+    
+    def _extract_trading_date_from_results(self, analysis_results: list) -> str:
+        """
+        개별 분석 결과에서 거래일 추출 (첫 번째 유효한 거래일 사용)
+        
+        Args:
+            analysis_results (list): 분석 결과 리스트
+            
+        Returns:
+            str: 거래일 (YYYY-MM-DD 형식) 또는 "N/A"
+        """
+        try:
+            for result in analysis_results:
+                try:
+                    # 종목정보에서 거래일 추출
+                    stock_info = result.get("종목정보", {})
+                    trading_date = stock_info.get("거래일", "")
+                    
+                    if trading_date and trading_date != "N/A":
+                        print(f"✅ 거래일 추출 성공: {trading_date}")
+                        return trading_date
+                except Exception as e:
+                    print(f"⚠️ 거래일 추출 실패: {e}")
+                    continue
+            
+            print("⚠️ 유효한 거래일을 찾을 수 없습니다")
+            return "N/A"
+            
+        except Exception as e:
+            print(f"❌ 거래일 추출 중 오류: {e}")
+            return "N/A"
     
     def save_summary_files(self, consolidated_result: dict, chart_type: str, output_dir: str = "ai_analysis_results") -> tuple:
         """
@@ -3108,82 +3144,27 @@ class SummaryFileGenerator:
                             run.font.name = '맑은 고딕'
                             run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
             
-            # 분석 개요 설명 추가 (일봉 분석에만 적용)
-            if chart_type == "일봉":
-                # summary_daily에서 최신거래일 정보 추출
-                latest_trading_date = None
-                formatted_date_desc = "최근 거래일 기준"  # 기본값
-                
-                # summary_daily JSON 파일에서 market_summary의 분석_결과에서 최신거래일 추출
-                analysis_result = ""
-                
-                # summary_daily JSON 파일 경로 찾기
+            # 분석 개요 설명 추가 (모든 차트 유형에 적용)
+            # summary_meta에서 거래일과 차트 유형 추출
+            summary_meta = consolidated_result.get("summary_meta", {}) if consolidated_result else {}
+            trading_date = summary_meta.get("trading_date", "N/A")
+            chart_type_from_meta = summary_meta.get("chart_type", chart_type)
+            
+            # 거래일 형식 변환 (YYYY-MM-DD → M월 D일)
+            formatted_trading_date = "N/A"
+            if trading_date != "N/A":
                 try:
-                    # consolidated_result에서 summary_daily 파일 경로 추출
-                    summary_meta = consolidated_result.get("summary_meta", {})
-                    generated_at = summary_meta.get("generated_at", "")
-                    
-                    if generated_at:
-                        # generated_at에서 날짜 부분 추출하여 summary_daily 파일 경로 생성
-                        date_part = generated_at.split()[0].replace("-", "")
-                        time_part = generated_at.split()[1].replace(":", "")[:6]
-                        
-                        # summary_daily 파일 경로 패턴: summary_daily_YYYYMMDD_HHMMSS.json
-                        summary_file_pattern = f"summary_daily_{date_part}_{time_part}.json"
-                        
-                        # results 폴더에서 summary_daily 파일 찾기
-                        import glob
-                        results_dir = "results"
-                        summary_files = glob.glob(f"{results_dir}/**/summary_daily_*.json", recursive=True)
-                        
-                        # 가장 최근 파일 찾기
-                        if summary_files:
-                            latest_summary_file = max(summary_files, key=os.path.getctime)
-                            
-                            # JSON 파일 읽기
-                            with open(latest_summary_file, 'r', encoding='utf-8') as f:
-                                summary_data = json.load(f)
-                                market_summary = summary_data.get("market_summary", {})
-                                analysis_result = market_summary.get("분석_결과", "")
-                                print(f"✅ summary_daily 파일에서 분석_결과 추출: {latest_summary_file}")
-                        else:
-                            print("⚠️ summary_daily JSON 파일을 찾을 수 없습니다.")
-                    else:
-                        print("⚠️ generated_at 정보가 없어 summary_daily 파일을 찾을 수 없습니다.")
-                        
-                except Exception as e:
-                    print(f"⚠️ summary_daily 파일 읽기 실패: {e}")
-                    analysis_result = ""
-                
-                # "(최근거래일: YYYY-MM-DD)" 패턴에서 날짜 추출
-                import re
-                pattern = r"\(최근거래일: (\d{4})-(\d{1,2})-(\d{1,2})\)"
-                match = re.search(pattern, analysis_result)
-                
-                if match:
-                    year, month, day = match.groups()
-                    try:
-                        # YYYY-MM-DD 형식으로 변환
-                        latest_trading_date = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
-                    except:
-                        pass
-                
-                if latest_trading_date:
-                    try:
-                        # 최신거래일에서 날짜 추출 (YYYY-MM-DD 형식)
-                        analysis_date = datetime.strptime(latest_trading_date, "%Y-%m-%d")
-                        formatted_date_desc = f"{analysis_date.strftime('%m')}월 {analysis_date.strftime('%d')}일"
-                    except:
-                        # 파싱 실패 시 기본값 유지
-                        formatted_date_desc = "최근 거래일 기준"
-                # latest_trading_date가 없으면 이미 기본값 "최근 거래일 기준"이 설정되어 있음
-                
-                overview_desc = f"{formatted_date_desc} 거래량 기준 상위 50개 종목의 일봉 차트를 분석한 결과, 특이사항을 나타낸 종목은 아래와 같습니다. 핵심내용만 요약하여 제공해드리고, 자세한 내용은 첨부파일의 개별 종목별 차트분석 결과를 참고하시기 바랍니다."
-                
-                para_desc = doc.add_paragraph(overview_desc)
-                for run in para_desc.runs:
-                    run.font.name = '맑은 고딕'
-                    run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                    date_obj = datetime.strptime(trading_date, "%Y-%m-%d")
+                    formatted_trading_date = f"{date_obj.month}월 {date_obj.day}일"
+                except:
+                    formatted_trading_date = trading_date
+            
+            overview_desc = f"{formatted_trading_date} 거래량 기준 상위 50개 종목의 {chart_type_from_meta} 차트를 분석한 결과, 특이사항을 나타낸 종목은 아래와 같습니다. 핵심내용만 요약하여 제공해드리고, 자세한 내용은 첨부파일의 개별 종목별 차트분석 결과를 참고하시기 바랍니다."
+            
+            para_desc = doc.add_paragraph(overview_desc)
+            for run in para_desc.runs:
+                run.font.name = '맑은 고딕'
+                run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
             
             # 마크다운 파싱 함수 정의
             def _parse_markdown_to_word(text: str, doc) -> None:
