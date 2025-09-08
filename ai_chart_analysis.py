@@ -774,6 +774,9 @@ class AIChartAnalyzer:
                                 if "종목정보" in analysis_result:
                                     analysis_result["종목정보"]["분석일시"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                     analysis_result["종목정보"]["차트유형"] = chart_type
+                                    # 거래타입 추가
+                                    if additional_info and "trading_type" in additional_info:
+                                        analysis_result["종목정보"]["거래타입"] = additional_info["trading_type"]
                                     # 종목정보가 없는 경우 추가
                                     if "종목명" not in analysis_result["종목정보"]:
                                         analysis_result["종목정보"]["종목명"] = stock_name
@@ -786,7 +789,8 @@ class AIChartAnalyzer:
                                         "종목명": stock_name,
                                         "종목번호": extracted_stock_code,
                                         "분석일시": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                        "차트유형": chart_type
+                                        "차트유형": chart_type,
+                                        "거래타입": additional_info.get("trading_type", "") if additional_info else ""
                                     }
                                 
                                 # 거래정보 추가 (JSON 파싱 성공)
@@ -824,7 +828,7 @@ class AIChartAnalyzer:
                                     continue
                                 else:
                                     print(f"❌ 모든 시도 실패. 마지막 응답: {response.text}")
-                                    fallback_result = self._create_fallback_result(stock_name, chart_type, response.text, "JSON 파싱 실패", extracted_stock_code, chart_data)
+                                    fallback_result = self._create_fallback_result(stock_name, chart_type, response.text, "JSON 파싱 실패", extracted_stock_code, chart_data, additional_info)
                                     fallback_result["original_ai_response"] = response.text
                                     return fallback_result
                         else:
@@ -835,7 +839,7 @@ class AIChartAnalyzer:
                                 continue
                             else:
                                 print(f"❌ 모든 시도 실패. 마지막 응답: {response.text}")
-                                fallback_result = self._create_fallback_result(stock_name, chart_type, response.text, "JSON 형식 아님", extracted_stock_code, chart_data)
+                                fallback_result = self._create_fallback_result(stock_name, chart_type, response.text, "JSON 형식 아님", extracted_stock_code, chart_data, additional_info)
                                 fallback_result["original_ai_response"] = response.text
                                 return fallback_result
                     else:
@@ -1379,7 +1383,7 @@ class AIChartAnalyzer:
             print(f"❌ 하이브리드 방식 Word 문서 생성 중 오류: {e}")
             return False
 
-    def _create_fallback_result(self, stock_name: str, chart_type: str, ai_response: str, error_type: str, stock_code: str = "000000", chart_data: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
+    def _create_fallback_result(self, stock_name: str, chart_type: str, ai_response: str, error_type: str, stock_code: str = "000000", chart_data: Optional[pd.DataFrame] = None, additional_info: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """JSON 파싱 실패 시 대체 결과 생성"""
         
         # 무조건 stocks 테이블에서 종목명 조회 (통일된 처리)
@@ -1400,6 +1404,7 @@ class AIChartAnalyzer:
                 "종목번호": stock_code,
                 "분석일시": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "차트유형": chart_type,
+                "거래타입": additional_info.get("trading_type", "") if additional_info else "",
                 "파싱상태": error_type
             },
             "AI분석결과": ai_response
@@ -2841,6 +2846,9 @@ class SummaryFileGenerator:
             # 거래일 추출 (첫 번째 유효한 거래일 사용)
             trading_date = self._extract_trading_date_from_results(analysis_results)
             
+            # 거래타입 추출 (첫 번째 유효한 거래타입 사용)
+            trading_type = self._extract_trading_type_from_results(analysis_results)
+            
             # 분석 결과 요약 데이터 준비
             summary_data = {
                 "분석종목수": len(analysis_results),
@@ -2935,6 +2943,7 @@ class SummaryFileGenerator:
                             "chart_type": chart_type_kr,
                             "total_stocks": len(analysis_results),
                             "trading_date": trading_date,
+                            "trading_type": trading_type,
                             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                             "summary_method": "AI_요약_프롬프트"
                         },
@@ -2954,6 +2963,7 @@ class SummaryFileGenerator:
                     "chart_type": chart_type_kr,
                     "total_stocks": len(analysis_results),
                     "trading_date": trading_date,
+                    "trading_type": trading_type,
                     "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "summary_method": "기본_요약"
                 },
@@ -3003,6 +3013,37 @@ class SummaryFileGenerator:
         except Exception as e:
             print(f"❌ 거래일 추출 중 오류: {e}")
             return "N/A"
+    
+    def _extract_trading_type_from_results(self, analysis_results: list) -> str:
+        """
+        개별 분석 결과에서 거래타입 추출 (첫 번째 유효한 거래타입 사용)
+        
+        Args:
+            analysis_results (list): 분석 결과 리스트
+            
+        Returns:
+            str: 거래타입 (거래량/거래률) 또는 ""
+        """
+        try:
+            for result in analysis_results:
+                try:
+                    # 종목정보에서 거래타입 추출
+                    stock_info = result.get("종목정보", {})
+                    trading_type = stock_info.get("거래타입", "")
+                    
+                    if trading_type and trading_type.strip():
+                        print(f"✅ 거래타입 추출 성공: {trading_type}")
+                        return trading_type
+                except Exception as e:
+                    print(f"⚠️ 거래타입 추출 실패: {e}")
+                    continue
+            
+            print("⚠️ 유효한 거래타입을 찾을 수 없습니다")
+            return ""
+            
+        except Exception as e:
+            print(f"❌ 거래타입 추출 중 오류: {e}")
+            return ""
     
     def save_summary_files(self, consolidated_result: dict, chart_type: str, output_dir: str = "ai_analysis_results") -> tuple:
         """

@@ -31,6 +31,23 @@
                     <li>빈 줄이나 주석은 무시됩니다</li>
                     <li>최대 100개 종목까지 처리 가능</li>
                 </ul>
+                <h4>🎯 자동 감지 기능</h4>
+                <p>파일명에 키워드를 포함하면 자동으로 설정됩니다:</p>
+                
+                <h5>📊 차트 유형</h5>
+                <ul>
+                    <li><strong>일봉:</strong> 파일명에 "일간", "daily", "day" 포함</li>
+                    <li><strong>주봉:</strong> 파일명에 "주간", "weekly", "week" 포함</li>
+                    <li><strong>월봉:</strong> 파일명에 "월간", "monthly", "month" 포함</li>
+                </ul>
+                
+                <h5>📈 거래타입</h5>
+                <ul>
+                    <li><strong>거래량:</strong> 파일명에 "거래량", "volume" 포함</li>
+                    <li><strong>거래률:</strong> 파일명에 "거래률", "turnover" 포함</li>
+                </ul>
+                
+                <p><small>예: "stock_list_일간_거래량.txt", "daily_volume_stocks.txt", "주간_거래률_분석.txt"</small></p>
             </div>
         </div>
         
@@ -57,7 +74,11 @@
                         <option value="주봉">주봉</option>
                         <option value="월봉">월봉</option>
                     </select>
-                    <small>분석할 차트의 시간 단위를 선택하세요</small>
+                    <small>분석할 차트의 시간 단위를 선택하세요 (파일명에서 자동 감지됩니다)</small>
+                    <div id="autoDetectHint" class="auto-detect-hint" style="display: none; margin-top: 5px; padding: 8px; background: #e3f2fd; border-left: 4px solid #2196f3; border-radius: 4px; font-size: 0.9em;">
+                        <span class="hint-icon">🎯</span>
+                        <span id="detectMessage">파일명에서 차트 유형이 자동으로 감지되었습니다.</span>
+                    </div>
                 </div>
                 
                 <div class="form-actions">

@@ -11,6 +11,72 @@ document.addEventListener('DOMContentLoaded', function() {
     let batchId = null;
     let statusInterval = null;
 
+    // 파일명에서 차트 유형 자동 감지 함수
+    function autoDetectChartType(fileName) {
+        const chartTypeSelect = document.getElementById('chart_type');
+        const autoDetectHint = document.getElementById('autoDetectHint');
+        const detectMessage = document.getElementById('detectMessage');
+        const fileNameLower = fileName.toLowerCase();
+        
+        let detectedChartType = '';
+        let detectedTradingType = '';
+        let chartTypeDetected = false;
+        let tradingTypeDetected = false;
+        
+        // 파일명에서 차트 유형 키워드 검색
+        if (fileNameLower.includes('일간') || fileNameLower.includes('daily') || fileNameLower.includes('day')) {
+            chartTypeSelect.value = '일봉';
+            detectedChartType = '일간';
+            chartTypeDetected = true;
+        } else if (fileNameLower.includes('주간') || fileNameLower.includes('weekly') || fileNameLower.includes('week')) {
+            chartTypeSelect.value = '주봉';
+            detectedChartType = '주간';
+            chartTypeDetected = true;
+        } else if (fileNameLower.includes('월간') || fileNameLower.includes('monthly') || fileNameLower.includes('month')) {
+            chartTypeSelect.value = '월봉';
+            detectedChartType = '월간';
+            chartTypeDetected = true;
+        } else {
+            // 차트 유형을 찾지 못한 경우 기본값 '일봉'으로 설정
+            chartTypeSelect.value = '일봉';
+        }
+        
+        // 파일명에서 거래타입 키워드 검색
+        if (fileNameLower.includes('거래량') || fileNameLower.includes('volume')) {
+            detectedTradingType = '거래량';
+            tradingTypeDetected = true;
+        } else if (fileNameLower.includes('거래률') || fileNameLower.includes('turnover')) {
+            detectedTradingType = '거래률';
+            tradingTypeDetected = true;
+        }
+        
+        // 실제로 키워드가 감지된 경우에만 힌트 메시지 표시
+        if (chartTypeDetected && tradingTypeDetected) {
+            showAutoDetectHint(`파일명에서 "${detectedChartType}" 차트 유형과 "${detectedTradingType}" 거래타입이 자동으로 감지되었습니다.`);
+        } else if (chartTypeDetected) {
+            showAutoDetectHint(`파일명에서 "${detectedChartType}" 차트 유형이 자동으로 감지되었습니다.`);
+        } else if (tradingTypeDetected) {
+            showAutoDetectHint(`파일명에서 "${detectedTradingType}" 거래타입이 자동으로 감지되었습니다.`);
+        } else {
+            // 키워드가 감지되지 않았으면 힌트 숨기기
+            hideAutoDetectHint();
+        }
+    }
+
+    // 자동 감지 힌트 표시 함수
+    function showAutoDetectHint(message) {
+        const autoDetectHint = document.getElementById('autoDetectHint');
+        const detectMessage = document.getElementById('detectMessage');
+        detectMessage.textContent = message;
+        autoDetectHint.style.display = 'block';
+    }
+
+    // 자동 감지 힌트 숨기기 함수
+    function hideAutoDetectHint() {
+        const autoDetectHint = document.getElementById('autoDetectHint');
+        autoDetectHint.style.display = 'none';
+    }
+
     // 파일 선택 시 미리보기
     fileInput.addEventListener('change', function(e) {
         const file = e.target.files[0];
@@ -28,6 +94,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 fileInput.value = '';
                 return;
             }
+
+            // 파일명에서 차트 유형 및 거래타입 자동 감지
+            autoDetectChartType(file.name);
 
             // 파일 내용 미리보기
             const reader = new FileReader();
@@ -65,6 +134,21 @@ document.addEventListener('DOMContentLoaded', function() {
         
         try {
             const formData = new FormData(form);
+            
+            // 파일명에서 거래타입 감지하여 추가 (기본값: 거래량)
+            const file = fileInput.files[0];
+            let tradingType = '거래량'; // 기본값
+            
+            if (file) {
+                const fileNameLower = file.name.toLowerCase();
+                if (fileNameLower.includes('거래량') || fileNameLower.includes('volume')) {
+                    tradingType = '거래량';
+                } else if (fileNameLower.includes('거래률') || fileNameLower.includes('turnover')) {
+                    tradingType = '거래률';
+                }
+            }
+            
+            formData.append('trading_type', tradingType);
             
             // API 호출
             const response = await fetch('/api/analyze/batch', {
@@ -261,6 +345,7 @@ document.addEventListener('DOMContentLoaded', function() {
             </div>
         `;
         hideError();
+        hideAutoDetectHint();
         
         // 배치 상태 숨기기
         batchStatusDiv.style.display = 'none';

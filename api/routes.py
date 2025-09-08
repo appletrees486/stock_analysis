@@ -122,8 +122,9 @@ def analyze_batch():
         
         # 폼 데이터 추출
         chart_type = request.form.get('chart_type', '일봉')
+        trading_type = request.form.get('trading_type', '')  # 거래타입 추가
         
-        logger.info(f"대량 분석 요청: 차트타입={chart_type}")
+        logger.info(f"대량 분석 요청: 차트타입={chart_type}, 거래타입={trading_type}")
         
         # 종목 리스트 파일 저장
         filename = secure_filename(f"stock_list_{int(time.time())}_{stock_list_file.filename}")
@@ -136,7 +137,7 @@ def analyze_batch():
         batch_id = f"batch_{int(time.time())}"
         from .batch_analyzer import BatchAnalyzer
         analyzer = BatchAnalyzer()
-        analyzer.start_batch_analysis(filepath, chart_type, batch_id)
+        analyzer.start_batch_analysis(filepath, chart_type, batch_id, trading_type)
         
         logger.info(f"대량 분석 시작: batch_id={batch_id}")
         

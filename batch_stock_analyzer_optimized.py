@@ -272,7 +272,7 @@ def create_chart_fast(stock_code: str, chart_type_en: str) -> tuple[bool, object
         traceback.print_exc()
         return False, None
 
-def run_ai_analysis_fast(stock_name: str, stock_code: str, chart_type: str, chart_type_en: str, chart_data=None, batch_id=None, additional_info=None) -> bool:
+def run_ai_analysis_fast(stock_name: str, stock_code: str, chart_type: str, chart_type_en: str, chart_data=None, batch_id=None, additional_info=None, trading_type: str = '') -> bool:
     """고속 AI 분석"""
     try:
         charts_dir = f"{chart_type_en}_charts"
@@ -348,6 +348,13 @@ def run_ai_analysis_fast(stock_name: str, stock_code: str, chart_type: str, char
             final_stock_name = additional_info["stock_name"]
             print(f"✅ additional_info에서 종목명 사용: {final_stock_name}")
         
+        # additional_info에 거래타입 추가
+        if not additional_info:
+            additional_info = {}
+        if trading_type:
+            additional_info["trading_type"] = trading_type
+            print(f"✅ 거래타입 추가: {trading_type}")
+        
         # 차트 데이터가 있는 경우 AI 분석에 전달
         if chart_data is not None:
             print(f"📊 차트 데이터 포함하여 분석")
@@ -418,7 +425,7 @@ def run_ai_analysis_fast(stock_name: str, stock_code: str, chart_type: str, char
         traceback.print_exc()
         return False
 
-def analyze_single_stock_fast(stock_input: str, chart_type: str, chart_type_en: str, tracker: FastProgressTracker, batch_id=None) -> Dict:
+def analyze_single_stock_fast(stock_input: str, chart_type: str, chart_type_en: str, tracker: FastProgressTracker, batch_id=None, trading_type: str = '') -> Dict:
     """고속 단일 종목 분석"""
     result = {
         "stock_input": stock_input,
@@ -448,7 +455,7 @@ def analyze_single_stock_fast(stock_input: str, chart_type: str, chart_type_en: 
             # 기존 형식: hist만 반환된 경우
             
             # AI 분석 (차트 데이터 + 추가 정보 포함)
-            ai_success = run_ai_analysis_fast(stock_input, stock_code, chart_type, chart_type_en, chart_data, batch_id, additional_info)
+            ai_success = run_ai_analysis_fast(stock_input, stock_code, chart_type, chart_type_en, chart_data, batch_id, additional_info, trading_type)
             if ai_success:
                 result["ai_analysis_done"] = True
                 result["success"] = True

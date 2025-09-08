@@ -38,10 +38,10 @@ class BatchAnalyzer:
         # 싱글톤이므로 초기화는 한 번만
         pass
     
-    def start_batch_analysis(self, stock_list_path: str, chart_type: str, batch_id: str):
+    def start_batch_analysis(self, stock_list_path: str, chart_type: str, batch_id: str, trading_type: str = ''):
         """대량 분석 시작"""
         try:
-            logger.info(f"대량 분석 시작: batch_id={batch_id}")
+            logger.info(f"대량 분석 시작: batch_id={batch_id}, trading_type={trading_type}")
             
             # 초기 상태 설정
             self.batch_status[batch_id] = {
@@ -51,11 +51,12 @@ class BatchAnalyzer:
                 'failed': 0,
                 'start_time': datetime.now().isoformat(),
                 'progress': 0,
-                'chart_type': chart_type
+                'chart_type': chart_type,
+                'trading_type': trading_type
             }
             
             # 동기적으로 분석 실행 (스레드 문제 해결)
-            self._run_batch_analysis(stock_list_path, chart_type, batch_id)
+            self._run_batch_analysis(stock_list_path, chart_type, batch_id, trading_type)
             
             logger.info(f"대량 분석 완료: batch_id={batch_id}")
             
@@ -67,7 +68,7 @@ class BatchAnalyzer:
                 'start_time': datetime.now().isoformat()
             }
     
-    def _run_batch_analysis(self, stock_list_path: str, chart_type: str, batch_id: str):
+    def _run_batch_analysis(self, stock_list_path: str, chart_type: str, batch_id: str, trading_type: str = ''):
         """백그라운드에서 대량 분석 실행"""
         try:
             # 종목 리스트 읽기
@@ -80,7 +81,7 @@ class BatchAnalyzer:
             self.batch_status[batch_id]['total'] = len(stock_codes)
             self.batch_results[batch_id] = []
             
-            logger.info(f"대량 분석 시작: {len(stock_codes)}개 종목, 차트타입={chart_type}")
+            logger.info(f"대량 분석 시작: {len(stock_codes)}개 종목, 차트타입={chart_type}, 거래타입={trading_type}")
             
             # 각 종목별 분석
             for i, stock_code in enumerate(stock_codes):
@@ -105,7 +106,7 @@ class BatchAnalyzer:
                     tracker = FastProgressTracker(1)
                     
                     batch_result = analyze_single_stock_fast(
-                        stock_code, chart_type, chart_type_en, tracker, batch_id
+                        stock_code, chart_type, chart_type_en, tracker, batch_id, trading_type
                     )
                     
                     logger.info(f"배치 분석 결과: {batch_result}")
@@ -213,6 +214,7 @@ class BatchAnalyzer:
                     result['batch_id'] = batch_id
                     result['stock_code'] = stock_code
                     result['chart_type'] = chart_type
+                    result['trading_type'] = trading_type  # 거래타입 추가
                     result['processed_at'] = datetime.now().isoformat()
                     
                     self.batch_results[batch_id].append(result)
@@ -229,6 +231,7 @@ class BatchAnalyzer:
                         'batch_id': batch_id,
                         'stock_code': stock_code,
                         'chart_type': chart_type,
+                        'trading_type': trading_type,  # 거래타입 추가
                         'processed_at': datetime.now().isoformat(),
                         'error': str(e),
                         'analysis_score': 0,
