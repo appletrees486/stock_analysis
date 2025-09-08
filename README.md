@@ -54,6 +54,27 @@
 
 ## 🆕 최신 업데이트
 
+### 🚀 배치 스케줄러 시스템 (2025-01-15)
+- **자동화된 배치 분석**: APScheduler를 활용한 정기적인 배치 분석 실행
+- **스케줄 관리**: 웹 인터페이스를 통한 배치 작업 스케줄 등록 및 관리
+- **작업 모니터링**: 실시간 작업 상태 추적 및 로그 관리
+- **유연한 스케줄링**: 일일, 주간, 월간 등 다양한 주기 설정 지원
+- **백그라운드 실행**: 웹 서버와 독립적으로 실행되는 안정적인 스케줄러
+
+### 🔄 일일 데이터 수집 시스템 (2025-01-15)
+- **자동 일일 수집**: 장 마감 후 자동으로 전일 데이터 수집
+- **DB 기반 작업 관리**: `collection_job_manager.py`를 통한 체계적인 작업 관리
+- **진행률 추적**: 실시간 수집 진행률 및 상태 모니터링
+- **에러 처리**: 수집 실패 시 자동 재시도 및 상세한 에러 로깅
+- **웹 인터페이스**: 일일 수집 작업을 웹에서 직접 실행 및 모니터링
+
+### 🎯 프롬프트 관리 시스템 (2025-01-15)
+- **웹 기반 프롬프트 편집**: 브라우저에서 직접 프롬프트 수정 및 관리
+- **실시간 프롬프트 적용**: 수정된 프롬프트가 즉시 AI 분석에 반영
+- **버전 관리**: 프롬프트 변경 이력 추적 및 롤백 지원
+- **카테고리별 관리**: 일봉/주봉/월봉별 프롬프트 체계적 분류
+- **API 지원**: REST API를 통한 프롬프트 CRUD 작업
+
 ### 🧹 프로젝트 정리 및 최적화 (2025-08-27)
 - **백업 파일 정리**: 불필요한 백업 파일들 제거하여 ~6.8MB 용량 절약
 - **SQLite 완전 제거**: MySQL 이전 완료로 SQLite 관련 파일들 모두 정리
@@ -124,7 +145,9 @@
 - **실시간 진행률**: 배치 분석 진행 상황 실시간 모니터링
 - **프롬프트 관리**: AI 분석용 프롬프트 웹 인터페이스에서 관리
 - **거래량 랭킹**: 일/주/월별 거래량 및 거래률 상위 50개 종목 조회
-- **REST API 제공**: 배치 분석, 프롬프트 관리, 거래량 랭킹 등을 위한 API 엔드포인트
+- **일일 데이터 수집**: 웹에서 직접 일일 시세 수집 작업 실행 및 모니터링
+- **배치 스케줄러**: 정기적인 배치 분석 작업 스케줄 등록 및 관리
+- **REST API 제공**: 배치 분석, 프롬프트 관리, 거래량 랭킹, 데이터 수집 등을 위한 API 엔드포인트
 - **반응형 디자인**: 모바일과 데스크톱 모두 지원하는 반응형 웹 인터페이스
 
 ## 📋 설치 요구사항
@@ -291,7 +314,18 @@ python app.py
 - 배치 분석 및 단일 분석 지원
 - 거래량 랭킹 조회 기능
 - 프롬프트 관리 기능
+- 일일 데이터 수집 기능
+- 배치 스케줄러 관리 기능
 - 결과 파일 다운로드 기능
+
+**웹 페이지 접속:**
+- 메인 페이지: http://localhost:5000
+- 단일 분석: http://localhost:5000/single
+- 배치 분석: http://localhost:5000/batch
+- 프롬프트 관리: http://localhost:5000/prompts
+- 거래량 랭킹: http://localhost:5000/volume-ranking
+- 일일 수집: http://localhost:5000/daily-collection
+- 배치 스케줄: http://localhost:5000/batch-schedule
 
 ### 6. 데이터베이스 관리
 ```bash
@@ -340,6 +374,24 @@ python update_database_schema.py
 # http://localhost:5000/volume-ranking
 ```
 
+### 9. 일일 데이터 수집
+```bash
+# 웹 인터페이스에서 일일 수집 실행
+# http://localhost:5000/daily-collection
+
+# 또는 명령행에서 직접 실행
+python stock_data_collector.py
+```
+
+### 10. 배치 스케줄러
+```bash
+# 스케줄러 서비스 시작
+python batch_scheduler.py
+
+# 웹 인터페이스에서 스케줄 관리
+# http://localhost:5000/batch-schedule
+```
+
 ## 📁 파일 구조
 
 ```
@@ -371,13 +423,17 @@ stock_analysis/
 │   ├── utils.py                     # 유틸리티 함수
 │   ├── batch_analyzer.py            # 배치 분석 API
 │   ├── prompt_routes.py             # 프롬프트 관리 API
+│   ├── daily_collection_routes.py   # 일일 수집 API
+│   ├── batch_schedule_routes.py     # 배치 스케줄 API
 │   └── volume_ranking_utils.py      # 거래량 랭킹 유틸리티
 ├── templates/                       # 웹 템플릿
 │   ├── index.html                   # 메인 페이지
 │   ├── single_analysis.html         # 단일 분석 페이지
 │   ├── batch_analysis.html          # 배치 분석 페이지
 │   ├── prompt_management.html       # 프롬프트 관리 페이지
-│   └── volume_ranking.html          # 거래량 랭킹 페이지
+│   ├── volume_ranking.html          # 거래량 랭킹 페이지
+│   ├── daily_collection.html        # 일일 수집 페이지
+│   └── batch_schedule.html          # 배치 스케줄 페이지
 ├── static/                          # 웹 정적 파일
 │   ├── css/
 │   │   └── style.css                # 메인 스타일시트
@@ -413,6 +469,8 @@ stock_analysis/
 ├── create_prompt_tables.py          # 프롬프트 테이블 생성
 ├── save_daily_prompt.py             # 일일 프롬프트 저장
 ├── check_saved_prompt.py            # 저장된 프롬프트 확인
+├── batch_scheduler.py               # 배치 스케줄러 서비스
+├── collection_job_manager.py        # 수집 작업 관리자
 ├── test_web_interface.py            # 웹 인터페이스 테스트
 ├── .secret_key                      # 보안 키 파일
 ├── config.txt                       # 설정 텍스트 파일
@@ -1067,6 +1125,9 @@ prompt_categories (1) ←→ (N) prompts
 - ✅ 거래량 랭킹 시스템 (2025-08-23)
 - ✅ 데이터베이스 스키마 업데이트 (2025-08-23)
 - ✅ 프로젝트 정리 및 최적화 (2025-08-27)
+- ✅ 배치 스케줄러 시스템 (2025-01-15)
+- ✅ 일일 데이터 수집 시스템 (2025-01-15)
+- ✅ 웹 기반 프롬프트 관리 (2025-01-15)
 
 ### 🔄 현재 진행 중인 기능
 - 🔄 차트 생성 모듈을 DB 기반으로 수정
