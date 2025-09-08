@@ -1076,13 +1076,25 @@ class BatchAnalyzer:
                     if chart_type == "일봉" and "종목정보" in stock_data:
                         trading_info = stock_data["종목정보"]
                         total_trading_amount = trading_info.get("총거래대금")
-                        trading_rank = trading_info.get("거래대금순위")
+                        trading_rank = trading_info.get("순위")  # "거래대금순위" → "순위"
                         
                         if total_trading_amount and trading_rank:
-                            # 억원 단위로 변환 (10000000000원 = 100억원)
-                            amount_in_hundred_millions = total_trading_amount / 100000000
+                            # 억원 단위로 변환 (1억 = 100,000,000원)
+                            if isinstance(total_trading_amount, str):
+                                # 문자열인 경우 쉼표 제거 후 숫자로 변환
+                                amount_numeric = int(total_trading_amount.replace(",", ""))
+                            else:
+                                amount_numeric = int(total_trading_amount)
                             
-                            trading_desc = f"위 주식의 일일 거래대금은 {amount_in_hundred_millions:.0f}억원으로 전체 종목중 상위 {trading_rank}위를 차지하여 분석 대상에 포함되었습니다."
+                            amount_billion = amount_numeric / 100_000_000  # 억원 단위로 변환
+                            
+                            # 순위에서 숫자만 추출
+                            if "위" in str(trading_rank):
+                                rank_number = str(trading_rank).replace("위", "").strip()
+                            else:
+                                rank_number = str(trading_rank)
+                            
+                            trading_desc = f"위 주식의 일일 거래대금은 {amount_billion:.1f}억원으로 전체 종목중 상위 {rank_number}위를 차지하여 분석 대상에 포함되었습니다."
                             
                             para_trading = doc.add_paragraph(trading_desc)
                             for run in para_trading.runs:
