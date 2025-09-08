@@ -54,7 +54,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (chartTypeDetected && tradingTypeDetected) {
             showAutoDetectHint(`파일명에서 "${detectedChartType}" 차트 유형과 "${detectedTradingType}" 거래타입이 자동으로 감지되었습니다.`);
         } else if (chartTypeDetected) {
-            showAutoDetectHint(`파일명에서 "${detectedChartType}" 차트 유형이 자동으로 감지되었습니다.`);
+            showAutoDetectHint(`파일명에서 "${detectedChartType}" 차트 유형이 자동으로 감지되었습니다. 거래타입은 기본값 "거래량"을 사용합니다.`);
         } else if (tradingTypeDetected) {
             showAutoDetectHint(`파일명에서 "${detectedTradingType}" 거래타입이 자동으로 감지되었습니다.`);
         } else {
@@ -135,9 +135,9 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             const formData = new FormData(form);
             
-            // 파일명에서 거래타입 감지하여 추가 (기본값: 거래량)
+            // 파일명에서 거래타입 감지하여 추가
             const file = fileInput.files[0];
-            let tradingType = '거래량'; // 기본값
+            let tradingType = ''; // 기본값을 빈 문자열로 설정
             
             if (file) {
                 const fileNameLower = file.name.toLowerCase();
@@ -145,10 +145,19 @@ document.addEventListener('DOMContentLoaded', function() {
                     tradingType = '거래량';
                 } else if (fileNameLower.includes('거래률') || fileNameLower.includes('turnover')) {
                     tradingType = '거래률';
+                } else {
+                    // 거래타입이 감지되지 않으면 사용자에게 알림
+                    console.warn('파일명에서 거래타입을 감지할 수 없습니다. 기본값 "거래량"을 사용합니다.');
+                    tradingType = '거래량'; // fallback
                 }
+            } else {
+                tradingType = '거래량'; // 파일이 없으면 기본값
             }
             
             formData.append('trading_type', tradingType);
+            
+            // 거래타입 감지 상태를 콘솔에 로그
+            console.log(`거래타입 설정: ${tradingType}`);
             
             // API 호출
             const response = await fetch('/api/analyze/batch', {

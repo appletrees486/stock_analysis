@@ -175,15 +175,19 @@ class VolumeRankingDataManager:
                 days_since_monday = today.weekday()
                 week_start = (today - timedelta(days=days_since_monday)).strftime('%Y-%m-%d')
             
-            # 캐시 확인
+            # 캐시 확인 (주간 데이터는 공유하므로 limit 없이 캐시)
             cache_key = f"weekly_volume_{week_start}"
             if cache_key in self._weekly_cache:
                 cache_data = self._weekly_cache[cache_key]
                 if datetime.now().timestamp() - cache_data['timestamp'] < self._cache_ttl:
-                    return cache_data['data']
+                    # 캐시된 전체 데이터에서 limit만큼 반환
+                    return cache_data['data'][:limit]
             
             # 주간 거래량 집계 (월~금)
             week_end = (datetime.strptime(week_start, '%Y-%m-%d') + timedelta(days=6)).strftime('%Y-%m-%d')
+            
+            # 캐시를 위해 더 많은 데이터를 조회 (최대 1000개)
+            cache_limit = max(1000, limit)
             
             query = """
                 SELECT 
@@ -207,7 +211,7 @@ class VolumeRankingDataManager:
                 return []
                 
             try:
-                self.db_manager.execute_query(query, (week_start, week_end, limit))
+                self.db_manager.execute_query(query, (week_start, week_end, cache_limit))
                 results = self.db_manager.cursor.fetchall()
                 
                 # 결과 포맷팅
@@ -223,13 +227,14 @@ class VolumeRankingDataManager:
                         'trading_days': row['trading_days']
                     })
                 
-                # 캐시 저장
+                # 캐시 저장 (전체 데이터)
                 self._weekly_cache[cache_key] = {
                     'data': formatted_results,
                     'timestamp': datetime.now().timestamp()
                 }
                 
-                return formatted_results
+                # 요청된 limit만큼 반환
+                return formatted_results[:limit]
                 
             finally:
                 self.db_manager.disconnect()
@@ -247,15 +252,19 @@ class VolumeRankingDataManager:
                 days_since_monday = today.weekday()
                 week_start = (today - timedelta(days=days_since_monday)).strftime('%Y-%m-%d')
             
-            # 캐시 확인
+            # 캐시 확인 (주간 데이터는 공유하므로 limit 없이 캐시)
             cache_key = f"weekly_turnover_{week_start}"
             if cache_key in self._weekly_cache:
                 cache_data = self._weekly_cache[cache_key]
                 if datetime.now().timestamp() - cache_data['timestamp'] < self._cache_ttl:
-                    return cache_data['data']
+                    # 캐시된 전체 데이터에서 limit만큼 반환
+                    return cache_data['data'][:limit]
             
             # 주간 거래률 계산 (월~금)
             week_end = (datetime.strptime(week_start, '%Y-%m-%d') + timedelta(days=6)).strftime('%Y-%m-%d')
+            
+            # 캐시를 위해 더 많은 데이터를 조회 (최대 1000개)
+            cache_limit = max(1000, limit)
             
             # 새로운 구조: daily_data의 outstanding_shares 사용
             query = """
@@ -287,7 +296,7 @@ class VolumeRankingDataManager:
                 return []
                 
             try:
-                self.db_manager.execute_query(query, (week_start, week_end, limit))
+                self.db_manager.execute_query(query, (week_start, week_end, cache_limit))
                 results = self.db_manager.cursor.fetchall()
                 
                 # 결과 포맷팅
@@ -303,14 +312,15 @@ class VolumeRankingDataManager:
                         'trading_days': row['trading_days']
                     })
                 
-                # 캐시 저장
+                # 캐시 저장 (전체 데이터)
                 self._weekly_cache[cache_key] = {
                     'data': formatted_results,
                     'timestamp': datetime.now().timestamp()
                 }
                 
                 logger.info(f"주간 거래률 랭킹 조회 완료: {week_start}~{week_end} - {len(formatted_results)}개 종목")
-                return formatted_results
+                # 요청된 limit만큼 반환
+                return formatted_results[:limit]
                 
             finally:
                 self.db_manager.disconnect()

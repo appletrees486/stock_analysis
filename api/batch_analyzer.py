@@ -677,7 +677,7 @@ class BatchAnalyzer:
                         temp_path = temp_file.name
                     
                     doc_success = self._create_total_analysis_docx(
-                        total_analysis_result, chart_type, temp_path
+                        total_analysis_result, chart_type, temp_path, batch_id
                     )
                     
                     if doc_success:
@@ -889,7 +889,7 @@ class BatchAnalyzer:
             logger.error(f"Total Analysis JSON 생성 중 오류: {e}")
             return None
     
-    def _create_total_analysis_docx(self, total_analysis_result: dict, chart_type: str, output_path: str) -> bool:
+    def _create_total_analysis_docx(self, total_analysis_result: dict, chart_type: str, output_path: str, batch_id: str) -> bool:
         """
         Total Analysis JSON을 기반으로 DOCX 문서 생성
         개별 분석 결과와 동일한 레이아웃과 구조 적용
@@ -1075,31 +1075,75 @@ class BatchAnalyzer:
                     doc.add_paragraph()
                     logger.info(f"차트 이미지 추가: {stock_code} - {chart_image_path}")
                     
-                    # 일봉 차트인 경우 거래대금 정보 추가
-                    if chart_type == "일봉" and "종목정보" in stock_data:
+                    # 거래 정보 추가 (거래타입에 따라 구분)
+                    if "종목정보" in stock_data:
                         trading_info = stock_data["종목정보"]
-                        total_trading_amount = trading_info.get("총거래대금")
-                        trading_rank = trading_info.get("순위")  # "거래대금순위" → "순위"
                         
-                        if total_trading_amount and trading_rank:
-                            # 억원 단위로 변환 (1억 = 100,000,000원)
-                            if isinstance(total_trading_amount, str):
-                                # 문자열인 경우 쉼표 제거 후 숫자로 변환
-                                amount_numeric = int(total_trading_amount.replace(",", ""))
-                            else:
-                                amount_numeric = int(total_trading_amount)
+                        # 배치 결과에서 거래타입 정보 가져오기
+                        trading_type = None
+                        if batch_id and batch_id in self.batch_results:
+                            for result in self.batch_results[batch_id]:
+                                if result.get('stock_code') == stock_code:
+                                    trading_type = result.get('trading_type', '')
+                                    break
+                        
+                        # 차트 타입별 기간 텍스트
+                        period_text = {
+                            "일봉": "일일",
+                            "주봉": "주간", 
+                            "월봉": "월간"
+                        }.get(chart_type, "일일")
+                        
+                        # 거래 타입별 문구 생성
+                        if trading_type == "거래률" and "거래률" in trading_info:
+                            turnover_rate = trading_info.get("거래률")
+                            ranking = trading_info.get("순위", "N/A")
                             
-                            amount_billion = amount_numeric / 100_000_000  # 억원 단위로 변환
+                            if turnover_rate and turnover_rate != "N/A":
+                                # 거래률 기준 문구
+                                rate_value = turnover_rate.replace("%", "").strip()
+                                if rate_value.replace(".", "").isdigit():
+                                    trading_info_text = f"위 주식의 {period_text} 거래률은 {turnover_rate}로 전체 종목 중 상위 {ranking}를 차지하여 분석 대상에 포함되었습니다."
+                                else:
+                                    trading_info_text = f"위 주식의 {period_text} 거래률 정보를 확인할 수 없어 분석 대상에 포함되었습니다."
+                                
+                                para_trading = doc.add_paragraph(trading_info_text)
+                                for run in para_trading.runs:
+                                    run.font.name = '맑은 고딕'
+                                    run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                                doc.add_paragraph()
+                        
+                        else:
+                            # 거래량 기준 문구 (기본값)
+                            total_trading_amount = trading_info.get("거래대금")
+                            trading_rank = trading_info.get("순위", "N/A")
+                            
+                            if total_trading_amount and total_trading_amount != "N/A":
+                                # 억원 단위로 변환 (1억 = 100,000,000원)
+                                if isinstance(total_trading_amount, str):
+                                    # 문자열인 경우 쉼표 제거 후 숫자로 변환
+                                    amount_numeric = int(total_trading_amount.replace(",", ""))
+                                else:
+                                    amount_numeric = int(total_trading_amount)
+                                
+                                amount_billion = amount_numeric / 100_000_000  # 억원 단위로 변환
+                                amount_text = f"{amount_billion:.1f}억원"
+                            else:
+                                amount_text = "정보 없음"
                             
                             # 순위에서 숫자만 추출
-                            if "위" in str(trading_rank):
+                            if trading_rank and trading_rank != "N/A" and "위" in str(trading_rank):
                                 rank_number = str(trading_rank).replace("위", "").strip()
+                                if rank_number.isdigit():
+                                    rank_text = f"상위 {rank_number}위"
+                                else:
+                                    rank_text = "순위 정보 없음"
                             else:
-                                rank_number = str(trading_rank)
+                                rank_text = "순위 정보 없음"
                             
-                            trading_desc = f"위 주식의 일일 거래대금은 {amount_billion:.1f}억원으로 전체 종목중 상위 {rank_number}위를 차지하여 분석 대상에 포함되었습니다."
+                            trading_info_text = f"위 주식의 {period_text} 거래량은 {amount_text}으로 전체 종목 중 {rank_text}를 차지하여 분석 대상에 포함되었습니다."
                             
-                            para_trading = doc.add_paragraph(trading_desc)
+                            para_trading = doc.add_paragraph(trading_info_text)
                             for run in para_trading.runs:
                                 run.font.name = '맑은 고딕'
                                 run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
@@ -1197,58 +1241,6 @@ class BatchAnalyzer:
                     p_score1.runs[0].font.size = Pt(14)
                     
                     for p in [p_score1, p_score2]:
-                        for run in p.runs:
-                            run.font.name = '맑은 고딕'
-                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
-                
-                # 차트 유형별 봉 요약 (개별 분석 결과와 동일한 구조)
-                if chart_type == "일봉" and "오늘의일봉" in stock_data:
-                    heading_candle = doc.add_heading('오늘의 일봉 요약', level=1)
-                    for run in heading_candle.runs:
-                        run.font.name = '맑은 고딕'
-                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
-                    
-                    candle = stock_data["오늘의일봉"]
-                    p_candle1 = doc.add_paragraph(f"종가: {candle.get('종가', 'N/A')}원")
-                    p_candle2 = doc.add_paragraph(f"등락률: {candle.get('등락률', 'N/A')}%")
-                    p_candle3 = doc.add_paragraph(f"거래량: {candle.get('거래량', 'N/A')}주")
-                    p_candle4 = doc.add_paragraph(f"주요 특징: {candle.get('주요특징', 'N/A')}")
-                    
-                    for p in [p_candle1, p_candle2, p_candle3, p_candle4]:
-                        for run in p.runs:
-                            run.font.name = '맑은 고딕'
-                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
-                
-                elif chart_type == "주봉" and "이번주봉" in stock_data:
-                    heading_candle = doc.add_heading('이번 주 봉 요약', level=1)
-                    for run in heading_candle.runs:
-                        run.font.name = '맑은 고딕'
-                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
-                    
-                    candle = stock_data["이번주봉"]
-                    p_candle1 = doc.add_paragraph(f"종가: {candle.get('종가', 'N/A')}원")
-                    p_candle2 = doc.add_paragraph(f"등락률: {candle.get('등락률', 'N/A')}%")
-                    p_candle3 = doc.add_paragraph(f"거래량: {candle.get('거래량', 'N/A')}주")
-                    p_candle4 = doc.add_paragraph(f"주요 특징: {candle.get('주요특징', 'N/A')}")
-                    
-                    for p in [p_candle1, p_candle2, p_candle3, p_candle4]:
-                        for run in p.runs:
-                            run.font.name = '맑은 고딕'
-                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
-                
-                elif chart_type == "월봉" and "이번월봉" in stock_data:
-                    heading_candle = doc.add_heading('이번 월봉 요약', level=1)
-                    for run in heading_candle.runs:
-                        run.font.name = '맑은 고딕'
-                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
-                    
-                    candle = stock_data["이번월봉"]
-                    p_candle1 = doc.add_paragraph(f"종가: {candle.get('종가', 'N/A')}원")
-                    p_candle2 = doc.add_paragraph(f"등락률: {candle.get('등락률', 'N/A')}%")
-                    p_candle3 = doc.add_paragraph(f"거래량: {candle.get('거래량', 'N/A')}주")
-                    p_candle4 = doc.add_paragraph(f"주요 특징: {candle.get('주요특징', 'N/A')}")
-                    
-                    for p in [p_candle1, p_candle2, p_candle3, p_candle4]:
                         for run in p.runs:
                             run.font.name = '맑은 고딕'
                             run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')

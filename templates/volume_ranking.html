@@ -733,8 +733,9 @@
             const periodText = currentPeriod === 'daily' ? '일간' : currentPeriod === 'weekly' ? '주간' : '월간';
             const rankingText = currentRankingType === 'volume' ? '거래량' : '거래률';
             const dateText = getCurrentDateText();
-            const periodRange = getSelectedPeriodRange();
-            const filename = `${periodRange}_${periodText}_${rankingText}_랭킹_${dateText}.txt`;
+            //const periodRange = getSelectedPeriodRange();
+            //const filename = `${periodRange}_${periodText}_${rankingText}_랭킹_${dateText}.txt`;
+            const filename = `${periodText}_${rankingText}_랭킹_${dateText}.txt`;
             
             // txt 파일 생성 및 다운로드
             const content = stockCodes.join('\n');
