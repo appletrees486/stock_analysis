@@ -431,13 +431,23 @@
             }
         }
         
-        // ISO week 계산 함수
+        // ISO 8601 주차 계산 함수 (통일된 표준)
         function getISOWeek(date) {
             const d = new Date(date.getTime());
             d.setHours(0, 0, 0, 0);
-            d.setDate(d.getDate() + 4 - (d.getDay() || 7));
-            const yearStart = new Date(d.getFullYear(), 0, 1);
-            const weekNo = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+            
+            // ISO 8601: 1월 4일이 속한 주의 월요일을 1주차로 계산
+            const jan4 = new Date(d.getFullYear(), 0, 4);
+            const jan4Day = jan4.getDay() || 7; // 일요일이면 7로 변환
+            const weekStart = new Date(jan4.getTime() - (jan4Day - 1) * 86400000);
+            
+            // 해당 날짜가 속한 주의 월요일 계산
+            const dayOfWeek = d.getDay() || 7;
+            const monday = new Date(d.getTime() - (dayOfWeek - 1) * 86400000);
+            
+            // 주차 계산
+            const weekNo = Math.floor((monday.getTime() - weekStart.getTime()) / (7 * 86400000)) + 1;
+            
             return weekNo;
         }
         
@@ -689,16 +699,19 @@
             }, 5000);
         }
 
-        // ISO week에서 주 시작일(월요일) 계산
+        // ISO 8601 주차에서 주 시작일(월요일) 계산 (통일된 표준)
         function getWeekStartFromISOWeek(isoWeek) {
             const [year, week] = isoWeek.split('-W');
             const yearNum = parseInt(year);
             const weekNum = parseInt(week);
             
-            // 1월 4일이 속한 주의 월요일을 기준으로 계산
+            // ISO 8601: 1월 4일이 속한 주의 월요일을 1주차로 계산
             const jan4 = new Date(yearNum, 0, 4);
             const jan4Day = jan4.getDay() || 7; // 일요일이면 7로 변환
-            const weekStart = new Date(yearNum, 0, 4 - jan4Day + 1 + (weekNum - 1) * 7);
+            const firstWeekStart = new Date(jan4.getTime() - (jan4Day - 1) * 86400000);
+            
+            // 요청된 주차의 월요일 계산
+            const weekStart = new Date(firstWeekStart.getTime() + (weekNum - 1) * 7 * 86400000);
             
             return weekStart.toISOString().split('T')[0];
         }

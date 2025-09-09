@@ -12,9 +12,18 @@ import time
 import glob
 from pathlib import Path
 
+# requests 라이브러리 확인 및 설치
+try:
+    import requests
+except ImportError:
+    print("❌ requests 라이브러리가 설치되지 않았습니다.")
+    print("💡 다음 명령어로 설치해주세요: pip install requests")
+    sys.exit(1)
+
 class CacheReset:
     def __init__(self):
         self.project_root = Path(__file__).parent
+        self.server_url = "http://localhost:5000"
         self.cache_dirs = [
             '__pycache__',
             'api/__pycache__',
@@ -145,6 +154,54 @@ class CacheReset:
         
         print(f"   📊 총 {removed_count}개의 차트 파일 삭제됨")
 
+    def clear_web_cache(self):
+        """웹 API 캐시 초기화"""
+        print("🌐 웹 API 캐시 초기화 중...")
+        
+        try:
+            # 거래량 랭킹 캐시 초기화
+            response = requests.post(f"{self.server_url}/api/volume-ranking/cache/clear", timeout=10)
+            if response.status_code == 200:
+                print("   ✅ 거래량 랭킹 캐시 초기화됨")
+            else:
+                print(f"   ⚠️  거래량 랭킹 캐시 초기화 실패: {response.status_code}")
+        except requests.exceptions.ConnectionError:
+            print("   ⚠️  서버가 실행 중이지 않습니다. 서버를 먼저 시작해주세요.")
+        except requests.exceptions.Timeout:
+            print("   ⚠️  서버 응답 시간 초과")
+        except Exception as e:
+            print(f"   ❌ 웹 캐시 초기화 오류: {e}")
+
+    def clear_browser_cache(self):
+        """브라우저 캐시 초기화 안내"""
+        print("🌐 브라우저 캐시 초기화 안내:")
+        print("   💡 브라우저에서 다음을 수행하세요:")
+        print("      - Ctrl + Shift + R (강력 새로고침)")
+        print("      - 또는 F12 → Network 탭 → 'Disable cache' 체크")
+        print("      - 또는 Ctrl + Shift + Delete → 캐시 삭제")
+
+    def check_server_status(self):
+        """서버 상태 확인"""
+        print("🔍 서버 상태 확인 중...")
+        
+        try:
+            response = requests.get(f"{self.server_url}/", timeout=5)
+            if response.status_code == 200:
+                print("   ✅ 서버가 정상적으로 실행 중입니다")
+                return True
+            else:
+                print(f"   ⚠️  서버 응답 오류: {response.status_code}")
+                return False
+        except requests.exceptions.ConnectionError:
+            print("   ❌ 서버에 연결할 수 없습니다")
+            return False
+        except requests.exceptions.Timeout:
+            print("   ⚠️  서버 응답 시간 초과")
+            return False
+        except Exception as e:
+            print(f"   ❌ 서버 상태 확인 오류: {e}")
+            return False
+
     def restart_server(self):
         """서버 재시작"""
         print("🔄 서버 재시작 중...")
@@ -210,16 +267,25 @@ class CacheReset:
             if chart_path.exists():
                 chart_count += len(list(chart_path.glob('*.png')))
         print(f"   📊 차트 파일: {chart_count}개")
+        
+        # 서버 상태 확인
+        print(f"\n🌐 웹 서버 상태:")
+        server_running = self.check_server_status()
+        if server_running:
+            print(f"   ✅ 서버 URL: {self.server_url}")
+        else:
+            print(f"   ❌ 서버가 실행 중이지 않습니다")
 
     def run_full_reset(self):
-        """전체 캐시 리셋 실행"""
-        print("🧹 로컬서버 캐시 리셋 시작")
+        """전체 캐시 리셋 실행 (서버 + 웹)"""
+        print("🧹 전체 캐시 리셋 시작 (서버 + 웹)")
         print("=" * 50)
         
         self.show_status()
         print("\n" + "=" * 50)
         
-        # 캐시 정리
+        # 1. 서버 캐시 정리
+        print("📁 1단계: 서버 캐시 정리")
         self.clear_pycache()
         print()
         self.clear_log_files()
@@ -230,15 +296,53 @@ class CacheReset:
         print()
         self.clear_chart_cache()
         
-        print("\n" + "=" * 50)
-        print("✅ 캐시 리셋 완료!")
+        print("\n" + "=" * 30)
+        print("📁 서버 캐시 정리 완료!")
+        print("=" * 30)
         
-        # 서버 재시작 여부 확인
-        restart = input("\n🔄 서버를 재시작하시겠습니까? (y/N): ").strip().lower()
-        if restart in ['y', 'yes', '예']:
-            self.restart_server()
-        else:
-            print("💡 수동으로 'python app.py' 실행하여 서버를 시작하세요")
+        # 2. 서버 재시작
+        print("\n🔄 2단계: 서버 재시작")
+        self.restart_server()
+        
+        # 서버 시작 대기
+        print("\n⏳ 서버 시작 대기 중... (5초)")
+        time.sleep(5)
+        
+        # 3. 웹 캐시 초기화
+        print("\n🌐 3단계: 웹 캐시 초기화")
+        self.clear_web_cache()
+        print()
+        self.clear_browser_cache()
+        
+        print("\n" + "=" * 50)
+        print("✅ 전체 캐시 리셋 완료!")
+        print("🌐 브라우저에서 http://localhost:5000 접속하여 확인하세요")
+        print("=" * 50)
+
+    def run_web_cache_reset(self):
+        """웹 캐시만 초기화"""
+        print("🌐 웹 캐시 초기화 시작")
+        print("=" * 30)
+        
+        # 서버 상태 확인
+        if not self.check_server_status():
+            print("\n❌ 서버가 실행 중이지 않습니다.")
+            start_server = input("서버를 시작하시겠습니까? (y/N): ").strip().lower()
+            if start_server in ['y', 'yes', '예']:
+                self.restart_server()
+                time.sleep(5)
+            else:
+                print("💡 먼저 'python app.py'로 서버를 시작해주세요")
+                return
+        
+        # 웹 캐시 초기화
+        self.clear_web_cache()
+        print()
+        self.clear_browser_cache()
+        
+        print("\n" + "=" * 30)
+        print("✅ 웹 캐시 초기화 완료!")
+        print("=" * 30)
 
 def main():
     """메인 함수"""
@@ -246,38 +350,45 @@ def main():
     
     print("🛠️  로컬서버 캐시 리셋 도구")
     print("=" * 50)
-    print("1. 전체 캐시 리셋 (권장)")
-    print("2. 캐시만 정리 (서버 재시작 안함)")
-    print("3. 서버만 재시작")
-    print("4. 현재 상태 확인")
-    print("5. 종료")
+    print("1. 전체 캐시 리셋 (서버 + 웹) - 권장")
+    print("2. 서버 캐시만 정리 (서버 재시작 안함)")
+    print("3. 웹 캐시만 초기화")
+    print("4. 서버만 재시작")
+    print("5. 서버 상태 확인")
+    print("6. 현재 상태 확인")
+    print("7. 종료")
     
     while True:
         try:
-            choice = input("\n선택하세요 (1-5): ").strip()
+            choice = input("\n선택하세요 (1-7): ").strip()
             
             if choice == '1':
                 reset_tool.run_full_reset()
                 break
             elif choice == '2':
-                print("🧹 캐시 정리만 실행")
+                print("🧹 서버 캐시 정리만 실행")
                 reset_tool.clear_pycache()
                 reset_tool.clear_log_files()
                 reset_tool.clear_temp_files()
                 reset_tool.clear_upload_cache()
                 reset_tool.clear_chart_cache()
-                print("\n✅ 캐시 정리 완료!")
+                print("\n✅ 서버 캐시 정리 완료!")
                 break
             elif choice == '3':
-                reset_tool.restart_server()
+                reset_tool.run_web_cache_reset()
                 break
             elif choice == '4':
-                reset_tool.show_status()
+                reset_tool.restart_server()
+                break
             elif choice == '5':
+                reset_tool.check_server_status()
+            elif choice == '6':
+                reset_tool.show_status()
+            elif choice == '7':
                 print("👋 종료합니다.")
                 break
             else:
-                print("❌ 잘못된 선택입니다. 1-5 중에서 선택해주세요.")
+                print("❌ 잘못된 선택입니다. 1-7 중에서 선택해주세요.")
                 
         except KeyboardInterrupt:
             print("\n\n👋 사용자가 중단했습니다.")

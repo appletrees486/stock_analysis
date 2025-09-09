@@ -16,6 +16,7 @@ import matplotlib.font_manager as fm
 import mplfinance as mpf
 import platform
 import os
+from week_calculator import get_week_number, get_week_number_string, get_week_start_date, get_week_end_date
 # openpyxl import 추가
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -304,7 +305,7 @@ def convert_daily_to_weekly(daily_data, stock_code):
         return None
 
 def is_complete_week(week_start_date, current_date):
-    """해당 주가 완성되었는지 확인 (주의 마지막 거래일이 지났는지 확인)"""
+    """해당 주가 완성되었는지 확인 (거래일 기준으로 주의 마지막 거래일이 지났는지 확인)"""
     try:
         # week_start_date를 date 객체로 변환
         if hasattr(week_start_date, 'date'):
@@ -318,14 +319,23 @@ def is_complete_week(week_start_date, current_date):
         else:
             current = current_date
         
-        # 주의 마지막 날 계산 (주 시작일로부터 6일 후)
-        week_end = week_start + timedelta(days=6)
+        # 주의 마지막 거래일 계산 (금요일)
+        # 월요일(0)부터 시작해서 금요일(4)까지가 한 주
+        if week_start.weekday() == 0:  # 월요일 시작
+            week_end_friday = week_start + timedelta(days=4)  # 금요일
+        else:
+            # 다른 요일 시작인 경우, 다음 금요일까지 계산
+            days_to_friday = (4 - week_start.weekday()) % 7
+            week_end_friday = week_start + timedelta(days=days_to_friday)
         
-        # 현재 날짜가 주의 마지막 날을 지났는지 확인
-        is_complete = current > week_end
+        # 현재 날짜가 금요일 이후인지 확인 (거래일 기준)
+        # 금요일 당일도 완성된 주로 간주
+        is_complete = current >= week_end_friday
         
         if not is_complete:
-            print(f"   ⚠️ 미완성 주 감지: {week_start} ~ {week_end} (현재: {current})")
+            print(f"   ⚠️ 미완성 주 감지: {week_start} ~ {week_end_friday} (현재: {current})")
+        else:
+            print(f"   ✅ 완성된 주 확인: {week_start} ~ {week_end_friday} (현재: {current})")
         
         return is_complete
         
@@ -1128,6 +1138,30 @@ def save_chart_data_to_json(chart_data, stock_code, stock_name):
             filepath = os.path.join(json_dir, filename)
             version += 1
         
+        # 주차 정보 계산 함수 (통일된 모듈 사용)
+        def get_week_number_local(date):
+            """날짜를 기준으로 해당 연도의 주차 계산 (통일된 모듈 사용)"""
+            try:
+                return get_week_number_string(date, "YYYY년 W주차")
+            except:
+                return f"{date.year}년 1주차"
+        
+        def get_week_period(date):
+            """주차의 구체적인 기간 계산 (통일된 모듈 사용)"""
+            try:
+                # ISO 8601 표준으로 주 기간 계산
+                year, week = get_week_number(date)
+                week_start = get_week_start_date(year, week)
+                week_end = get_week_end_date(year, week)
+                return f"{week_start.strftime('%Y-%m-%d')} ~ {week_end.strftime('%Y-%m-%d')}"
+            except:
+                return f"{date.strftime('%Y-%m-%d')} ~ {date.strftime('%Y-%m-%d')}"
+        
+        # 최신 데이터의 주차 정보
+        latest_date = chart_data_clean.index[-1]
+        latest_week_info = get_week_number_local(latest_date)
+        latest_week_period = get_week_period(latest_date)
+        
         # JSON 데이터 구조화
         json_data = {
             "metadata": {
@@ -1139,7 +1173,11 @@ def save_chart_data_to_json(chart_data, stock_code, stock_name):
                     "end": chart_data_clean.index[-1].strftime('%Y-%m-%d')
                 },
                 "total_records": len(chart_data_clean),
-                "chart_type": "weekly"
+                "chart_type": "weekly",
+                "latest_week_info": latest_week_info,
+                "current_analysis_week": latest_week_info,
+                "week_period": latest_week_period,
+                "analysis_date": latest_date.strftime('%Y-%m-%d')
             },
             "summary": {
                 "latest_close": float(chart_data_clean['Close'].iloc[-1]),
@@ -1155,6 +1193,13 @@ def save_chart_data_to_json(chart_data, stock_code, stock_name):
                     "ma5": float(chart_data_clean['MA5'].iloc[-1]) if 'MA5' in chart_data_clean else None,
                     "ma20": float(chart_data_clean['MA20'].iloc[-1]) if 'MA20' in chart_data_clean else None,
                     "ma60": float(chart_data_clean['MA60'].iloc[-1]) if 'MA60' in chart_data_clean else None,
+                    "rsi": float(chart_data_clean['RSI'].iloc[-1]) if 'RSI' in chart_data_clean else None,
+                    "macd": float(chart_data_clean['MACD'].iloc[-1]) if 'MACD' in chart_data_clean else None,
+                    "macd_signal": float(chart_data_clean['MACD_Signal'].iloc[-1]) if 'MACD_Signal' in chart_data_clean else None,
+                    "macd_histogram": float(chart_data_clean['MACD_Histogram'].iloc[-1]) if 'MACD_Histogram' in chart_data_clean else None,
+                    "adx": float(chart_data_clean['ADX'].iloc[-1]) if 'ADX' in chart_data_clean else None,
+                    "plus_di": float(chart_data_clean['Plus_DI'].iloc[-1]) if 'Plus_DI' in chart_data_clean else None,
+                    "minus_di": float(chart_data_clean['Minus_DI'].iloc[-1]) if 'Minus_DI' in chart_data_clean else None,
                     "stoch_k": float(chart_data_clean['Stoch_K'].iloc[-1]) if 'Stoch_K' in chart_data_clean else None,
                     "stoch_d": float(chart_data_clean['Stoch_D'].iloc[-1]) if 'Stoch_D' in chart_data_clean else None,
                     "bb_upper": float(chart_data_clean['BB_Upper'].iloc[-1]) if 'BB_Upper' in chart_data_clean else None,
@@ -1168,8 +1213,14 @@ def save_chart_data_to_json(chart_data, stock_code, stock_name):
         # 차트 데이터 추가 (최근 30개 데이터만 - AI 분석에 충분)
         recent_data = chart_data_clean.tail(30)
         for date, row in recent_data.iterrows():
+            # 각 주의 주차 정보 계산
+            week_info = get_week_number_local(date)
+            week_period = get_week_period(date)
+            
             data_point = {
                 "date": date.strftime('%Y-%m-%d'),
+                "week_info": week_info,
+                "week_period": week_period,
                 "open": float(row['Open']),
                 "high": float(row['High']),
                 "low": float(row['Low']),
@@ -1184,6 +1235,20 @@ def save_chart_data_to_json(chart_data, stock_code, stock_name):
                 data_point["ma20"] = float(row['MA20'])
             if 'MA60' in row:
                 data_point["ma60"] = float(row['MA60'])
+            if 'RSI' in row:
+                data_point["rsi"] = float(row['RSI'])
+            if 'MACD' in row:
+                data_point["macd"] = float(row['MACD'])
+            if 'MACD_Signal' in row:
+                data_point["macd_signal"] = float(row['MACD_Signal'])
+            if 'MACD_Histogram' in row:
+                data_point["macd_histogram"] = float(row['MACD_Histogram'])
+            if 'ADX' in row:
+                data_point["adx"] = float(row['ADX'])
+            if 'Plus_DI' in row:
+                data_point["plus_di"] = float(row['Plus_DI'])
+            if 'Minus_DI' in row:
+                data_point["minus_di"] = float(row['Minus_DI'])
             if 'Stoch_K' in row:
                 data_point["stoch_k"] = float(row['Stoch_K'])
             if 'Stoch_D' in row:
@@ -1293,6 +1358,18 @@ def save_chart_summary_to_text(chart_data, stock_code, stock_name):
             filepath = os.path.join(text_dir, filename)
             version += 1
         
+        # 주차 정보 계산 (통일된 모듈 사용)
+        def get_week_number_local(date):
+            """날짜를 기준으로 해당 연도의 주차 계산 (통일된 모듈 사용)"""
+            try:
+                return get_week_number_string(date, "YYYY년 W주차")
+            except:
+                return f"{date.year}년 1주차"
+        
+        latest_date = chart_data.index[-1]
+        latest_week_info = get_week_number_local(latest_date)
+        latest_week_period = get_week_period(latest_date)
+        
         # 요약 텍스트 생성
         summary_text = f"""주식 주봉 차트 데이터 요약
 ========================
@@ -1303,6 +1380,8 @@ def save_chart_summary_to_text(chart_data, stock_code, stock_name):
 - 생성일시: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 - 데이터 기간: {chart_data.index[0].strftime('%Y-%m-%d')} ~ {chart_data.index[-1].strftime('%Y-%m-%d')}
 - 총 데이터 수: {len(chart_data)}주
+- 최신 분석 주차: {latest_week_info} (현재 분석 대상)
+- 주차 기간: {latest_week_period}
 
 가격 정보:
 - 시작가: {chart_data['Open'].iloc[0]:,.0f}원

@@ -1621,16 +1621,17 @@ class StockDataCollector:
             return False
     
     def save_batch_technical_indicators(self, batch_technical_data):
-        """배치 단위로 기술적 지표 저장 - 오류 처리 강화"""
+        """배치 단위로 기술적 지표 저장 - 오류 처리 강화 (NULL 값 허용)"""
         try:
             if not batch_technical_data:
                 logging.info("📝 배치 기술적 지표 데이터가 없습니다.")
                 return True
             
-            # 데이터 유효성 검증
+            # 데이터 유효성 검증 (수정: NULL 값 허용)
             valid_data = []
             for data in batch_technical_data:
-                if len(data) == 13 and data[0] is not None and data[1] is not None:  # stock_code와 trade_date는 필수
+                # stock_code와 trade_date만 필수, 보조지표는 NULL 허용
+                if len(data) == 13 and data[0] is not None and data[1] is not None:
                     valid_data.append(data)
                 else:
                     logging.warning(f"⚠️ 잘못된 기술적 지표 데이터 형식: {data}")

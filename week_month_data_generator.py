@@ -12,6 +12,7 @@ import logging
 from database_config import DatabaseManager
 import time
 from korean_holiday_manager import KoreanHolidayManager
+from week_calculator import get_week_number, get_week_number_string
 
 # 로깅 설정
 logging.basicConfig(
@@ -229,7 +230,7 @@ class WeekMonthDataGenerator:
             weekly_df['bb_upper'] = weekly_df['bb_middle'] + (bb_std * 2)
             weekly_df['bb_lower'] = weekly_df['bb_middle'] - (bb_std * 2)
             
-            logging.info(f"주봉 보조지표 계산 완료: {len(weekly_df)}주")
+            logging.info(f"주봉 보조지표 계산 완료: {len(weekly_df)}주 (ISO 8601 표준)")
             return weekly_df
             
         except Exception as e:

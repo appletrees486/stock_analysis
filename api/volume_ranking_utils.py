@@ -43,7 +43,7 @@ class VolumeRankingDataManager:
                 if datetime.now().timestamp() - cache_data['timestamp'] < self._cache_ttl:
                     return cache_data['data']
             
-            # 데이터베이스에서 조회 (거래량만)
+            # 데이터베이스에서 조회 (거래량 기준)
             query = """
                 SELECT 
                     d.stock_code,
@@ -75,6 +75,9 @@ class VolumeRankingDataManager:
                         'stock_name': row['stock_name'],
                         'market_type': row['market_type'],
                         'volume': row['volume'],
+                        'outstanding_shares': 0,  # 거래량 기준에서는 유통주식수 없음
+                        'close_price': 0,  # 거래량 기준에서는 종가 정보 없음
+                        'total_amount': 0,  # 거래량 기준에서는 거래대금 정보 없음
                         'turnover_rate': 0.0  # 거래률 정보 없음
                     })
                 
@@ -147,6 +150,8 @@ class VolumeRankingDataManager:
                         'volume': row['volume'],
                         'trade_date': str(row['trade_date']) if row['trade_date'] else None,
                         'outstanding_shares': row['outstanding_shares'],
+                        'close_price': 0,  # 거래률 기준에서는 종가 정보 없음
+                        'total_amount': 0,  # 거래률 기준에서는 거래대금 정보 없음
                         'turnover_rate': float(row['turnover_rate']) if row['turnover_rate'] is not None else 0.0
                     })
                 
@@ -223,6 +228,9 @@ class VolumeRankingDataManager:
                         'market_type': row['market_type'],
                         'total_volume': row['total_volume'],
                         'volume': row['total_volume'],  # 프론트엔드 호환성을 위해 추가
+                        'outstanding_shares': 0,  # 주봉 거래량 기준에서는 유통주식수 없음
+                        'close_price': 0,  # 주봉 거래량 기준에서는 종가 정보 없음
+                        'total_amount': 0,  # 주봉 거래량 기준에서는 거래대금 정보 없음
                         'turnover_rate': 0.0,  # 거래률 계산 불가
                         'trading_days': row['trading_days']
                     })
@@ -308,6 +316,9 @@ class VolumeRankingDataManager:
                         'market_type': row['market_type'],
                         'total_volume': row['total_volume'],
                         'volume': row['total_volume'],  # 프론트엔드 호환성을 위해 추가
+                        'outstanding_shares': row['avg_shares'],  # 주봉 거래률 기준에서는 유통주식수 있음
+                        'close_price': 0,  # 주봉 거래률 기준에서는 종가 정보 없음
+                        'total_amount': 0,  # 주봉 거래률 기준에서는 거래대금 정보 없음
                         'turnover_rate': float(row['turnover_rate']) if row['turnover_rate'] is not None else 0.0,
                         'trading_days': row['trading_days']
                     })
@@ -381,6 +392,9 @@ class VolumeRankingDataManager:
                         'market_type': row['market_type'],
                         'total_volume': row['total_volume'],
                         'volume': row['total_volume'],  # 프론트엔드 호환성을 위해 추가
+                        'outstanding_shares': 0,  # 월봉 거래량 기준에서는 유통주식수 없음
+                        'close_price': 0,  # 월봉 거래량 기준에서는 종가 정보 없음
+                        'total_amount': 0,  # 월봉 거래량 기준에서는 거래대금 정보 없음
                         'turnover_rate': 0.0,  # 거래률 계산 불가
                         'trading_days': row['trading_days']
                     })
@@ -460,6 +474,9 @@ class VolumeRankingDataManager:
                         'market_type': row['market_type'],
                         'total_volume': row['total_volume'],
                         'volume': row['total_volume'],  # 프론트엔드 호환성을 위해 추가
+                        'outstanding_shares': row['avg_shares'],  # 월봉 거래률 기준에서는 유통주식수 있음
+                        'close_price': 0,  # 월봉 거래률 기준에서는 종가 정보 없음
+                        'total_amount': 0,  # 월봉 거래률 기준에서는 거래대금 정보 없음
                         'turnover_rate': float(row['turnover_rate']) if row['turnover_rate'] is not None else 0.0,
                         'trading_days': row['trading_days']
                     })

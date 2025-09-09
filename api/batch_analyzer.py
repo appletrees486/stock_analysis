@@ -870,6 +870,18 @@ class BatchAnalyzer:
             
             results = self.batch_results[batch_id]
             
+            # 거래정보 통계 수집
+            trading_stats = {
+                "거래대금_통계": {"총합": 0, "평균": 0, "최대": 0, "최소": float('inf'), "단위": "원"},
+                "거래률_통계": {"총합": 0, "평균": 0, "최대": 0, "최소": float('inf'), "단위": "%"},
+                "순위_통계": {"1위": 0, "10위이내": 0, "50위이내": 0, "100위이내": 0},
+                "거래타입_분포": {"거래량": 0, "거래률": 0},
+                "유통주식수_통계": {"총합": 0, "평균": 0, "최대": 0, "최소": float('inf'), "단위": "주"},
+                "거래량_통계": {"총합": 0, "평균": 0, "최대": 0, "최소": float('inf'), "단위": "주"}
+            }
+            
+            valid_trading_data = 0
+            
             # 메타데이터
             total_analysis = {
                 "metadata": {
@@ -879,7 +891,8 @@ class BatchAnalyzer:
                     "analysis_version": "1.0",
                     "file_type": "total_analysis"
                 },
-                "consolidated_analysis": {}
+                "consolidated_analysis": {},
+                "trading_statistics": trading_stats
             }
             
             # 각 종목별 분석 결과를 개별 종목과 동일한 구조로 추가
@@ -889,9 +902,69 @@ class BatchAnalyzer:
                     stock_code = result.get("stock_code", "000000")
                     stock_name = result.get("stock_name", "알수없음")
                     
+                    # 거래정보 통계 수집
+                    if "종목정보" in ai_data:
+                        trading_info = ai_data["종목정보"]
+                        
+                        # 거래대금 파싱 및 통계 수집
+                        trading_amount_str = trading_info.get("거래대금", "0")
+                        trading_amount = self._parse_trading_amount(trading_amount_str)
+                        if trading_amount > 0:
+                            trading_stats["거래대금_통계"]["총합"] += trading_amount
+                            trading_stats["거래대금_통계"]["최대"] = max(trading_stats["거래대금_통계"]["최대"], trading_amount)
+                            trading_stats["거래대금_통계"]["최소"] = min(trading_stats["거래대금_통계"]["최소"], trading_amount)
+                        
+                        # 거래률 파싱 및 통계 수집
+                        turnover_rate_str = trading_info.get("거래률", "0%")
+                        turnover_rate = self._parse_percentage(turnover_rate_str)
+                        if turnover_rate > 0:
+                            trading_stats["거래률_통계"]["총합"] += turnover_rate
+                            trading_stats["거래률_통계"]["최대"] = max(trading_stats["거래률_통계"]["최대"], turnover_rate)
+                            trading_stats["거래률_통계"]["최소"] = min(trading_stats["거래률_통계"]["최소"], turnover_rate)
+                        
+                        # 순위 통계 수집
+                        ranking_str = trading_info.get("순위", "999위")
+                        ranking = self._parse_ranking(ranking_str)
+                        if ranking == 1:
+                            trading_stats["순위_통계"]["1위"] += 1
+                        elif ranking <= 10:
+                            trading_stats["순위_통계"]["10위이내"] += 1
+                        elif ranking <= 50:
+                            trading_stats["순위_통계"]["50위이내"] += 1
+                        elif ranking <= 100:
+                            trading_stats["순위_통계"]["100위이내"] += 1
+                        
+                        # 거래타입 분포 수집
+                        trading_type = trading_info.get("거래타입", "거래량")
+                        if trading_type in trading_stats["거래타입_분포"]:
+                            trading_stats["거래타입_분포"][trading_type] += 1
+                        
+                        # 유통주식수 파싱 및 통계 수집
+                        shares_str = trading_info.get("유통주식수", "0주")
+                        shares = self._parse_shares(shares_str)
+                        if shares > 0:
+                            trading_stats["유통주식수_통계"]["총합"] += shares
+                            trading_stats["유통주식수_통계"]["최대"] = max(trading_stats["유통주식수_통계"]["최대"], shares)
+                            trading_stats["유통주식수_통계"]["최소"] = min(trading_stats["유통주식수_통계"]["최소"], shares)
+                        
+                        # 거래량 파싱 및 통계 수집
+                        volume_str = trading_info.get("거래량", "0주")
+                        volume = self._parse_shares(volume_str)
+                        if volume > 0:
+                            trading_stats["거래량_통계"]["총합"] += volume
+                            trading_stats["거래량_통계"]["최대"] = max(trading_stats["거래량_통계"]["최대"], volume)
+                            trading_stats["거래량_통계"]["최소"] = min(trading_stats["거래량_통계"]["최소"], volume)
+                        
+                        valid_trading_data += 1
+                    
                     # 개별 종목의 전체 구조를 그대로 유지하면서 키-값 형태로 저장
                     # 키: 종목코드, 값: 전체 AI 분석 데이터
                     total_analysis["consolidated_analysis"][stock_code] = ai_data
+                    
+                    # 거래타입 확인 로그
+                    if "종목정보" in ai_data:
+                        trading_type = ai_data["종목정보"].get("거래타입", "N/A")
+                        logger.info(f"종목 {stock_code} 거래타입 확인: {trading_type}")
                     
                     # ai_analysis_file 정보 추가 (차트 이미지 찾기용)
                     if "ai_analysis_file" in result:
@@ -917,7 +990,29 @@ class BatchAnalyzer:
                     total_analysis["consolidated_analysis"][stock_code] = basic_result
                     logger.info(f"종목 {stock_code} ({stock_name}) 기본 정보 추가 완료")
             
-            logger.info(f"Total Analysis JSON 생성 완료: {len(total_analysis['consolidated_analysis'])}개 종목")
+            # 통계 계산
+            if valid_trading_data > 0:
+                # 평균 계산
+                trading_stats["거래대금_통계"]["평균"] = trading_stats["거래대금_통계"]["총합"] / valid_trading_data
+                trading_stats["거래률_통계"]["평균"] = trading_stats["거래률_통계"]["총합"] / valid_trading_data
+                trading_stats["유통주식수_통계"]["평균"] = trading_stats["유통주식수_통계"]["총합"] / valid_trading_data
+                trading_stats["거래량_통계"]["평균"] = trading_stats["거래량_통계"]["총합"] / valid_trading_data
+                
+                # 최소값이 무한대인 경우 0으로 설정
+                if trading_stats["거래대금_통계"]["최소"] == float('inf'):
+                    trading_stats["거래대금_통계"]["최소"] = 0
+                if trading_stats["거래률_통계"]["최소"] == float('inf'):
+                    trading_stats["거래률_통계"]["최소"] = 0
+                if trading_stats["유통주식수_통계"]["최소"] == float('inf'):
+                    trading_stats["유통주식수_통계"]["최소"] = 0
+                if trading_stats["거래량_통계"]["최소"] == float('inf'):
+                    trading_stats["거래량_통계"]["최소"] = 0
+            
+            # 통계 정보를 메타데이터에 추가
+            total_analysis["metadata"]["trading_data_count"] = valid_trading_data
+            total_analysis["metadata"]["trading_statistics"] = trading_stats
+            
+            logger.info(f"Total Analysis JSON 생성 완료: {len(total_analysis['consolidated_analysis'])}개 종목 (거래정보: {valid_trading_data}개)")
             
             # JSON 생성 후 배치 결과 메모리 해제 (여러 차례 분석 가능하도록)
             if batch_id in self.batch_results:
@@ -1062,6 +1157,50 @@ class BatchAnalyzer:
                                 run.font.name = '맑은 고딕'
                                 run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
                 
+                # 거래정보 섹션 추가
+                if "거래일" in stock_info or "거래대금" in stock_info or "거래률" in stock_info:
+                    doc.add_heading('💰 거래정보', level=2)
+                    
+                    # 거래정보 테이블 생성
+                    trading_table = doc.add_table(rows=2, cols=3)
+                    trading_table.style = 'Table Grid'
+                    
+                    # 거래정보 헤더
+                    trading_header = trading_table.rows[0].cells
+                    trading_header[0].text = '거래일'
+                    trading_header[1].text = '거래대금'
+                    trading_header[2].text = '거래률'
+                    
+                    # 거래정보 데이터
+                    trading_data = trading_table.rows[1].cells
+                    trading_data[0].text = stock_info.get("거래일", "N/A")
+                    trading_data[1].text = stock_info.get("거래대금", "N/A")
+                    trading_data[2].text = stock_info.get("거래률", "N/A")
+                    
+                    # 순위 및 기타 정보 테이블
+                    if "순위" in stock_info or "유통주식수" in stock_info or "거래량" in stock_info:
+                        trading_table2 = doc.add_table(rows=2, cols=3)
+                        trading_table2.style = 'Table Grid'
+                        
+                        trading_header2 = trading_table2.rows[0].cells
+                        trading_header2[0].text = '순위'
+                        trading_header2[1].text = '유통주식수'
+                        trading_header2[2].text = '거래량'
+                        
+                        trading_data2 = trading_table2.rows[1].cells
+                        trading_data2[0].text = stock_info.get("순위", "N/A")
+                        trading_data2[1].text = stock_info.get("유통주식수", "N/A")
+                        trading_data2[2].text = stock_info.get("거래량", "N/A")
+                        
+                        # 거래정보 테이블들에 한글 폰트 적용
+                        for table in [trading_table, trading_table2]:
+                            for row in table.rows:
+                                for cell in row.cells:
+                                    for paragraph in cell.paragraphs:
+                                        for run in paragraph.runs:
+                                            run.font.name = '맑은 고딕'
+                                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                
                 # 차트 이미지 추가
                 chart_image_path = None
                 
@@ -1123,13 +1262,11 @@ class BatchAnalyzer:
                     if "종목정보" in stock_data:
                         trading_info = stock_data["종목정보"]
                         
-                        # 배치 결과에서 거래타입 정보 가져오기
-                        trading_type = None
-                        if batch_id and batch_id in self.batch_results:
-                            for result in self.batch_results[batch_id]:
-                                if result.get('stock_code') == stock_code:
-                                    trading_type = result.get('trading_type', '')
-                                    break
+                        # 거래타입 정보 가져오기 (total_analysis JSON에서 직접)
+                        trading_type = trading_info.get("거래타입", "거래량")
+                        
+                        # 디버깅을 위한 로그
+                        logger.info(f"종목 {stock_code} 거래타입: {trading_type}")
                         
                         # 차트 타입별 기간 텍스트
                         period_text = {
@@ -1141,13 +1278,22 @@ class BatchAnalyzer:
                         # 거래 타입별 문구 생성
                         if trading_type == "거래률" and "거래률" in trading_info:
                             turnover_rate = trading_info.get("거래률")
+                            volume = trading_info.get("거래량", "N/A")
+                            outstanding_shares = trading_info.get("유통주식수", "N/A")
                             ranking = trading_info.get("순위", "N/A")
                             
                             if turnover_rate and turnover_rate != "N/A":
-                                # 거래률 기준 문구
+                                # 거래률 기준 문구 - ai_chart_analysis.py 로직 참조
                                 rate_value = turnover_rate.replace("%", "").strip()
-                                if rate_value.replace(".", "").isdigit():
-                                    trading_info_text = f"위 주식의 {period_text} 거래률은 {turnover_rate}로 전체 종목 중 상위 {ranking}를 차지하여 분석 대상에 포함되었습니다."
+                                if rate_value.replace(".", "").isdigit() and volume != "N/A" and outstanding_shares != "N/A":
+                                    # 거래량과 유통주식수에서 숫자만 추출
+                                    volume_clean = volume.replace(",", "").replace("주", "").strip()
+                                    shares_clean = outstanding_shares.replace(",", "").replace("주", "").strip()
+                                    
+                                    if volume_clean.isdigit() and shares_clean.isdigit():
+                                        trading_info_text = f"위 주식의 {period_text} 거래량은 {volume}로 유통주식수 {outstanding_shares} 대비 {turnover_rate}로 전체 종목 중 상위 {ranking}를 차지하여 분석 대상에 포함되었습니다."
+                                    else:
+                                        trading_info_text = f"위 주식의 {period_text} 거래률은 {turnover_rate}로 전체 종목 중 상위 {ranking}를 차지하여 분석 대상에 포함되었습니다."
                                 else:
                                     trading_info_text = f"위 주식의 {period_text} 거래률 정보를 확인할 수 없어 분석 대상에 포함되었습니다."
                                 
@@ -1158,34 +1304,33 @@ class BatchAnalyzer:
                                 doc.add_paragraph()
                         
                         else:
-                            # 거래량 기준 문구 (기본값)
+                            # 거래량 기준 문구 (기본값) - ai_chart_analysis.py 로직 참조
                             total_trading_amount = trading_info.get("거래대금")
                             trading_rank = trading_info.get("순위", "N/A")
                             
                             if total_trading_amount and total_trading_amount != "N/A":
-                                # 억원 단위로 변환 (1억 = 100,000,000원)
-                                if isinstance(total_trading_amount, str):
-                                    # 문자열인 경우 쉼표 제거 후 숫자로 변환
-                                    amount_numeric = int(total_trading_amount.replace(",", ""))
-                                else:
-                                    amount_numeric = int(total_trading_amount)
+                                # 거래대금 파싱 함수 사용
+                                amount_numeric = self._parse_trading_amount(total_trading_amount)
                                 
-                                amount_billion = amount_numeric / 100_000_000  # 억원 단위로 변환
-                                amount_text = f"{amount_billion:.1f}억원"
-                            else:
-                                amount_text = "정보 없음"
-                            
-                            # 순위에서 숫자만 추출
-                            if trading_rank and trading_rank != "N/A" and "위" in str(trading_rank):
-                                rank_number = str(trading_rank).replace("위", "").strip()
-                                if rank_number.isdigit():
-                                    rank_text = f"상위 {rank_number}위"
+                                if amount_numeric > 0:
+                                    amount_billion = amount_numeric / 100_000_000  # 억원 단위로 변환
+                                    amount_text = f"{amount_billion:.1f}억원"
+                                else:
+                                    amount_text = total_trading_amount  # 원본 문자열 사용
+                                
+                                # 순위에서 숫자만 추출
+                                if trading_rank and trading_rank != "N/A" and "위" in str(trading_rank):
+                                    rank_number = str(trading_rank).replace("위", "").strip()
+                                    if rank_number.isdigit():
+                                        rank_text = f"상위 {rank_number}위"
+                                    else:
+                                        rank_text = "순위 정보 없음"
                                 else:
                                     rank_text = "순위 정보 없음"
+                                
+                                trading_info_text = f"위 주식의 {period_text} 거래량은 {amount_text}으로 전체 종목 중 {rank_text}를 차지하여 분석 대상에 포함되었습니다."
                             else:
-                                rank_text = "순위 정보 없음"
-                            
-                            trading_info_text = f"위 주식의 {period_text} 거래량은 {amount_text}으로 전체 종목 중 {rank_text}를 차지하여 분석 대상에 포함되었습니다."
+                                trading_info_text = f"위 주식의 {period_text} 거래대금 정보를 확인할 수 없어 분석 대상에 포함되었습니다."
                             
                             para_trading = doc.add_paragraph(trading_info_text)
                             for run in para_trading.runs:
@@ -1496,6 +1641,70 @@ class BatchAnalyzer:
                             run.font.name = '맑은 고딕'
                             run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
             
+            # 거래정보 통계 섹션 추가
+            metadata = total_analysis_result.get("metadata", {})
+            trading_stats = metadata.get("trading_statistics", {})
+            
+            if trading_stats and any(trading_stats.values()):
+                doc.add_heading('📊 거래정보 통계', level=1)
+                
+                # 거래대금 통계
+                if trading_stats.get("거래대금_통계", {}).get("총합", 0) > 0:
+                    doc.add_heading('💰 거래대금 통계', level=2)
+                    
+                    amount_stats = trading_stats["거래대금_통계"]
+                    p_amount1 = doc.add_paragraph(f"총 거래대금: {amount_stats.get('총합', 0):,.0f}원")
+                    p_amount2 = doc.add_paragraph(f"평균 거래대금: {amount_stats.get('평균', 0):,.0f}원")
+                    p_amount3 = doc.add_paragraph(f"최대 거래대금: {amount_stats.get('최대', 0):,.0f}원")
+                    p_amount4 = doc.add_paragraph(f"최소 거래대금: {amount_stats.get('최소', 0):,.0f}원")
+                    
+                    for p in [p_amount1, p_amount2, p_amount3, p_amount4]:
+                        for run in p.runs:
+                            run.font.name = '맑은 고딕'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                
+                # 거래률 통계
+                if trading_stats.get("거래률_통계", {}).get("총합", 0) > 0:
+                    doc.add_heading('📈 거래률 통계', level=2)
+                    
+                    rate_stats = trading_stats["거래률_통계"]
+                    p_rate1 = doc.add_paragraph(f"평균 거래률: {rate_stats.get('평균', 0):.2f}%")
+                    p_rate2 = doc.add_paragraph(f"최대 거래률: {rate_stats.get('최대', 0):.2f}%")
+                    p_rate3 = doc.add_paragraph(f"최소 거래률: {rate_stats.get('최소', 0):.2f}%")
+                    
+                    for p in [p_rate1, p_rate2, p_rate3]:
+                        for run in p.runs:
+                            run.font.name = '맑은 고딕'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                
+                # 순위 통계
+                if trading_stats.get("순위_통계", {}):
+                    doc.add_heading('🏆 순위 통계', level=2)
+                    
+                    ranking_stats = trading_stats["순위_통계"]
+                    p_rank1 = doc.add_paragraph(f"1위: {ranking_stats.get('1위', 0)}개 종목")
+                    p_rank2 = doc.add_paragraph(f"10위 이내: {ranking_stats.get('10위이내', 0)}개 종목")
+                    p_rank3 = doc.add_paragraph(f"50위 이내: {ranking_stats.get('50위이내', 0)}개 종목")
+                    p_rank4 = doc.add_paragraph(f"100위 이내: {ranking_stats.get('100위이내', 0)}개 종목")
+                    
+                    for p in [p_rank1, p_rank2, p_rank3, p_rank4]:
+                        for run in p.runs:
+                            run.font.name = '맑은 고딕'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                
+                # 거래타입 분포
+                if trading_stats.get("거래타입_분포", {}):
+                    doc.add_heading('📋 거래타입 분포', level=2)
+                    
+                    type_stats = trading_stats["거래타입_분포"]
+                    p_type1 = doc.add_paragraph(f"거래량 기준: {type_stats.get('거래량', 0)}개 종목")
+                    p_type2 = doc.add_paragraph(f"거래률 기준: {type_stats.get('거래률', 0)}개 종목")
+                    
+                    for p in [p_type1, p_type2]:
+                        for run in p.runs:
+                            run.font.name = '맑은 고딕'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+            
             # 문서 저장
             doc.save(output_path)
             logger.info(f"Total Analysis DOCX 생성 완료: {output_path}")
@@ -1640,3 +1849,71 @@ class BatchAnalyzer:
             logger.error(f"요약 분석 중 오류 발생: {e}")
             logger.info("개별 분석 결과는 정상적으로 저장되었습니다.")
             return None 
+    
+    def _parse_trading_amount(self, amount_str: str) -> float:
+        """거래대금 문자열을 숫자로 변환 (예: '5263억원' -> 526300000000)"""
+        try:
+            if not amount_str or amount_str == "N/A":
+                return 0
+            
+            # 숫자와 단위 추출
+            import re
+            # 쉼표 제거 후 숫자와 단위 추출
+            clean_str = amount_str.replace(',', '')
+            match = re.search(r'([\d.]+)(억원|만원|원)?', clean_str)
+            if not match:
+                return 0
+            
+            number = float(match.group(1))
+            unit = match.group(2) or "원"
+            
+            if unit == "억원":
+                return number * 100000000
+            elif unit == "만원":
+                return number * 10000
+            else:  # "원"
+                return number
+        except:
+            return 0
+    
+    def _parse_percentage(self, percent_str: str) -> float:
+        """퍼센트 문자열을 숫자로 변환 (예: '1250.18%' -> 1250.18)"""
+        try:
+            if not percent_str or percent_str == "N/A":
+                return 0
+            
+            import re
+            match = re.search(r'([\d.]+)%', percent_str)
+            if match:
+                return float(match.group(1))
+            return 0
+        except:
+            return 0
+    
+    def _parse_ranking(self, ranking_str: str) -> int:
+        """순위 문자열을 숫자로 변환 (예: '1위' -> 1)"""
+        try:
+            if not ranking_str or ranking_str == "N/A":
+                return 999
+            
+            import re
+            match = re.search(r'(\d+)위', ranking_str)
+            if match:
+                return int(match.group(1))
+            return 999
+        except:
+            return 999
+    
+    def _parse_shares(self, shares_str: str) -> int:
+        """주식수 문자열을 숫자로 변환 (예: '16,366,428주' -> 16366428)"""
+        try:
+            if not shares_str or shares_str == "N/A":
+                return 0
+            
+            import re
+            match = re.search(r'([\d,]+)주', shares_str.replace(',', ''))
+            if match:
+                return int(match.group(1))
+            return 0
+        except:
+            return 0

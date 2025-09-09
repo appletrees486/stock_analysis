@@ -18,8 +18,9 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.shared import OxmlElement, qn
 import pandas as pd
 from datetime import datetime, timedelta
-from api.volume_ranking_utils import VolumeRankingDataManager
+# from api.volume_ranking_utils import VolumeRankingDataManager  # 제거: 사이드 임팩트 방지
 import re
+from week_calculator import WeekCalculator, get_week_number, get_week_number_string, parse_week_string, get_week_start_date
 
 class StockNameMapper:
     """종목번호와 종목명 매핑 클래스 (DB 기반)"""
@@ -1310,6 +1311,8 @@ class AIChartAnalyzer:
                     total_amount = result["종목정보"].get("거래대금", "N/A")
                     turnover_rate = result["종목정보"].get("거래률", "N/A")
                     ranking = result["종목정보"].get("순위", "N/A")
+                    outstanding_shares = result["종목정보"].get("유통주식수", "N/A")
+                    volume = result["종목정보"].get("거래량", "N/A")
                     trading_type = result["종목정보"].get("거래타입", "거래량")
                     
                     # 차트 타입별 기간 텍스트 설정
@@ -1321,33 +1324,25 @@ class AIChartAnalyzer:
                     
                     # 거래 타입별 문구 생성
                     if trading_type == "거래률" and turnover_rate != "N/A":
-                        # 거래률 기준 문구
+                        # 거래률 기준 문구 - 사용자 요구사항에 맞게 수정
                         rate_value = turnover_rate.replace("%", "").strip()
-                        if rate_value.replace(".", "").isdigit():
-                            trading_info_text = f"위 주식의 {period_text} 거래률은 {turnover_rate}로 전체 종목 중 상위 {ranking}를 차지하여 분석 대상에 포함되었습니다."
+                        if rate_value.replace(".", "").isdigit() and volume != "N/A" and outstanding_shares != "N/A":
+                            # 거래량과 유통주식수에서 숫자만 추출
+                            volume_clean = volume.replace(",", "").replace("주", "").strip()
+                            shares_clean = outstanding_shares.replace(",", "").replace("주", "").strip()
+                            
+                            if volume_clean.isdigit() and shares_clean.isdigit():
+                                trading_info_text = f"위 주식의 {period_text} 거래량은 {volume}로 유통주식수 {outstanding_shares} 대비 {turnover_rate}로 전체 종목 중 상위 {ranking}를 차지하여 분석 대상에 포함되었습니다."
+                            else:
+                                trading_info_text = f"위 주식의 {period_text} 거래률은 {turnover_rate}로 전체 종목 중 상위 {ranking}를 차지하여 분석 대상에 포함되었습니다."
                         else:
                             trading_info_text = f"위 주식의 {period_text} 거래률 정보를 확인할 수 없어 분석 대상에 포함되었습니다."
                     else:
-                        # 거래량 기준 문구
-                        if total_amount != "N/A" and total_amount.replace(",", "").replace(".", "").isdigit():
-                            # 쉼표 제거 후 숫자로 변환
-                            amount_numeric = int(total_amount.replace(",", ""))
-                            amount_billion = amount_numeric / 100_000_000  # 억원 단위로 변환
-                            amount_text = f"{amount_billion:.1f}억원"
+                        # 거래량 기준 문구 - 사용자 요구사항에 맞게 수정
+                        if total_amount != "N/A":
+                            trading_info_text = f"위 주식의 {period_text} 거래대금은 {total_amount}으로 전체 종목 중 상위 {ranking}를 차지하여 분석 대상에 포함되었습니다."
                         else:
-                            amount_text = "정보 없음"
-                        
-                        # 순위에서 숫자만 추출
-                        if ranking != "N/A" and "위" in ranking:
-                            rank_number = ranking.replace("위", "").strip()
-                            if rank_number.isdigit():
-                                rank_text = f"상위 {rank_number}위"
-                            else:
-                                rank_text = "순위 정보 없음"
-                        else:
-                            rank_text = "순위 정보 없음"
-                        
-                        trading_info_text = f"위 주식의 {period_text} 거래량은 {amount_text}으로 전체 종목 중 {rank_text}를 차지하여 분석 대상에 포함되었습니다."
+                            trading_info_text = f"위 주식의 {period_text} 거래대금 정보를 확인할 수 없어 분석 대상에 포함되었습니다."
                     
                     # 문단 추가
                     trading_info_para = doc.add_paragraph(trading_info_text)
@@ -1463,7 +1458,7 @@ class AIChartAnalyzer:
 
     def _parse_weekly_date(self, date_text: str) -> str:
         """
-        주봉 날짜 텍스트를 파싱하여 주 시작일(월요일) 반환
+        주봉 날짜 텍스트를 파싱하여 주 시작일(월요일) 반환 (한국식 주차 기준)
         
         Args:
             date_text (str): "2025년 35주차" 형식의 날짜 텍스트
@@ -1472,24 +1467,19 @@ class AIChartAnalyzer:
             str: "YYYY-MM-DD" 형식의 주 시작일, 파싱 실패 시 None
         """
         try:
-            # "2025년 35주차" 형식 파싱
-            pattern = r'(\d{4})년\s*(\d{1,2})주차'
-            match = re.search(pattern, date_text)
-            
-            if not match:
+            # 주차 문자열 파싱
+            result = parse_week_string(date_text)
+            if not result:
                 print(f"⚠️ 주봉 날짜 형식 파싱 실패: {date_text}")
                 return None
             
-            year = int(match.group(1))
-            week = int(match.group(2))
+            year, week = result
             
-            # ISO 주차 기준으로 정확한 주차 계산
-            from datetime import date
-            first_day = date.fromisocalendar(year, week, 1)  # n주차의 월요일
-            last_day = date.fromisocalendar(year, week, 7)   # n주차의 일요일
+            # ISO 8601 표준으로 주 시작일 계산
+            week_start = get_week_start_date(year, week)
             
-            print(f"📅 주봉 날짜 파싱: {date_text} → {first_day} ~ {last_day}")
-            return first_day.strftime('%Y-%m-%d')
+            print(f"📅 주봉 날짜 파싱 (ISO 8601): {date_text} → {week_start}")
+            return week_start.strftime('%Y-%m-%d')
             
         except Exception as e:
             print(f"❌ 주봉 날짜 파싱 오류: {e}")
@@ -1573,8 +1563,20 @@ class AIChartAnalyzer:
                     params = (target_date, volume)
                 
             elif chart_type == "주봉":
-                # 주봉 순위 계산 (거래타입에 따라 분기)
-                week_end = (datetime.strptime(target_date, '%Y-%m-%d') + timedelta(days=6)).strftime('%Y-%m-%d')
+                # 주봉 순위 계산 (거래타입에 따라 분기) - week_calculator 모듈 사용
+                try:
+                    # target_date를 주 시작일로 가정하고 주 종료일 계산
+                    target_datetime = datetime.strptime(target_date, '%Y-%m-%d')
+                    year, week = get_week_number(target_datetime)
+                    week_start = WeekCalculator.get_week_start_date(year, week)
+                    week_end = WeekCalculator.get_week_end_date(year, week)
+                    
+                    print(f"📅 주봉 순위 계산 기간: {week_start.strftime('%Y-%m-%d')} ~ {week_end.strftime('%Y-%m-%d')}")
+                    
+                except Exception as e:
+                    print(f"❌ 주차 계산 실패: {e}")
+                    return 1  # 주차 계산 실패 시 1위로 설정
+                
                 if trading_type == "거래률":
                     # 거래률 기준 주봉 순위 계산
                     query = """
@@ -1588,7 +1590,7 @@ class AIChartAnalyzer:
                         HAVING avg_turnover_rate > %s
                     ) as weekly_turnover_rates
                     """
-                    params = (target_date, week_end, volume)
+                    params = (week_start, week_end, volume)
                 else:
                     # 거래량 기준 주봉 순위 계산 (기본값)
                     query = """
@@ -1602,7 +1604,7 @@ class AIChartAnalyzer:
                         HAVING total_volume > %s
                     ) as weekly_volumes
                     """
-                    params = (target_date, week_end, volume)
+                    params = (week_start, week_end, volume)
                 
             elif chart_type == "월봉":
                 # 월봉 순위 계산 (거래타입에 따라 분기)
@@ -1682,11 +1684,13 @@ class AIChartAnalyzer:
             market_type = stock_info['market_type']
             
             if period_type == "daily":
-                # 일봉 데이터 조회
+                # 일봉 데이터 조회 - close 가격 및 거래대금 추가
                 query = """
                 SELECT 
                     SUM(volume) as total_volume,
+                    SUM(volume * close) as total_amount,
                     AVG(outstanding_shares) as avg_shares,
+                    AVG(close) as avg_close,
                     COUNT(trade_date) as trading_days
                 FROM daily_data 
                 WHERE stock_code = %s AND trade_date = %s
@@ -1694,32 +1698,48 @@ class AIChartAnalyzer:
                 params = (stock_code, target_date)
                 
             elif period_type == "weekly":
-                # 주봉 데이터 조회 (월요일부터 금요일까지)
-                week_end = (datetime.strptime(target_date, '%Y-%m-%d') + timedelta(days=6)).strftime('%Y-%m-%d')
+                # 주봉 데이터 조회 (월요일부터 금요일까지) - week_calculator 모듈 사용
+                try:
+                    target_datetime = datetime.strptime(target_date, '%Y-%m-%d')
+                    year, week = get_week_number(target_datetime)
+                    week_start = WeekCalculator.get_week_start_date(year, week)
+                    week_end = WeekCalculator.get_week_end_date(year, week)
+                    week_end_str = week_end.strftime('%Y-%m-%d')
+                    print(f"📅 주봉 데이터 조회 기간: {week_start.strftime('%Y-%m-%d')} ~ {week_end_str}")
+                except Exception as e:
+                    print(f"❌ 주차 계산 실패: {e}")
+                    return None
                 query = """
                 SELECT 
                     SUM(volume) as total_volume,
+                    SUM(volume * close) as total_amount,
                     AVG(outstanding_shares) as avg_shares,
+                    AVG(close) as avg_close,
                     COUNT(trade_date) as trading_days
                 FROM daily_data 
                 WHERE stock_code = %s 
                 AND trade_date BETWEEN %s AND %s
                 AND WEEKDAY(trade_date) < 5
                 """
-                params = (stock_code, target_date, week_end)
+                params = (stock_code, week_start, week_end)
                 
             elif period_type == "monthly":
-                # 월봉 데이터 조회
+                # 월봉 데이터 조회 - 거래대금 정확한 계산
+                # target_date를 년도와 월로 분리
+                year, month = target_date.split('-')
                 query = """
                 SELECT 
                     SUM(volume) as total_volume,
+                    SUM(volume * close) as total_amount,
                     AVG(outstanding_shares) as avg_shares,
+                    AVG(close) as avg_close,
                     COUNT(trade_date) as trading_days
                 FROM daily_data 
                 WHERE stock_code = %s 
-                AND DATE_FORMAT(trade_date, '%%Y-%%m') = %s
+                AND YEAR(trade_date) = %s AND MONTH(trade_date) = %s
+                AND WEEKDAY(trade_date) < 5
                 """
-                params = (stock_code, target_date)
+                params = (stock_code, year, month)
             
             else:
                 print(f"⚠️ 잘못된 기간 타입: {period_type}")
@@ -1735,7 +1755,11 @@ class AIChartAnalyzer:
             
             total_volume = float(result['total_volume']) if result['total_volume'] else 0
             avg_shares = float(result['avg_shares']) if result['avg_shares'] else 0
+            avg_close = float(result['avg_close']) if result['avg_close'] else 0
             trading_days = int(result['trading_days']) if result['trading_days'] else 0
+            
+            # 거래대금 계산 (DB에서 직접 계산된 값 사용)
+            total_amount = float(result['total_amount']) if result['total_amount'] else 0
             
             # 거래률 계산
             turnover_rate = 0.0
@@ -1747,6 +1771,9 @@ class AIChartAnalyzer:
                 'stock_name': stock_name,
                 'market_type': market_type,
                 'volume': total_volume,
+                'outstanding_shares': avg_shares,
+                'close_price': avg_close,
+                'total_amount': total_amount,
                 'turnover_rate': turnover_rate,
                 'trading_days': trading_days
             }
@@ -1755,9 +1782,187 @@ class AIChartAnalyzer:
             print(f"❌ {stock_code} 개별 거래 데이터 조회 실패: {e}")
             return None
 
-    def _calculate_korean_week_number(self, date: datetime) -> str:
+    def _get_daily_ranking_data(self, target_date: str, trading_type: str = "거래량") -> list:
+        """일봉 전체 순위 데이터 조회 (거래타입별 분기)"""
+        try:
+            from database_config import DatabaseManager
+            db = DatabaseManager()
+            
+            if not db.connect():
+                print("⚠️ DB 연결 실패 - 일봉 순위 조회 불가")
+                return []
+            
+            if trading_type == "거래률":
+                # 거래률 기준 일봉 순위
+                query = """
+                SELECT 
+                    stock_code,
+                    SUM(volume) as total_volume,
+                    SUM(volume * close) as total_amount,
+                    AVG(outstanding_shares) as avg_shares,
+                    (SUM(volume) / AVG(outstanding_shares)) * 100 as turnover_rate,
+                    ROW_NUMBER() OVER (ORDER BY (SUM(volume) / AVG(outstanding_shares)) * 100 DESC) as ranking
+                FROM daily_data 
+                WHERE trade_date = %s
+                AND outstanding_shares > 0
+                GROUP BY stock_code
+                HAVING SUM(volume) > 0 AND AVG(outstanding_shares) > 0
+                ORDER BY turnover_rate DESC
+                """
+            else:
+                # 거래량 기준 일봉 순위 (기본값)
+                query = """
+                SELECT 
+                    stock_code,
+                    SUM(volume) as total_volume,
+                    SUM(volume * close) as total_amount,
+                    AVG(outstanding_shares) as avg_shares,
+                    (SUM(volume) / AVG(outstanding_shares)) * 100 as turnover_rate,
+                    ROW_NUMBER() OVER (ORDER BY SUM(volume) DESC) as ranking
+                FROM daily_data 
+                WHERE trade_date = %s
+                GROUP BY stock_code
+                HAVING SUM(volume) > 0
+                ORDER BY total_volume DESC
+                """
+            
+            results = db.fetch_all(query, (target_date,))
+            db.disconnect()
+            
+            return results
+            
+        except Exception as e:
+            print(f"❌ 일봉 순위 데이터 조회 실패: {e}")
+            return []
+
+    def _get_weekly_ranking_data(self, week_start: str, trading_type: str = "거래량") -> list:
+        """주간 전체 순위 데이터 조회 (거래타입별 분기)"""
+        try:
+            from database_config import DatabaseManager
+            db = DatabaseManager()
+            
+            if not db.connect():
+                print("⚠️ DB 연결 실패 - 주간 순위 조회 불가")
+                return []
+            
+            # week_calculator 모듈을 사용하여 주 종료일 계산
+            try:
+                week_start_datetime = datetime.strptime(week_start, '%Y-%m-%d')
+                year, week = get_week_number(week_start_datetime)
+                week_start_date = WeekCalculator.get_week_start_date(year, week)
+                week_end_date = WeekCalculator.get_week_end_date(year, week)
+                week_end = week_end_date.strftime('%Y-%m-%d')
+                print(f"📅 주간 랭킹 조회 기간: {week_start_date.strftime('%Y-%m-%d')} ~ {week_end} ({trading_type} 기준)")
+            except Exception as e:
+                print(f"❌ 주차 계산 실패: {e}")
+                return []
+            
+            if trading_type == "거래률":
+                # 거래률 기준 주간 순위
+                query = """
+                SELECT 
+                    stock_code,
+                    SUM(volume) as total_volume,
+                    SUM(volume * close) as total_amount,
+                    AVG(outstanding_shares) as avg_shares,
+                    (SUM(volume) / AVG(outstanding_shares)) * 100 as turnover_rate,
+                    ROW_NUMBER() OVER (ORDER BY (SUM(volume) / AVG(outstanding_shares)) * 100 DESC) as ranking
+                FROM daily_data 
+                WHERE trade_date BETWEEN %s AND %s
+                AND WEEKDAY(trade_date) < 5
+                AND outstanding_shares > 0
+                GROUP BY stock_code
+                HAVING SUM(volume) > 0 AND AVG(outstanding_shares) > 0
+                ORDER BY turnover_rate DESC
+                """
+            else:
+                # 거래량 기준 주간 순위 (기본값)
+                query = """
+                SELECT 
+                    stock_code,
+                    SUM(volume) as total_volume,
+                    SUM(volume * close) as total_amount,
+                    AVG(outstanding_shares) as avg_shares,
+                    (SUM(volume) / AVG(outstanding_shares)) * 100 as turnover_rate,
+                    ROW_NUMBER() OVER (ORDER BY SUM(volume) DESC) as ranking
+                FROM daily_data 
+                WHERE trade_date BETWEEN %s AND %s
+                AND WEEKDAY(trade_date) < 5
+                GROUP BY stock_code
+                HAVING SUM(volume) > 0
+                ORDER BY total_volume DESC
+                """
+            
+            results = db.fetch_all(query, (week_start_date, week_end_date))
+            db.disconnect()
+            
+            return results if results else []
+            
+        except Exception as e:
+            print(f"❌ 주간 순위 데이터 조회 실패: {e}")
+            return []
+    
+    def _get_monthly_ranking_data(self, year_month: str, trading_type: str = "거래량") -> list:
+        """월간 전체 순위 데이터 조회 (거래타입별 분기)"""
+        try:
+            from database_config import DatabaseManager
+            db = DatabaseManager()
+            
+            if not db.connect():
+                print("⚠️ DB 연결 실패 - 월간 순위 조회 불가")
+                return []
+            
+            # year_month를 년도와 월로 분리
+            year, month = year_month.split('-')
+            
+            if trading_type == "거래률":
+                # 거래률 기준 월봉 순위
+                query = """
+                SELECT 
+                    stock_code,
+                    SUM(volume) as total_volume,
+                    SUM(volume * close) as total_amount,
+                    AVG(outstanding_shares) as avg_shares,
+                    (SUM(volume) / AVG(outstanding_shares)) * 100 as turnover_rate,
+                    ROW_NUMBER() OVER (ORDER BY (SUM(volume) / AVG(outstanding_shares)) * 100 DESC) as ranking
+                FROM daily_data 
+                WHERE YEAR(trade_date) = %s AND MONTH(trade_date) = %s
+                AND WEEKDAY(trade_date) < 5
+                AND outstanding_shares > 0
+                GROUP BY stock_code
+                HAVING SUM(volume) > 0 AND AVG(outstanding_shares) > 0
+                ORDER BY turnover_rate DESC
+                """
+            else:
+                # 거래량 기준 월봉 순위 (기본값)
+                query = """
+                SELECT 
+                    stock_code,
+                    SUM(volume) as total_volume,
+                    SUM(volume * close) as total_amount,
+                    AVG(outstanding_shares) as avg_shares,
+                    (SUM(volume) / AVG(outstanding_shares)) * 100 as turnover_rate,
+                    ROW_NUMBER() OVER (ORDER BY SUM(volume) DESC) as ranking
+                FROM daily_data 
+                WHERE YEAR(trade_date) = %s AND MONTH(trade_date) = %s
+                AND WEEKDAY(trade_date) < 5
+                GROUP BY stock_code
+                HAVING SUM(volume) > 0
+                ORDER BY total_volume DESC
+                """
+            
+            results = db.fetch_all(query, (year, month))
+            db.disconnect()
+            
+            return results if results else []
+            
+        except Exception as e:
+            print(f"❌ 월간 순위 데이터 조회 실패: {e}")
+            return []
+
+    def _calculate_week_number(self, date: datetime) -> str:
         """
-        한국식 주차 계산 (1월 1일부터 시작하는 주차)
+        ISO 8601 표준 주차 계산 (통일된 주차 계산 방식)
         
         Args:
             date (datetime): 계산할 날짜
@@ -1766,20 +1971,7 @@ class AIChartAnalyzer:
             str: "YYYY년 XX주차" 형식의 문자열
         """
         try:
-            year = date.year
-            # 1월 1일부터의 일수 계산
-            jan_1 = datetime(year, 1, 1)
-            days_since_jan_1 = (date - jan_1).days
-            
-            # 주차 계산 (월요일 시작)
-            # 1월 1일이 월요일이 아닌 경우, 첫 번째 월요일까지의 일수를 조정
-            jan_1_weekday = jan_1.weekday()  # 0=월요일, 6=일요일
-            if jan_1_weekday > 0:  # 1월 1일이 월요일이 아닌 경우
-                days_since_jan_1 += (7 - jan_1_weekday)  # 첫 번째 월요일까지의 일수 추가
-            
-            week_number = (days_since_jan_1 // 7) + 1
-            
-            return f"{year}년 {week_number}주차"
+            return get_week_number_string(date, "YYYY년 W주차")
         except Exception as e:
             print(f"⚠️ 주차 계산 중 오류: {e}")
             return f"{date.year}년 1주차"
@@ -1851,30 +2043,51 @@ class AIChartAnalyzer:
             str: 추출된 주차 (추출 실패 시 "N/A")
         """
         import re
+        from datetime import datetime
         
-        # 패턴 1: "**1) 거래 요약:** 2025년 35주차(...)"
-        pattern1 = r'\*\*1\)\s*거래 요약:\*\*\s*(\d{4}년 \d{1,2}주차)'
+        # 패턴 1: "2025년 35주차" 형식 (숫자 주차)
+        pattern1 = r'(\d{4}년 \d{1,2}주차)'
         match1 = re.search(pattern1, ai_result_text)
         if match1:
             return match1.group(1)
         
-        # 패턴 2: "1. **거래 요약:** 2025년 35주차(...)"
-        pattern2 = r'1\.\s*\*\*거래 요약:\*\*\s*(\d{4}년 \d{1,2}주차)'
+        # 패턴 2: "2025년 9월 1주차" 형식 (월+주차)
+        pattern2 = r'(\d{4}년 \d{1,2}월 \d{1,2}주차)'
         match2 = re.search(pattern2, ai_result_text)
         if match2:
             return match2.group(1)
         
-        # 패턴 3: AI 응답 전체에서 주차 패턴 검색
-        pattern3 = r'(\d{4}년 \d{1,2}주차)'
+        # 패턴 3: "2025년 8월 25일 ~ 2025년 9월 1일" 형식
+        pattern3 = r'(\d{4}년 \d{1,2}월 \d{1,2}일 ~ \d{4}년 \d{1,2}월 \d{1,2}일)'
         match3 = re.search(pattern3, ai_result_text)
         if match3:
             return match3.group(1)
         
-        # 패턴 4: "2025년 8월 25일 ~ 2025년 9월 1일" 형식
-        pattern4 = r'(\d{4}년 \d{1,2}월 \d{1,2}일 ~ \d{4}년 \d{1,2}월 \d{1,2}일)'
+        # 패턴 4: "**1) 거래 요약:** 2025년 35주차(...)" 형식
+        pattern4 = r'\*\*1\)\s*거래 요약:\*\*\s*(\d{4}년 \d{1,2}주차)'
         match4 = re.search(pattern4, ai_result_text)
         if match4:
             return match4.group(1)
+        
+        # 패턴 5: "1. **거래 요약:** 2025년 35주차(...)" 형식
+        pattern5 = r'1\.\s*\*\*거래 요약:\*\*\s*(\d{4}년 \d{1,2}주차)'
+        match5 = re.search(pattern5, ai_result_text)
+        if match5:
+            return match5.group(1)
+        
+        # 패턴 6: "2025년 9월 1일 기준" 형식에서 주차 계산 (마지막에 시도)
+        pattern6 = r'(\d{4}년 \d{1,2}월 \d{1,2}일)'
+        match6 = re.search(pattern6, ai_result_text)
+        if match6:
+            try:
+                date_str = match6.group(1)
+                # "2025년 9월 1일" -> "2025-09-01" 변환
+                date_obj = datetime.strptime(date_str, "%Y년 %m월 %d일")
+                # 해당 날짜의 주차 계산 (ISO 8601 표준)
+                week_info = self._calculate_week_number(date_obj)
+                return week_info
+            except Exception as e:
+                print(f"⚠️ 날짜 파싱 실패: {e}")
         
         return "N/A"
     
@@ -1885,7 +2098,7 @@ class AIChartAnalyzer:
 
     def _get_trading_info_from_db(self, stock_code: str, chart_type: str = "일봉", ai_result_text: str = "", trading_type: str = "거래량") -> Dict[str, Any]:
         """
-        DB에서 거래일, 거래대금/거래량, 거래률, 순위 정보 조회
+        DB에서 거래일, 거래대금, 거래률, 순위, 유통주식수, 거래량 정보 조회
         
         Args:
             stock_code (str): 종목코드 (6자리)
@@ -1896,15 +2109,19 @@ class AIChartAnalyzer:
         Returns:
             Dict[str, Any]: 거래정보 딕셔너리
                 - 거래일: 추출된 거래일/거래기간
-                - 거래대금: volume 값 (원 단위, 천단위 구분자 포함)
+                - 거래대금: volume * close (억원 단위)
                 - 거래률: 거래률 값 (퍼센트, 소수점 2자리)
                 - 순위: 거래량/거래률 기준 순위 (N위 형식)
+                - 유통주식수: 해당 종목의 유통주식수 (주 단위)
+                - 거래량: 거래일 기준 누적 거래량 (주 단위)
                 
         Note:
             - 거래일: AI 분석 결과에서 추출 (차트 타입별로 다른 형식)
-            - 거래대금: daily_data 테이블의 volume 값 직접 사용
+            - 거래대금: volume * close (억원 단위로 표시)
             - 거래률: volume / outstanding_shares * 100 (퍼센트)
             - 순위 계산: 거래량/거래률 기준 내림차순 정렬
+            - 유통주식수: outstanding_shares 값 (주 단위)
+            - 거래량: volume 값 (주 단위)
             - DB 연결 실패 시 모든 값이 "N/A"로 반환
         """
         try:
@@ -1929,12 +2146,8 @@ class AIChartAnalyzer:
                 extracted_date = self._extract_trading_date_from_ai_result(ai_result_text, chart_type)
                 print(f"📅 AI 결과에서 추출된 거래일/기간: {extracted_date}")
             
-            # 2. VolumeRankingDataManager를 사용하여 거래량/거래률 순위 조회
+            # 2. 자체적으로 거래량/거래률 순위 조회 (VolumeRankingDataManager 의존성 제거)
             try:
-                # 타이밍 이슈 방지를 위한 짧은 대기
-                import time
-                time.sleep(0.1)
-                volume_manager = VolumeRankingDataManager()
                 
                 # 차트 타입과 거래 타입에 따라 적절한 함수 호출
                 ranking_data = []
@@ -1957,39 +2170,13 @@ class AIChartAnalyzer:
                             target_date = latest_date_result['latest_date'].strftime('%Y-%m-%d')
                     
                     if target_date:
-                        # 거래타입에 따라 다른 함수 호출
-                        if trading_type == "거래률":
-                            # 거래률 기준 일봉 순위 조회
-                            ranking_data = volume_manager.get_daily_turnover_ranking(target_date, 50)
-                            print(f"📊 거래률 기준 전체 순위 조회 완료: {len(ranking_data)}개 종목")
-                            
-                            # 전체 순위 데이터에서 해당 종목 찾기
-                            target_stock_data = None
-                            for stock_data in ranking_data:
-                                if stock_data.get('stock_code') == stock_code:
-                                    target_stock_data = stock_data
-                                    break
-                            
-                            # 해당 종목이 순위에 없으면 개별 조회
-                            if not target_stock_data:
-                                print(f"⚠️ {stock_code}이 거래률 순위에 없어 개별 조회")
-                                target_stock_data = self._get_individual_stock_trading_data(stock_code, target_date, "daily")
-                        else:
-                            # 거래량 기준 일봉 순위 조회 (기본값)
-                            ranking_data = volume_manager.get_daily_volume_ranking(target_date, 50)
-                            print(f"📊 거래량 기준 전체 순위 조회 완료: {len(ranking_data)}개 종목")
-                            
-                            # 전체 순위 데이터에서 해당 종목 찾기
-                            target_stock_data = None
-                            for stock_data in ranking_data:
-                                if stock_data.get('stock_code') == stock_code:
-                                    target_stock_data = stock_data
-                                    break
-                            
-                            # 해당 종목이 순위에 없으면 개별 조회
-                            if not target_stock_data:
-                                print(f"⚠️ {stock_code}이 거래량 순위에 없어 개별 조회")
-                                target_stock_data = self._get_individual_stock_trading_data(stock_code, target_date, "daily")
+                        # 개별 종목 데이터 조회 (VolumeRankingDataManager 대신 직접 조회)
+                        target_stock_data = self._get_individual_stock_trading_data(stock_code, target_date, "daily")
+                        print(f"📊 {stock_code} 개별 거래 데이터 조회 완료")
+                        
+                        # 전체 순위 데이터 조회 (거래타입 전달)
+                        ranking_data = self._get_daily_ranking_data(target_date, trading_type)
+                        print(f"📊 일봉 전체 순위 데이터 조회 완료: {len(ranking_data)}개 종목 ({trading_type} 기준)")
                 
                 elif chart_type == "주봉":
                     # 주봉의 경우 주간 시작일 계산
@@ -2025,9 +2212,15 @@ class AIChartAnalyzer:
                         
                         # 파싱된 주차에 거래 데이터가 있는지 확인
                         if week_start:
-                            # 해당 주차에 거래 데이터가 있는지 확인
-                            test_data = volume_manager.get_weekly_volume_ranking(week_start, 1)
-                            if not test_data:
+                            # 해당 주차에 거래 데이터가 있는지 확인 (직접 DB 조회)
+                            test_query = """
+                                SELECT COUNT(*) as count 
+                                FROM daily_data 
+                                WHERE stock_code = %s 
+                                AND trade_date BETWEEN %s AND DATE_ADD(%s, INTERVAL 6 DAY)
+                            """
+                            test_result = db.fetch_one(test_query, (stock_code, week_start, week_start))
+                            if not test_result or test_result['count'] == 0:
                                 print(f"⚠️ {week_start} 주차에 거래 데이터가 없음")
                                 # 데이터가 없으면 N/A 반환
                                 db.disconnect()
@@ -2035,7 +2228,9 @@ class AIChartAnalyzer:
                                     "거래일": week_display,
                                     "거래대금": "N/A",
                                     "거래률": "N/A",
-                                    "순위": "N/A"
+                                    "순위": "N/A",
+                                    "유통주식수": "N/A",
+                                    "거래량": "N/A"
                                 }
                             else:
                                 print(f"✅ {week_start} 주차에 거래 데이터 존재")
@@ -2052,48 +2247,25 @@ class AIChartAnalyzer:
                     
                     target_date = week_start
                     if week_start:
-                        # 거래타입에 따라 다른 함수 호출
-                        if trading_type == "거래률":
-                            # 거래률 기준 주봉 순위 조회
-                            ranking_data = volume_manager.get_weekly_turnover_ranking(week_start, 50)
-                            print(f"📊 거래률 기준 주봉 전체 순위 조회 완료: {len(ranking_data)}개 종목")
-                            
-                            # 전체 순위 데이터에서 해당 종목 찾기
-                            target_stock_data = None
-                            for stock_data in ranking_data:
-                                if stock_data.get('stock_code') == stock_code:
-                                    target_stock_data = stock_data
-                                    break
-                            
-                            # 해당 종목이 순위에 없으면 개별 조회
-                            if not target_stock_data:
-                                print(f"⚠️ {stock_code}이 거래률 주봉 순위에 없어 개별 조회")
-                                target_stock_data = self._get_individual_stock_trading_data(stock_code, week_start, "weekly")
-                        else:
-                            # 거래량 기준 주봉 순위 조회 (기본값)
-                            ranking_data = volume_manager.get_weekly_volume_ranking(week_start, 50)
-                            print(f"📊 거래량 기준 주봉 전체 순위 조회 완료: {len(ranking_data)}개 종목")
-                            
-                            # 전체 순위 데이터에서 해당 종목 찾기
-                            target_stock_data = None
-                            for stock_data in ranking_data:
-                                if stock_data.get('stock_code') == stock_code:
-                                    target_stock_data = stock_data
-                                    break
-                            
-                            # 해당 종목이 순위에 없으면 개별 조회
-                            if not target_stock_data:
-                                print(f"⚠️ {stock_code}이 거래량 주봉 순위에 없어 개별 조회")
-                                target_stock_data = self._get_individual_stock_trading_data(stock_code, week_start, "weekly")
+                        # 개별 종목 데이터 조회
+                        target_stock_data = self._get_individual_stock_trading_data(stock_code, week_start, "weekly")
+                        print(f"📊 {stock_code} 주봉 개별 거래 데이터 조회 완료")
+                        
+                        # 전체 순위 데이터 조회 (거래타입 전달)
+                        ranking_data = self._get_weekly_ranking_data(week_start, trading_type)
+                        print(f"📊 주봉 전체 순위 데이터 조회 완료: {len(ranking_data)}개 종목 ({trading_type} 기준)")
                     else:
                         ranking_data = []
                 
                 elif chart_type == "월봉":
                     # 월봉의 경우 월간 시작일 계산
+                    year_month = None  # 초기화
+                    
                     if extracted_date != "N/A" and "~" in extracted_date:
                         # "2024-01-01~2024-01-31" 형식에서 시작일 추출
                         month_start = extracted_date.split("~")[0]
                         year_month = month_start[:7]  # "2024-01"
+                        print(f"📅 월봉 기간 형식 파싱: {extracted_date} → {year_month}")
                     elif extracted_date != "N/A" and "월" in extracted_date:
                         # "2025년 9월" 형식 파싱 - 추출된 월을 그대로 사용
                         year_month = self._parse_monthly_date(extracted_date)
@@ -2107,6 +2279,7 @@ class AIChartAnalyzer:
                                 "거래률": "N/A",
                                 "순위": "N/A"
                             }
+                        print(f"📅 월봉 년월 형식 파싱: {extracted_date} → {year_month}")
                     else:
                         # 추출된 날짜가 없으면 N/A 반환 (월 변경하지 않음)
                         print(f"⚠️ 월봉 거래일을 추출할 수 없음: {extracted_date}")
@@ -2119,41 +2292,18 @@ class AIChartAnalyzer:
                         }
                     
                     target_date = year_month
+                    print(f"📊 월봉 처리 - year_month: {year_month}, target_date: {target_date}")
+                    
                     if year_month:
-                        # 거래타입에 따라 다른 함수 호출
-                        if trading_type == "거래률":
-                            # 거래률 기준 월봉 순위 조회
-                            ranking_data = volume_manager.get_monthly_turnover_ranking(year_month, 50)
-                            print(f"📊 거래률 기준 월봉 전체 순위 조회 완료: {len(ranking_data)}개 종목")
-                            
-                            # 전체 순위 데이터에서 해당 종목 찾기
-                            target_stock_data = None
-                            for stock_data in ranking_data:
-                                if stock_data.get('stock_code') == stock_code:
-                                    target_stock_data = stock_data
-                                    break
-                            
-                            # 해당 종목이 순위에 없으면 개별 조회
-                            if not target_stock_data:
-                                print(f"⚠️ {stock_code}이 거래률 월봉 순위에 없어 개별 조회")
-                                target_stock_data = self._get_individual_stock_trading_data(stock_code, year_month, "monthly")
-                        else:
-                            # 거래량 기준 월봉 순위 조회 (기본값)
-                            ranking_data = volume_manager.get_monthly_volume_ranking(year_month, 50)
-                            print(f"📊 거래량 기준 월봉 전체 순위 조회 완료: {len(ranking_data)}개 종목")
-                            
-                            # 전체 순위 데이터에서 해당 종목 찾기
-                            target_stock_data = None
-                            for stock_data in ranking_data:
-                                if stock_data.get('stock_code') == stock_code:
-                                    target_stock_data = stock_data
-                                    break
-                            
-                            # 해당 종목이 순위에 없으면 개별 조회
-                            if not target_stock_data:
-                                print(f"⚠️ {stock_code}이 거래량 월봉 순위에 없어 개별 조회")
-                                target_stock_data = self._get_individual_stock_trading_data(stock_code, year_month, "monthly")
+                        # 개별 종목 데이터 조회
+                        target_stock_data = self._get_individual_stock_trading_data(stock_code, year_month, "monthly")
+                        print(f"📊 {stock_code} 월봉 개별 거래 데이터 조회 완료")
+                        
+                        # 전체 순위 데이터 조회 (거래타입 전달)
+                        ranking_data = self._get_monthly_ranking_data(year_month, trading_type)
+                        print(f"📊 월봉 전체 순위 데이터 조회 완료: {len(ranking_data)}개 종목 ({trading_type} 기준)")
                     else:
+                        print(f"⚠️ year_month가 None이어서 데이터 조회 불가")
                         ranking_data = []
                 
                 # 개별 종목 데이터 확인
@@ -2170,37 +2320,75 @@ class AIChartAnalyzer:
                         "거래일": display_date,
                         "거래대금": "N/A",
                         "거래률": "N/A",
-                        "순위": "N/A"
+                        "순위": "N/A",
+                        "유통주식수": "N/A",
+                        "거래량": "N/A"
                     }
                 
-                # 전체 순위 데이터에서 해당 종목의 순위 찾기
+                
+                # 순위 계산 (전체 순위 데이터에서 정확한 순위 찾기)
                 print(f"🔍 순위 계산 시작: {stock_code} ({chart_type}, {trading_type})")
-                ranking = 1  # 기본값
+                ranking = 999  # 기본값 (순위를 찾을 수 없는 경우)
                 
                 if ranking_data and len(ranking_data) > 0:
                     # 전체 순위 데이터에서 해당 종목의 순위 찾기
-                    for idx, stock_data in enumerate(ranking_data):
+                    for stock_data in ranking_data:
                         if stock_data.get('stock_code') == stock_code:
-                            ranking = idx + 1  # 1부터 시작하는 순위
-                            print(f"📊 {trading_type} 기준 순위: {ranking}위")
+                            ranking = int(stock_data.get('ranking', 999))
+                            print(f"📊 {trading_type} 기준 순위: {ranking}위 (전체 {len(ranking_data)}개 종목 중)")
                             break
                     else:
-                        # 순위에 없으면 50위 이후로 설정
-                        ranking = 51
-                        print(f"📊 {trading_type} 기준 순위: 50위 이후")
+                        # 순위에 없으면 거래량이 0이거나 데이터 없음
+                        ranking = 999
+                        print(f"📊 {stock_code}이 순위에 없음 (거래량 0 또는 데이터 없음)")
                 else:
                     print(f"⚠️ 전체 순위 데이터가 없어 순위 계산 불가")
                 
-                # 거래대금/거래량 계산 (안전한 None 처리)
+                # 거래량 계산 (안전한 None 처리)
                 volume_value = target_stock_data.get('volume', 0)
                 if volume_value is None or volume_value == '':
                     volume_value = 0
                 
                 try:
-                    total_amount = float(volume_value)
+                    volume = float(volume_value)
                 except (ValueError, TypeError):
                     print(f"⚠️ {stock_code} volume 값 변환 실패: {volume_value}")
-                    total_amount = 0
+                    volume = 0
+                
+                # 유통주식수 계산
+                outstanding_shares_value = target_stock_data.get('outstanding_shares', 0)
+                if outstanding_shares_value is None or outstanding_shares_value == '':
+                    outstanding_shares = 0
+                else:
+                    try:
+                        outstanding_shares = float(outstanding_shares_value)
+                    except (ValueError, TypeError):
+                        print(f"⚠️ {stock_code} outstanding_shares 값 변환 실패: {outstanding_shares_value}")
+                        outstanding_shares = 0
+                
+                # 거래대금 계산 (volume * close 또는 이미 계산된 total_amount 사용)
+                total_amount_value = target_stock_data.get('total_amount', 0)
+                if total_amount_value is None or total_amount_value == '':
+                    # total_amount가 없으면 volume * close로 계산
+                    close_price_value = target_stock_data.get('close_price', 0)
+                    if close_price_value is None or close_price_value == '':
+                        close_price = 0
+                    else:
+                        try:
+                            close_price = float(close_price_value)
+                        except (ValueError, TypeError):
+                            print(f"⚠️ {stock_code} close_price 값 변환 실패: {close_price_value}")
+                            close_price = 0
+                    
+                    # 거래대금 = 거래량 * 종가
+                    total_amount = volume * close_price if close_price > 0 else 0
+                else:
+                    # 이미 계산된 total_amount 사용
+                    try:
+                        total_amount = float(total_amount_value)
+                    except (ValueError, TypeError):
+                        print(f"⚠️ {stock_code} total_amount 값 변환 실패: {total_amount_value}")
+                        total_amount = 0
                 
                 # 거래률 계산 (모든 차트 타입에서 항상 계산)
                 turnover_rate_value = target_stock_data.get('turnover_rate', 0)
@@ -2217,12 +2405,19 @@ class AIChartAnalyzer:
                 
                 print(f"💰 {stock_code} {chart_type} 조회:")
                 if total_amount > 0:
-                    print(f"   거래대금(volume): {total_amount:,.0f}원")
+                    print(f"   거래대금(SUM(volume*close)): {total_amount:,.0f}원")
                 else:
-                    print(f"   거래대금(volume): 0원 (데이터 없음)")
+                    print(f"   거래대금(SUM(volume*close)): 0원 (데이터 없음)")
+                print(f"   거래량: {volume:,.0f}주")
+                print(f"   유통주식수: {outstanding_shares:,.0f}주")
                 # 모든 차트 타입에서 거래률 표시
                 print(f"   거래률: {turnover_rate:.2f}%")
-                print(f"   순위: {ranking}위 (총 {len(ranking_data)}개 종목 중)")
+                # 순위 표시 처리
+                if ranking == 999:
+                    ranking_display = "N/A"
+                else:
+                    ranking_display = f"{ranking}위"
+                print(f"   순위: {ranking_display} (전체 {len(ranking_data)}개 종목 중)")
                 
                 db.disconnect()
                 
@@ -2232,23 +2427,30 @@ class AIChartAnalyzer:
                 else:
                     display_date = extracted_date if extracted_date != "N/A" else target_date
                 
+                # 억원 단위로 변환
+                amount_in_hundred_millions = total_amount / 100000000
+                
                 # 모든 차트 타입에서 거래률 반환
                 return {
                     "거래일": display_date,
-                    "거래대금": f"{total_amount:,.0f}",
+                    "거래대금": f"{amount_in_hundred_millions:,.0f}억원",
                     "거래률": f"{turnover_rate:.2f}%",
-                    "순위": f"{ranking}위"
+                    "순위": ranking_display,
+                    "유통주식수": f"{outstanding_shares:,.0f}주",
+                    "거래량": f"{volume:,.0f}주"
                 }
                 
             except Exception as e:
-                print(f"❌ VolumeRankingDataManager 사용 중 오류: {e}")
+                print(f"❌ 거래 데이터 조회 중 오류: {e}")
                 # 기존 방식으로 fallback
                 db.disconnect()
                 return {
                     "거래일": extracted_date if extracted_date != "N/A" else "N/A",
                     "거래대금": "N/A",
                     "거래률": "N/A",
-                    "순위": "N/A"
+                    "순위": "N/A",
+                    "유통주식수": "N/A",
+                    "거래량": "N/A"
                 }
             
         except Exception as e:
@@ -2261,12 +2463,14 @@ class AIChartAnalyzer:
                 "거래일": "N/A",
                 "거래대금": "N/A",
                 "거래률": "N/A",
-                "순위": "N/A"
+                "순위": "N/A",
+                "유통주식수": "N/A",
+                "거래량": "N/A"
             }
     
     def _add_trading_info_to_result(self, result: Dict[str, Any], stock_code: str, result_type: str, chart_type: str = "일봉", ai_result_text: str = "", trading_type: str = "거래량") -> Dict[str, Any]:
         """
-        결과에 거래일, 거래대금, 거래률, 순위 정보 추가
+        결과에 거래일, 거래대금, 거래률, 순위, 유통주식수, 거래량 정보 추가
         
         Args:
             result (Dict[str, Any]): 기존 결과 딕셔너리
@@ -2283,7 +2487,7 @@ class AIChartAnalyzer:
             Dict[str, Any]: 거래정보가 추가된 결과 딕셔너리
             
         Note:
-            - 종목정보 섹션에 거래일, 거래대금, 거래률, 순위, 타입 필드 추가
+            - 종목정보 섹션에 거래일, 거래대금, 거래률, 순위, 유통주식수, 거래량, 타입 필드 추가
             - DB 조회 실패 시 모든 값이 "N/A"로 설정
             - result_type은 디버깅 및 유지보수 목적으로 사용
         """
@@ -2300,6 +2504,8 @@ class AIChartAnalyzer:
                 result["종목정보"]["거래대금"] = trading_info["거래대금"]
                 result["종목정보"]["거래률"] = trading_info["거래률"]
                 result["종목정보"]["순위"] = trading_info["순위"]
+                result["종목정보"]["유통주식수"] = trading_info["유통주식수"]
+                result["종목정보"]["거래량"] = trading_info["거래량"]
                 result["종목정보"]["거래타입"] = trading_type
                 result["종목정보"]["타입"] = result_type
                 print(f"✅ 거래정보 추가 완료 ({result_type}, {trading_type}): {trading_info}")
@@ -2314,6 +2520,8 @@ class AIChartAnalyzer:
                 result["종목정보"]["거래대금"] = "N/A"
                 result["종목정보"]["거래률"] = "N/A"
                 result["종목정보"]["순위"] = "N/A"
+                result["종목정보"]["유통주식수"] = "N/A"
+                result["종목정보"]["거래량"] = "N/A"
                 result["종목정보"]["거래타입"] = trading_type
                 result["종목정보"]["타입"] = result_type
         
@@ -3577,6 +3785,33 @@ class SummaryFileGenerator:
                         "파일명": file_name
                     }
                     
+                    # 개별 종목 JSON에서 거래 정보 추출하여 추가
+                    stock_info = result.get("종목정보", {})
+                    if stock_info:
+                        # 거래일 정보 추가
+                        if "거래일" in stock_info:
+                            summary_item["거래일"] = stock_info["거래일"]
+                        
+                        # 거래대금 정보 추가
+                        if "거래대금" in stock_info:
+                            summary_item["거래대금"] = stock_info["거래대금"]
+                        
+                        # 거래률 정보 추가
+                        if "거래률" in stock_info:
+                            summary_item["거래률"] = stock_info["거래률"]
+                        
+                        # 순위 정보 추가
+                        if "순위" in stock_info:
+                            summary_item["순위"] = stock_info["순위"]
+                        
+                        # 유통주식수 정보 추가
+                        if "유통주식수" in stock_info:
+                            summary_item["유통주식수"] = stock_info["유통주식수"]
+                        
+                        # 거래량 정보 추가
+                        if "거래량" in stock_info:
+                            summary_item["거래량"] = stock_info["거래량"]
+                    
                     # 하이브리드 방식: 상세 정보는 개별 워드 파일에서 확인하도록 안내
                     summary_item["주요정보"] = {
                         "상세분석": "개별 워드 파일에서 확인 가능",
@@ -3823,6 +4058,125 @@ class SummaryFileGenerator:
             print(f"❌ 요약 파일 저장 중 오류: {e}")
             return None, None, False
     
+    def _add_ranking_table_to_docx(self, doc, consolidated_result: dict, trading_type: str) -> None:
+        """
+        상위 50개 종목 순위표를 DOCX에 추가
+        
+        Args:
+            doc: Word 문서 객체
+            consolidated_result (dict): 통합 요약 결과
+            trading_type (str): 거래 타입 (거래량/거래률)
+        """
+        try:
+            # stock_details에서 데이터 추출
+            stock_details = consolidated_result.get("stock_details", [])
+            if not stock_details:
+                print("⚠️ stock_details 데이터가 없습니다.")
+                return
+            
+            # 거래대금 또는 거래률 기준으로 정렬
+            sort_key = "거래대금" if trading_type == "거래량" else "거래률"
+            
+            # 정렬 가능한 데이터만 필터링하고 정렬
+            sortable_stocks = []
+            for stock in stock_details:
+                if sort_key in stock and stock[sort_key] != "N/A":
+                    try:
+                        # 거래대금: "149억원" -> 149
+                        # 거래률: "72.47%" -> 72.47
+                        value_str = stock[sort_key]
+                        if sort_key == "거래대금":
+                            # "149억원" -> 149
+                            value = float(value_str.replace("억원", "").replace(",", ""))
+                        else:  # 거래률
+                            # "72.47%" -> 72.47
+                            value = float(value_str.replace("%", "").replace(",", ""))
+                        
+                        sortable_stocks.append((value, stock))
+                    except (ValueError, AttributeError):
+                        continue
+            
+            # 내림차순 정렬 (높은 값부터)
+            sortable_stocks.sort(key=lambda x: x[0], reverse=True)
+            
+            # 상위 50개만 선택
+            top_50_stocks = [stock for _, stock in sortable_stocks[:50]]
+            
+            if not top_50_stocks:
+                print("⚠️ 정렬 가능한 종목 데이터가 없습니다.")
+                return
+            
+            # 표 제목 추가
+            table_title = doc.add_heading(f'📈 {trading_type} 기준 상위 50개 종목 순위', level=1)
+            for run in table_title.runs:
+                run.font.name = '맑은 고딕'
+                run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+            
+            # 표 생성 (6열: 순위|거래율/거래대금|종목명|순위|거래율/거래대금|종목명)
+            # 25행 (50개 종목을 2열로 나누어 표시)
+            table = doc.add_table(rows=26, cols=6)  # 헤더 1행 + 데이터 25행
+            table.style = 'Table Grid'
+            
+            # 헤더 설정
+            header_cells = table.rows[0].cells
+            header_texts = ['순위', '거래율' if trading_type == "거래률" else '거래대금', '종목명', 
+                           '순위', '거래율' if trading_type == "거래률" else '거래대금', '종목명']
+            
+            for i, header_text in enumerate(header_texts):
+                header_cells[i].text = header_text
+                # 헤더 셀 스타일링
+                for paragraph in header_cells[i].paragraphs:
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    for run in paragraph.runs:
+                        run.font.name = '맑은 고딕'
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                        run.font.bold = True
+            
+            # 칸 크기 조정 (순위 칸 50% 줄이고, 거래율/종목명 칸 늘리기)
+            # 전체 테이블 너비를 100%로 설정
+            table.width = Inches(7.0)  # 전체 테이블 너비
+            
+            # 각 칸의 너비 설정 (Inches 단위)
+            # 순위: 0.5인치 (50% 줄임), 거래율/거래대금: 1.2인치, 종목명: 1.8인치
+            column_widths = [0.5, 1.2, 1.8, 0.5, 1.2, 1.8]  # 6개 칸의 너비
+            
+            for i, width in enumerate(column_widths):
+                table.columns[i].width = Inches(width)
+            
+            # 데이터 행 채우기 (25행, 각 행에 2개 종목)
+            for row_idx in range(1, 26):  # 1~25행
+                data_cells = table.rows[row_idx].cells
+                
+                # 왼쪽 열 (1-25위)
+                left_stock_idx = row_idx - 1
+                if left_stock_idx < len(top_50_stocks):
+                    left_stock = top_50_stocks[left_stock_idx]
+                    data_cells[0].text = str(left_stock_idx + 1)  # 순위
+                    data_cells[1].text = left_stock.get(sort_key, "N/A")  # 거래율/거래대금
+                    data_cells[2].text = left_stock.get("종목명", "N/A")  # 종목명
+                
+                # 오른쪽 열 (26-50위)
+                right_stock_idx = left_stock_idx + 25
+                if right_stock_idx < len(top_50_stocks):
+                    right_stock = top_50_stocks[right_stock_idx]
+                    data_cells[3].text = str(right_stock_idx + 1)  # 순위
+                    data_cells[4].text = right_stock.get(sort_key, "N/A")  # 거래율/거래대금
+                    data_cells[5].text = right_stock.get("종목명", "N/A")  # 종목명
+            
+            # 테이블 전체에 한글 폰트 적용
+            for row in table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        for run in paragraph.runs:
+                            run.font.name = '맑은 고딕'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+            
+            print(f"✅ {trading_type} 기준 상위 50개 종목 순위표 추가 완료")
+            
+        except Exception as e:
+            print(f"❌ 순위표 추가 중 오류: {e}")
+    
     def _create_summary_docx(self, consolidated_result: dict, output_path: str) -> bool:
         """
         통합 요약 결과를 DOCX 파일로 생성
@@ -3910,6 +4264,9 @@ class SummaryFileGenerator:
             for run in para_desc.runs:
                 run.font.name = '맑은 고딕'
                 run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+            
+            # 상위 50개 종목 순위표 추가
+            self._add_ranking_table_to_docx(doc, consolidated_result, trading_type_from_meta)
             
             # 마크다운 파싱 함수 정의
             def _parse_markdown_to_word(text: str, doc) -> None:
