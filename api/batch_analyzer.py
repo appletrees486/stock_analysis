@@ -387,6 +387,64 @@ class BatchAnalyzer:
         else:
             return {'error': '결과를 찾을 수 없습니다'}
     
+    def _generate_zip_filename(self, batch_id: str) -> str:
+        """summary_meta 정보를 기반으로 zip 파일명 생성"""
+        try:
+            # summary JSON 파일에서 메타데이터 읽기
+            summary_meta = self._get_summary_meta(batch_id)
+            if summary_meta:
+                chart_type = summary_meta.get('chart_type', '')
+                trading_date = summary_meta.get('trading_date', '')
+                trading_type = summary_meta.get('trading_type', '')
+                total_stocks = summary_meta.get('total_stocks', 0)
+                generated_at = summary_meta.get('generated_at', '').replace(' ', '_').replace(':', '').replace('-', '')
+                
+                # 파일명 생성: {chart_type}_{trading_date}_{trading_type}_{total_stocks}개_{generated_at}_{batch_id}.zip
+                zip_filename = f"{chart_type}_{trading_date}_{trading_type}_{total_stocks}개_{generated_at}_{batch_id}.zip"
+                return f"results/{zip_filename}"
+            else:
+                # summary_meta를 찾을 수 없는 경우 기본 파일명 사용
+                return f"results/{batch_id}_results.zip"
+        except Exception as e:
+            logger.warning(f"zip 파일명 생성 중 오류: {e}, 기본 파일명 사용")
+            return f"results/{batch_id}_results.zip"
+    
+    def _get_summary_meta(self, batch_id: str) -> dict:
+        """summary JSON 파일에서 메타데이터 추출"""
+        try:
+            # ai_analysis_results 폴더에서 summary 파일 찾기
+            ai_results_dir = "ai_analysis_results"
+            if not os.path.exists(ai_results_dir):
+                return None
+            
+            # summary 파일 패턴으로 검색
+            import glob
+            summary_pattern = f"{ai_results_dir}/summary_*.json"
+            summary_files = glob.glob(summary_pattern)
+            
+            # 최신 summary 파일 선택 (batch_id와 가장 가까운 시간)
+            latest_summary = None
+            latest_time = None
+            
+            for summary_file in summary_files:
+                try:
+                    with open(summary_file, 'r', encoding='utf-8') as f:
+                        summary_data = json.load(f)
+                        if 'summary_meta' in summary_data:
+                            # 파일 생성 시간과 batch_id 시간 비교
+                            file_time = os.path.getmtime(summary_file)
+                            if latest_time is None or file_time > latest_time:
+                                latest_time = file_time
+                                latest_summary = summary_data['summary_meta']
+                except Exception as e:
+                    logger.warning(f"summary 파일 읽기 실패: {summary_file}, {e}")
+                    continue
+            
+            return latest_summary
+        except Exception as e:
+            logger.warning(f"summary_meta 추출 중 오류: {e}")
+            return None
+
     def _save_batch_results(self, batch_id: str):
         """배치 결과를 파일로 저장"""
         try:
@@ -398,27 +456,17 @@ class BatchAnalyzer:
                 os.makedirs(results_dir)
                 logger.info(f"results 폴더 생성: {results_dir}")
             
-            # ZIP 파일만 생성 (결과 다운로드용)
-            zip_file = f"results/{batch_id}_results.zip"
+            # ZIP 파일명 생성 (summary_meta 기반)
+            zip_file = self._generate_zip_filename(batch_id)
             logger.info(f"ZIP 파일 생성: {zip_file}")
             
             with zipfile.ZipFile(zip_file, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                # 배치 결과 JSON을 메모리에서 직접 ZIP에 추가 (파일로 저장하지 않음)
-                batch_results_json = json.dumps(self.batch_results[batch_id], ensure_ascii=False, indent=2)
-                zipf.writestr(f"{batch_id}_results.json", batch_results_json)
-                logger.info(f"ZIP에 배치 결과 JSON 추가: {batch_id}_results.json")
-                
-                # 요약 파일을 메모리에서 직접 ZIP에 추가 (파일로 저장하지 않음)
-                summary_content = self._create_summary_content(batch_id)
-                zipf.writestr(f"{batch_id}_summary.txt", summary_content)
-                logger.info(f"ZIP에 요약 파일 추가: {batch_id}_summary.txt")
-                
-                # ai_analysis_results 폴더의 개별 종목별 분석 결과 파일들 추가
+                # ai_analysis_results 폴더의 개별 종목별 분석 결과 파일들 추가 (DOCX만)
                 logger.info(f"AI 분석 결과 파일들 ZIP에 추가 시작")
                 self._add_analysis_files_to_zip(zipf, batch_id)
                 logger.info(f"AI 분석 결과 파일들 ZIP에 추가 완료")
                 
-                # 통합 파일들 ZIP에 추가
+                # 통합 파일들 ZIP에 추가 (DOCX만)
                 logger.info(f"통합 분석 파일들 ZIP에 추가 시작")
                 self._add_consolidated_files_to_zip(zipf, batch_id)
                 logger.info(f"통합 분석 파일들 ZIP에 추가 완료")
@@ -426,10 +474,15 @@ class BatchAnalyzer:
             logger.info(f"ZIP 파일 생성 완료: {zip_file}")
             logger.info(f"배치 결과 저장 완료: {batch_id}")
             
+            # 메모리 정리
+            self.cleanup_batch_memory(batch_id)
+            
         except Exception as e:
             logger.error(f"배치 결과 저장 오류: {e}")
             import traceback
             logger.error(f"상세 오류: {traceback.format_exc()}")
+            # 오류 발생 시에도 메모리 정리
+            self.cleanup_batch_memory(batch_id)
     
     def _add_analysis_files_to_zip(self, zipf, batch_id: str):
         """ai_analysis_results 폴더의 분석 결과 파일들을 ZIP에 추가"""
@@ -467,49 +520,36 @@ class BatchAnalyzer:
                     # 배치 결과에 AI 분석 파일 정보가 있는 경우
                     json_path = os.path.join(ai_results_dir, ai_analysis_file)
                     if os.path.exists(json_path):
-                        # JSON 파일 추가
-                        zip_path = f"analysis_results/{ai_analysis_file}"
-                        zipf.write(json_path, zip_path)
-                        
                         # 해당하는 DOCX 파일 찾기
                         docx_file = ai_analysis_file.replace('.json', '.docx')
                         docx_path = os.path.join(ai_results_dir, docx_file)
                         if os.path.exists(docx_path):
                             docx_zip_path = f"analysis_results/{docx_file}"
                             zipf.write(docx_path, docx_zip_path)
-                            logger.info(f"분석 결과 파일 추가: {stock_code} - {ai_analysis_file}, {docx_file}")
+                            logger.info(f"분석 결과 파일 추가: {stock_code} - {docx_file}")
                         else:
                             logger.info(f"분석 결과 파일 추가: {stock_code} - {ai_analysis_file} (DOCX 없음)")
                     else:
                         logger.warning(f"AI 분석 JSON 파일을 찾을 수 없습니다: {json_path}")
                 else:
-                    # 기존 방식으로 파일 찾기 (하위 호환성)
-                    pattern = f"analysis_{chart_type_en}_{stock_code}_*.json"
-                    json_files = []
+                    # 기존 방식으로 파일 찾기 (하위 호환성) - DOCX만 추가
+                    pattern = f"analysis_{chart_type_en}_{stock_code}_*.docx"
+                    docx_files = []
                     for file in os.listdir(ai_results_dir):
-                        if file.startswith(f"analysis_{chart_type_en}_{stock_code}_") and file.endswith('.json'):
-                            json_files.append(file)
+                        if file.startswith(f"analysis_{chart_type_en}_{stock_code}_") and file.endswith('.docx'):
+                            docx_files.append(file)
                     
                     # 가장 최근 파일 선택 (타임스탬프가 가장 큰 파일)
-                    if json_files:
-                        latest_json = sorted(json_files)[-1]
-                        json_path = os.path.join(ai_results_dir, latest_json)
+                    if docx_files:
+                        latest_docx = sorted(docx_files)[-1]
+                        docx_path = os.path.join(ai_results_dir, latest_docx)
                         
-                        # ZIP에 JSON 파일 추가
-                        zip_path = f"analysis_results/{latest_json}"
-                        zipf.write(json_path, zip_path)
-                        
-                        # 해당하는 DOCX 파일도 찾아서 추가
-                        docx_file = latest_json.replace('.json', '.docx')
-                        docx_path = os.path.join(ai_results_dir, docx_file)
-                        if os.path.exists(docx_path):
-                            docx_zip_path = f"analysis_results/{docx_file}"
-                            zipf.write(docx_path, docx_zip_path)
-                            logger.info(f"분석 결과 파일 추가: {stock_code} - {latest_json}, {docx_file}")
-                        else:
-                            logger.info(f"분석 결과 파일 추가: {stock_code} - {latest_json} (DOCX 없음)")
+                        # ZIP에 DOCX 파일 추가
+                        docx_zip_path = f"analysis_results/{latest_docx}"
+                        zipf.write(docx_path, docx_zip_path)
+                        logger.info(f"분석 결과 파일 추가: {stock_code} - {latest_docx}")
                     else:
-                        logger.warning(f"종목 {stock_code}의 분석 결과 파일을 찾을 수 없습니다")
+                        logger.warning(f"종목 {stock_code}의 분석 결과 DOCX 파일을 찾을 수 없습니다")
             
         except Exception as e:
             logger.error(f"분석 결과 파일 ZIP 추가 오류: {e}")
@@ -596,20 +636,27 @@ class BatchAnalyzer:
         except Exception as e:
             logger.error(f"요약 파일 생성 오류: {e}")
     
-    def cleanup_batch(self, batch_id: str):
-        """배치 데이터 정리"""
+    def cleanup_batch_memory(self, batch_id: str):
+        """배치 완료 후 메모리 강제 정리"""
         try:
-            if batch_id in self.batch_status:
-                del self.batch_status[batch_id]
             if batch_id in self.batch_results:
                 del self.batch_results[batch_id]
+                logger.info(f"배치 결과 메모리 해제: {batch_id}")
+            if batch_id in self.batch_status:
+                del self.batch_status[batch_id]
+                logger.info(f"배치 상태 메모리 해제: {batch_id}")
             if batch_id in self.batch_threads:
                 del self.batch_threads[batch_id]
+                logger.info(f"배치 스레드 메모리 해제: {batch_id}")
             
-            logger.info(f"배치 데이터 정리 완료: {batch_id}")
+            logger.info(f"배치 메모리 정리 완료: {batch_id}")
             
         except Exception as e:
-            logger.error(f"배치 데이터 정리 오류: {e}")
+            logger.error(f"배치 메모리 정리 오류: {e}")
+
+    def cleanup_batch(self, batch_id: str):
+        """배치 데이터 정리 (기존 호환성 유지)"""
+        self.cleanup_batch_memory(batch_id)
     
     def get_all_batches(self) -> List[str]:
         """모든 배치 ID 목록 반환"""
@@ -652,23 +699,18 @@ class BatchAnalyzer:
             
             # consolidated_analysis 폴더 파일들 제거 (사용자 요청)
             
-            # 4. Total Analysis JSON을 메모리에서 생성하여 ZIP에 추가
+            # 4. Total Analysis JSON을 메모리에서 생성 (ZIP에는 추가하지 않음)
             try:
                 total_analysis_result = self._create_total_analysis_json(batch_id, chart_type)
-                if total_analysis_result:
-                    total_analysis_json_content = json.dumps(total_analysis_result, ensure_ascii=False, indent=2)
-                    total_analysis_json_filename = f"total_analysis/total_analysis_{chart_type_en}_{timestamp}.json"
-                    zipf.writestr(total_analysis_json_filename, total_analysis_json_content)
-                    logger.info(f"Total Analysis JSON 추가: {total_analysis_json_filename}")
-                else:
+                if not total_analysis_result:
                     logger.error(f"Total Analysis JSON 생성 실패")
             except Exception as e:
-                logger.error(f"Total Analysis JSON ZIP 추가 실패: {e}")
+                logger.error(f"Total Analysis JSON 생성 실패: {e}")
+                total_analysis_result = None
             
             # 5. Total Analysis DOCX를 메모리에서 생성하여 ZIP에 추가
             try:
                 import tempfile
-                total_analysis_result = self._create_total_analysis_json(batch_id, chart_type)
                 if total_analysis_result:
                     total_analysis_doc_filename = f"total_analysis/total_analysis_{chart_type_en}_{timestamp}.docx"
                     
@@ -706,13 +748,6 @@ class BatchAnalyzer:
                 if summary_info:
                     summary_files = summary_info.get('summary_files', {})
                     if summary_files:
-                        # JSON 파일 추가
-                        json_path = summary_files.get('json_path')
-                        if json_path and os.path.exists(json_path):
-                            summary_json_filename = f"summary_analysis/summary_{chart_type_en}_{timestamp}.json"
-                            zipf.write(json_path, summary_json_filename)
-                            logger.info(f"요약 분석 JSON 추가: {summary_json_filename}")
-                        
                         # DOCX 파일 추가
                         docx_path = summary_files.get('docx_path')
                         if docx_path and os.path.exists(docx_path):
@@ -883,10 +918,19 @@ class BatchAnalyzer:
                     logger.info(f"종목 {stock_code} ({stock_name}) 기본 정보 추가 완료")
             
             logger.info(f"Total Analysis JSON 생성 완료: {len(total_analysis['consolidated_analysis'])}개 종목")
+            
+            # JSON 생성 후 배치 결과 메모리 해제 (여러 차례 분석 가능하도록)
+            if batch_id in self.batch_results:
+                del self.batch_results[batch_id]
+                logger.info(f"Total Analysis JSON 생성 후 배치 결과 메모리 해제: {batch_id}")
+            
             return total_analysis
             
         except Exception as e:
             logger.error(f"Total Analysis JSON 생성 중 오류: {e}")
+            # 오류 발생 시에도 메모리 해제
+            if batch_id in self.batch_results:
+                del self.batch_results[batch_id]
             return None
     
     def _create_total_analysis_docx(self, total_analysis_result: dict, chart_type: str, output_path: str, batch_id: str) -> bool:
