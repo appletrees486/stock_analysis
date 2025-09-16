@@ -461,10 +461,11 @@ class BatchAnalyzer:
             logger.info(f"ZIP 파일 생성: {zip_file}")
             
             with zipfile.ZipFile(zip_file, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                # ai_analysis_results 폴더의 개별 종목별 분석 결과 파일들 추가 (DOCX만)
-                logger.info(f"AI 분석 결과 파일들 ZIP에 추가 시작")
-                self._add_analysis_files_to_zip(zipf, batch_id)
-                logger.info(f"AI 분석 결과 파일들 ZIP에 추가 완료")
+                # ai_analysis_results 폴더의 개별 종목별 분석 결과 파일들 추가 (DOCX만) - 비활성화
+                # logger.info(f"AI 분석 결과 파일들 ZIP에 추가 시작")
+                # self._add_analysis_files_to_zip(zipf, batch_id)
+                # logger.info(f"AI 분석 결과 파일들 ZIP에 추가 완료")
+                logger.info("개별 종목 분석 결과 DOCX 파일은 ZIP에 포함하지 않습니다.")
                 
                 # 통합 파일들 ZIP에 추가 (DOCX만)
                 logger.info(f"통합 분석 파일들 ZIP에 추가 시작")
@@ -486,73 +487,9 @@ class BatchAnalyzer:
     
     def _add_analysis_files_to_zip(self, zipf, batch_id: str):
         """ai_analysis_results 폴더의 분석 결과 파일들을 ZIP에 추가"""
-        try:
-            ai_results_dir = "ai_analysis_results"
-            if not os.path.exists(ai_results_dir):
-                logger.warning(f"AI 분석 결과 폴더가 존재하지 않습니다: {ai_results_dir}")
-                return
-            
-            # 배치에 포함된 종목 코드들 가져오기
-            if batch_id not in self.batch_results:
-                return
-            
-            batch_results = self.batch_results[batch_id]
-            chart_type = self.batch_status.get(batch_id, {}).get('chart_type', '일봉')
-            
-            # 차트 타입 매핑
-            chart_type_mapping = {
-                "일봉": "daily",
-                "주봉": "weekly", 
-                "월봉": "monthly"
-            }
-            chart_type_en = chart_type_mapping.get(chart_type, "daily")
-            
-            # 각 종목별로 분석 결과 파일 찾기
-            for result in batch_results:
-                stock_code = result.get('stock_code')
-                if not stock_code:
-                    continue
-                
-                # 배치 결과에서 AI 분석 파일 정보 확인
-                ai_analysis_file = result.get('ai_analysis_file')
-                
-                if ai_analysis_file:
-                    # 배치 결과에 AI 분석 파일 정보가 있는 경우
-                    json_path = os.path.join(ai_results_dir, ai_analysis_file)
-                    if os.path.exists(json_path):
-                        # 해당하는 DOCX 파일 찾기
-                        docx_file = ai_analysis_file.replace('.json', '.docx')
-                        docx_path = os.path.join(ai_results_dir, docx_file)
-                        if os.path.exists(docx_path):
-                            docx_zip_path = f"analysis_results/{docx_file}"
-                            zipf.write(docx_path, docx_zip_path)
-                            logger.info(f"분석 결과 파일 추가: {stock_code} - {docx_file}")
-                        else:
-                            logger.info(f"분석 결과 파일 추가: {stock_code} - {ai_analysis_file} (DOCX 없음)")
-                    else:
-                        logger.warning(f"AI 분석 JSON 파일을 찾을 수 없습니다: {json_path}")
-                else:
-                    # 기존 방식으로 파일 찾기 (하위 호환성) - DOCX만 추가
-                    pattern = f"analysis_{chart_type_en}_{stock_code}_*.docx"
-                    docx_files = []
-                    for file in os.listdir(ai_results_dir):
-                        if file.startswith(f"analysis_{chart_type_en}_{stock_code}_") and file.endswith('.docx'):
-                            docx_files.append(file)
-                    
-                    # 가장 최근 파일 선택 (타임스탬프가 가장 큰 파일)
-                    if docx_files:
-                        latest_docx = sorted(docx_files)[-1]
-                        docx_path = os.path.join(ai_results_dir, latest_docx)
-                        
-                        # ZIP에 DOCX 파일 추가
-                        docx_zip_path = f"analysis_results/{latest_docx}"
-                        zipf.write(docx_path, docx_zip_path)
-                        logger.info(f"분석 결과 파일 추가: {stock_code} - {latest_docx}")
-                    else:
-                        logger.warning(f"종목 {stock_code}의 분석 결과 DOCX 파일을 찾을 수 없습니다")
-            
-        except Exception as e:
-            logger.error(f"분석 결과 파일 ZIP 추가 오류: {e}")
+        # 개별 종목 분석 결과 DOCX 파일은 ZIP에 포함하지 않음
+        logger.info("개별 종목 분석 결과 DOCX 파일은 ZIP에 포함하지 않습니다.")
+        return
     
     def _create_summary_content(self, batch_id: str) -> str:
         """분석 결과 요약 내용을 메모리에서 생성"""
