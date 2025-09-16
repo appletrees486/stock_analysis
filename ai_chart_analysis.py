@@ -473,7 +473,7 @@ class AIChartAnalyzer:
 
     def analyze_chart_image(self, image_path: str, stock_name: str = "", chart_type: str = "일봉", chart_data: Optional[pd.DataFrame] = None, 
                            json_data_path: str = "", csv_data_path: str = "", text_summary_path: str = "", 
-                           enable_summary_analysis: bool = False, additional_info: Optional[Dict[str, Any]] = None, trading_type: str = "거래량") -> Optional[Dict[str, Any]]:
+                           enable_summary_analysis: bool = False, additional_info: Optional[Dict[str, Any]] = None, trading_type: str = "거래대금") -> Optional[Dict[str, Any]]:
         """
         차트 이미지를 AI로 분석 (하이브리드 버전 - 개별 + 요약 분석 동시 지원)
         
@@ -487,7 +487,7 @@ class AIChartAnalyzer:
             text_summary_path (str): 텍스트 요약 파일 경로
             enable_summary_analysis (bool): 요약 분석 활성화 여부
             additional_info (Dict[str, Any]): 추가 정보
-            trading_type (str): 거래 타입 (거래량, 거래률)
+            trading_type (str): 거래 타입 (거래대금, 거래율)
             
         Returns:
             Dict[str, Any]: 분석 결과 JSON (요약 분석 포함 시 summary_analysis 키 추가)
@@ -623,7 +623,7 @@ class AIChartAnalyzer:
                     close_val = f"{row['Close']:,.0f}" if pd.notna(row['Close']) else "N/A"
                     volume_val = f"{row['Volume']:,.0f}" if pd.notna(row['Volume']) else "N/A"
                     
-                    data_summary += f"- {date.strftime('%Y-%m-%d')}: 시가 {open_val}, 고가 {high_val}, 저가 {low_val}, 종가 {close_val}, 거래량 {volume_val}\n"
+                    data_summary += f"- {date.strftime('%Y-%m-%d')}: 시가 {open_val}, 고가 {high_val}, 저가 {low_val}, 종가 {close_val}, 거래대금 {volume_val}\n"
                 
                 # 기술적 지표 정보 추가 (있는 경우)
                 if 'MA5' in chart_data.columns and pd.notna(chart_data['MA5'].iloc[-1]):
@@ -1304,16 +1304,16 @@ class AIChartAnalyzer:
                 doc.add_picture(chart_image_path, width=Inches(6))
                 doc.add_paragraph()
             
-            # 거래대금/거래량 및 순위 정보 추가 (모든 차트 타입에 적용)
+            # 거래대금/거래대금 및 순위 정보 추가 (모든 차트 타입에 적용)
             if isinstance(result, dict) and "종목정보" in result:
                 try:
                     # 거래 정보 추출
                     total_amount = result["종목정보"].get("거래대금", "N/A")
-                    turnover_rate = result["종목정보"].get("거래률", "N/A")
+                    turnover_rate = result["종목정보"].get("거래율", "N/A")
                     ranking = result["종목정보"].get("순위", "N/A")
                     outstanding_shares = result["종목정보"].get("유통주식수", "N/A")
-                    volume = result["종목정보"].get("거래량", "N/A")
-                    trading_type = result["종목정보"].get("거래타입", "거래량")
+                    volume = result["종목정보"].get("거래대금", "N/A")
+                    trading_type = result["종목정보"].get("거래타입", "거래대금")
                     
                     # 차트 타입별 기간 텍스트 설정
                     period_text = {
@@ -1323,8 +1323,8 @@ class AIChartAnalyzer:
                     }.get(chart_type, "일일")
                     
                     # 거래 타입별 문구 생성
-                    if trading_type == "거래률" and turnover_rate != "N/A":
-                        # 거래률 기준 문구 - 사용자 요구사항에 맞게 수정
+                    if trading_type == "거래율" and turnover_rate != "N/A":
+                        # 거래율 기준 문구 - 사용자 요구사항에 맞게 수정
                         rate_value = turnover_rate.replace("%", "").strip()
                         if rate_value.replace(".", "").isdigit() and volume != "N/A" and outstanding_shares != "N/A":
                             # 거래량과 유통주식수에서 숫자만 추출
@@ -1336,9 +1336,9 @@ class AIChartAnalyzer:
                             else:
                                 trading_info_text = f"위 주식의 {period_text} 거래률은 {turnover_rate}로 전체 종목 중 상위 {ranking}를 차지하여 분석 대상에 포함되었습니다."
                         else:
-                            trading_info_text = f"위 주식의 {period_text} 거래률 정보를 확인할 수 없어 분석 대상에 포함되었습니다."
+                            trading_info_text = f"위 주식의 {period_text} 거래율 정보를 확인할 수 없어 분석 대상에 포함되었습니다."
                     else:
-                        # 거래량 기준 문구 - 사용자 요구사항에 맞게 수정
+                        # 거래대금 기준 문구 - 사용자 요구사항에 맞게 수정
                         if total_amount != "N/A":
                             trading_info_text = f"위 주식의 {period_text} 거래대금은 {total_amount}으로 전체 종목 중 상위 {ranking}를 차지하여 분석 대상에 포함되었습니다."
                         else:
@@ -1421,7 +1421,7 @@ class AIChartAnalyzer:
             print(f"❌ 하이브리드 방식 Word 문서 생성 중 오류: {e}")
             return False
 
-    def _create_fallback_result(self, stock_name: str, chart_type: str, ai_response: str, error_type: str, stock_code: str = "000000", chart_data: Optional[pd.DataFrame] = None, additional_info: Optional[Dict[str, Any]] = None, trading_type: str = "거래량") -> Dict[str, Any]:
+    def _create_fallback_result(self, stock_name: str, chart_type: str, ai_response: str, error_type: str, stock_code: str = "000000", chart_data: Optional[pd.DataFrame] = None, additional_info: Optional[Dict[str, Any]] = None, trading_type: str = "거래대금") -> Dict[str, Any]:
         """JSON 파싱 실패 시 대체 결과 생성"""
         
         # 무조건 stocks 테이블에서 종목명 조회 (통일된 처리)
@@ -1517,16 +1517,16 @@ class AIChartAnalyzer:
             print(f"❌ 월봉 날짜 파싱 오류: {e}")
             return None
 
-    def _calculate_stock_ranking(self, stock_code: str, target_date: str, chart_type: str, volume: float, trading_type: str = "거래량") -> int:
+    def _calculate_stock_ranking(self, stock_code: str, target_date: str, chart_type: str, volume: float, trading_type: str = "거래대금") -> int:
         """
-        종목의 거래량/거래률 순위 계산
+        종목의 거래대금/거래율 순위 계산
         
         Args:
             stock_code (str): 종목코드
             target_date (str): 대상 날짜/기간
             chart_type (str): 차트 타입
-            volume (float): 해당 종목의 거래량
-            trading_type (str): 거래 타입 (거래량, 거래률)
+            volume (float): 해당 종목의 거래대금
+            trading_type (str): 거래 타입 (거래대금, 거래율)
             
         Returns:
             int: 순위 (1부터 시작)
@@ -1541,9 +1541,9 @@ class AIChartAnalyzer:
             if chart_type == "일봉":
                 # 일봉 순위 계산 (거래타입에 따라 분기)
                 print(f"🔍 일봉 순위 계산: {trading_type} 기준")
-                if trading_type == "거래률":
-                    # 거래률 기준 순위 계산
-                    print(f"📊 거래률 기준 쿼리 실행: {target_date}, {volume}")
+                if trading_type == "거래율":
+                    # 거래율 기준 순위 계산
+                    print(f"📊 거래율 기준 쿼리 실행: {target_date}, {volume}")
                     query = """
                     SELECT COUNT(*) + 1 as ranking
                     FROM daily_data 
@@ -1552,8 +1552,8 @@ class AIChartAnalyzer:
                     """
                     params = (target_date, volume)
                 else:
-                    # 거래량 기준 순위 계산 (기본값)
-                    print(f"📊 거래량 기준 쿼리 실행: {target_date}, {volume}")
+                    # 거래대금 기준 순위 계산 (기본값)
+                    print(f"📊 거래대금 기준 쿼리 실행: {target_date}, {volume}")
                     query = """
                     SELECT COUNT(*) + 1 as ranking
                     FROM daily_data 
@@ -1577,8 +1577,8 @@ class AIChartAnalyzer:
                     print(f"❌ 주차 계산 실패: {e}")
                     return 1  # 주차 계산 실패 시 1위로 설정
                 
-                if trading_type == "거래률":
-                    # 거래률 기준 주봉 순위 계산
+                if trading_type == "거래율":
+                    # 거래율 기준 주봉 순위 계산
                     query = """
                     SELECT COUNT(*) + 1 as ranking
                     FROM (
@@ -1608,8 +1608,8 @@ class AIChartAnalyzer:
                 
             elif chart_type == "월봉":
                 # 월봉 순위 계산 (거래타입에 따라 분기)
-                if trading_type == "거래률":
-                    # 거래률 기준 월봉 순위 계산
+                if trading_type == "거래율":
+                    # 거래율 기준 월봉 순위 계산
                     query = """
                     SELECT COUNT(*) + 1 as ranking
                     FROM (
@@ -1622,7 +1622,7 @@ class AIChartAnalyzer:
                     """
                     params = (target_date, volume)
                 else:
-                    # 거래량 기준 월봉 순위 계산 (기본값)
+                    # 거래대금 기준 월봉 순위 계산 (기본값)
                     query = """
                     SELECT COUNT(*) + 1 as ranking
                     FROM (
@@ -1653,7 +1653,7 @@ class AIChartAnalyzer:
 
     def _get_individual_stock_trading_data(self, stock_code: str, target_date: str, period_type: str) -> Optional[Dict[str, Any]]:
         """
-        개별 종목의 거래량과 거래률 데이터를 직접 조회
+        개별 종목의 거래량과 거래율 데이터를 직접 조회
         
         Args:
             stock_code (str): 종목코드
@@ -1761,7 +1761,7 @@ class AIChartAnalyzer:
             # 거래대금 계산 (DB에서 직접 계산된 값 사용)
             total_amount = float(result['total_amount']) if result['total_amount'] else 0
             
-            # 거래률 계산
+            # 거래율 계산
             turnover_rate = 0.0
             if avg_shares > 0 and total_volume > 0:
                 turnover_rate = (total_volume / avg_shares) * 100
@@ -1782,7 +1782,7 @@ class AIChartAnalyzer:
             print(f"❌ {stock_code} 개별 거래 데이터 조회 실패: {e}")
             return None
 
-    def _get_daily_ranking_data(self, target_date: str, trading_type: str = "거래량") -> list:
+    def _get_daily_ranking_data(self, target_date: str, trading_type: str = "거래대금") -> list:
         """일봉 전체 순위 데이터 조회 (거래타입별 분기)"""
         try:
             from database_config import DatabaseManager
@@ -1792,8 +1792,8 @@ class AIChartAnalyzer:
                 print("⚠️ DB 연결 실패 - 일봉 순위 조회 불가")
                 return []
             
-            if trading_type == "거래률":
-                # 거래률 기준 일봉 순위
+            if trading_type == "거래율":
+                # 거래율 기준 일봉 순위
                 query = """
                 SELECT 
                     stock_code,
@@ -1810,7 +1810,7 @@ class AIChartAnalyzer:
                 ORDER BY turnover_rate DESC
                 """
             else:
-                # 거래량 기준 일봉 순위 (기본값)
+                # 거래대금 기준 일봉 순위 (기본값)
                 query = """
                 SELECT 
                     stock_code,
@@ -1835,7 +1835,7 @@ class AIChartAnalyzer:
             print(f"❌ 일봉 순위 데이터 조회 실패: {e}")
             return []
 
-    def _get_weekly_ranking_data(self, week_start: str, trading_type: str = "거래량") -> list:
+    def _get_weekly_ranking_data(self, week_start: str, trading_type: str = "거래대금") -> list:
         """주간 전체 순위 데이터 조회 (거래타입별 분기)"""
         try:
             from database_config import DatabaseManager
@@ -1857,8 +1857,8 @@ class AIChartAnalyzer:
                 print(f"❌ 주차 계산 실패: {e}")
                 return []
             
-            if trading_type == "거래률":
-                # 거래률 기준 주간 순위
+            if trading_type == "거래율":
+                # 거래율 기준 주간 순위
                 query = """
                 SELECT 
                     stock_code,
@@ -1902,7 +1902,7 @@ class AIChartAnalyzer:
             print(f"❌ 주간 순위 데이터 조회 실패: {e}")
             return []
     
-    def _get_monthly_ranking_data(self, year_month: str, trading_type: str = "거래량") -> list:
+    def _get_monthly_ranking_data(self, year_month: str, trading_type: str = "거래대금") -> list:
         """월간 전체 순위 데이터 조회 (거래타입별 분기)"""
         try:
             from database_config import DatabaseManager
@@ -1915,8 +1915,8 @@ class AIChartAnalyzer:
             # year_month를 년도와 월로 분리
             year, month = year_month.split('-')
             
-            if trading_type == "거래률":
-                # 거래률 기준 월봉 순위
+            if trading_type == "거래율":
+                # 거래율 기준 월봉 순위
                 query = """
                 SELECT 
                     stock_code,
@@ -1934,7 +1934,7 @@ class AIChartAnalyzer:
                 ORDER BY turnover_rate DESC
                 """
             else:
-                # 거래량 기준 월봉 순위 (기본값)
+                # 거래대금 기준 월봉 순위 (기본값)
                 query = """
                 SELECT 
                     stock_code,
@@ -2096,30 +2096,30 @@ class AIChartAnalyzer:
         self._weekly_trading_date_cache = None
         print("🧹 주봉 거래일 캐시 초기화 완료")
 
-    def _get_trading_info_from_db(self, stock_code: str, chart_type: str = "일봉", ai_result_text: str = "", trading_type: str = "거래량") -> Dict[str, Any]:
+    def _get_trading_info_from_db(self, stock_code: str, chart_type: str = "일봉", ai_result_text: str = "", trading_type: str = "거래대금") -> Dict[str, Any]:
         """
-        DB에서 거래일, 거래대금, 거래률, 순위, 유통주식수, 거래량 정보 조회
+        DB에서 거래일, 거래대금, 거래율, 순위, 유통주식수, 거래량 정보 조회
         
         Args:
             stock_code (str): 종목코드 (6자리)
             chart_type (str): 차트 타입 (일봉, 주봉, 월봉)
             ai_result_text (str): AI 분석 결과 텍스트 (거래일 추출용)
-            trading_type (str): 거래 타입 (거래량, 거래률)
+            trading_type (str): 거래 타입 (거래대금, 거래율)
             
         Returns:
             Dict[str, Any]: 거래정보 딕셔너리
                 - 거래일: 추출된 거래일/거래기간
                 - 거래대금: volume * close (억원 단위)
-                - 거래률: 거래률 값 (퍼센트, 소수점 2자리)
-                - 순위: 거래량/거래률 기준 순위 (N위 형식)
+                - 거래율: 거래율 값 (퍼센트, 소수점 2자리)
+                - 순위: 거래대금/거래율 기준 순위 (N위 형식)
                 - 유통주식수: 해당 종목의 유통주식수 (주 단위)
                 - 거래량: 거래일 기준 누적 거래량 (주 단위)
                 
         Note:
             - 거래일: AI 분석 결과에서 추출 (차트 타입별로 다른 형식)
             - 거래대금: volume * close (억원 단위로 표시)
-            - 거래률: volume / outstanding_shares * 100 (퍼센트)
-            - 순위 계산: 거래량/거래률 기준 내림차순 정렬
+            - 거래율: volume / outstanding_shares * 100 (퍼센트)
+            - 순위 계산: 거래대금/거래율 기준 내림차순 정렬
             - 유통주식수: outstanding_shares 값 (주 단위)
             - 거래량: volume 값 (주 단위)
             - DB 연결 실패 시 모든 값이 "N/A"로 반환
@@ -2136,7 +2136,7 @@ class AIChartAnalyzer:
                 return {
                     "거래일": "N/A",
                     "거래대금": "N/A",
-                    "거래률": "N/A",
+                    "거래율": "N/A",
                     "순위": "N/A"
                 }
             
@@ -2146,7 +2146,7 @@ class AIChartAnalyzer:
                 extracted_date = self._extract_trading_date_from_ai_result(ai_result_text, chart_type)
                 print(f"📅 AI 결과에서 추출된 거래일/기간: {extracted_date}")
             
-            # 2. 자체적으로 거래량/거래률 순위 조회 (VolumeRankingDataManager 의존성 제거)
+            # 2. 자체적으로 거래대금/거래율 순위 조회 (VolumeRankingDataManager 의존성 제거)
             try:
                 
                 # 차트 타입과 거래 타입에 따라 적절한 함수 호출
@@ -2206,7 +2206,7 @@ class AIChartAnalyzer:
                             return {
                                 "거래일": week_display,
                                 "거래대금": "N/A",
-                                "거래률": "N/A",
+                                "거래율": "N/A",
                                 "순위": "N/A"
                             }
                         
@@ -2227,10 +2227,10 @@ class AIChartAnalyzer:
                                 return {
                                     "거래일": week_display,
                                     "거래대금": "N/A",
-                                    "거래률": "N/A",
+                                    "거래율": "N/A",
                                     "순위": "N/A",
                                     "유통주식수": "N/A",
-                                    "거래량": "N/A"
+                                    "거래대금": "N/A"
                                 }
                             else:
                                 print(f"✅ {week_start} 주차에 거래 데이터 존재")
@@ -2241,7 +2241,7 @@ class AIChartAnalyzer:
                         return {
                             "거래일": "N/A",
                             "거래대금": "N/A",
-                            "거래률": "N/A",
+                            "거래율": "N/A",
                             "순위": "N/A"
                         }
                     
@@ -2276,7 +2276,7 @@ class AIChartAnalyzer:
                             return {
                                 "거래일": extracted_date,
                                 "거래대금": "N/A",
-                                "거래률": "N/A",
+                                "거래율": "N/A",
                                 "순위": "N/A"
                             }
                         print(f"📅 월봉 년월 형식 파싱: {extracted_date} → {year_month}")
@@ -2287,7 +2287,7 @@ class AIChartAnalyzer:
                         return {
                             "거래일": "N/A",
                             "거래대금": "N/A",
-                            "거래률": "N/A",
+                            "거래율": "N/A",
                             "순위": "N/A"
                         }
                     
@@ -2319,10 +2319,10 @@ class AIChartAnalyzer:
                     return {
                         "거래일": display_date,
                         "거래대금": "N/A",
-                        "거래률": "N/A",
+                        "거래율": "N/A",
                         "순위": "N/A",
                         "유통주식수": "N/A",
-                        "거래량": "N/A"
+                        "거래대금": "N/A"
                     }
                 
                 
@@ -2340,11 +2340,11 @@ class AIChartAnalyzer:
                     else:
                         # 순위에 없으면 거래량이 0이거나 데이터 없음
                         ranking = 999
-                        print(f"📊 {stock_code}이 순위에 없음 (거래량 0 또는 데이터 없음)")
+                        print(f"📊 {stock_code}이 순위에 없음 (거래대금 0 또는 데이터 없음)")
                 else:
                     print(f"⚠️ 전체 순위 데이터가 없어 순위 계산 불가")
                 
-                # 거래량 계산 (안전한 None 처리)
+                # 거래대금 계산 (안전한 None 처리)
                 volume_value = target_stock_data.get('volume', 0)
                 if volume_value is None or volume_value == '':
                     volume_value = 0
@@ -2380,7 +2380,7 @@ class AIChartAnalyzer:
                             print(f"⚠️ {stock_code} close_price 값 변환 실패: {close_price_value}")
                             close_price = 0
                     
-                    # 거래대금 = 거래량 * 종가
+                    # 거래대금 = 거래대금 * 종가
                     total_amount = volume * close_price if close_price > 0 else 0
                 else:
                     # 이미 계산된 total_amount 사용
@@ -2390,7 +2390,7 @@ class AIChartAnalyzer:
                         print(f"⚠️ {stock_code} total_amount 값 변환 실패: {total_amount_value}")
                         total_amount = 0
                 
-                # 거래률 계산 (모든 차트 타입에서 항상 계산)
+                # 거래율 계산 (모든 차트 타입에서 항상 계산)
                 turnover_rate_value = target_stock_data.get('turnover_rate', 0)
                 if turnover_rate_value is None or turnover_rate_value == '':
                     turnover_rate = 0
@@ -2410,8 +2410,8 @@ class AIChartAnalyzer:
                     print(f"   거래대금(SUM(volume*close)): 0원 (데이터 없음)")
                 print(f"   거래량: {volume:,.0f}주")
                 print(f"   유통주식수: {outstanding_shares:,.0f}주")
-                # 모든 차트 타입에서 거래률 표시
-                print(f"   거래률: {turnover_rate:.2f}%")
+                # 모든 차트 타입에서 거래율 표시
+                print(f"   거래율: {turnover_rate:.2f}%")
                 # 순위 표시 처리
                 if ranking == 999:
                     ranking_display = "N/A"
@@ -2430,11 +2430,11 @@ class AIChartAnalyzer:
                 # 억원 단위로 변환
                 amount_in_hundred_millions = total_amount / 100000000
                 
-                # 모든 차트 타입에서 거래률 반환
+                # 모든 차트 타입에서 거래율 반환
                 return {
                     "거래일": display_date,
                     "거래대금": f"{amount_in_hundred_millions:,.0f}억원",
-                    "거래률": f"{turnover_rate:.2f}%",
+                    "거래율": f"{turnover_rate:.2f}%",
                     "순위": ranking_display,
                     "유통주식수": f"{outstanding_shares:,.0f}주",
                     "거래량": f"{volume:,.0f}주"
@@ -2447,10 +2447,10 @@ class AIChartAnalyzer:
                 return {
                     "거래일": extracted_date if extracted_date != "N/A" else "N/A",
                     "거래대금": "N/A",
-                    "거래률": "N/A",
+                    "거래율": "N/A",
                     "순위": "N/A",
                     "유통주식수": "N/A",
-                    "거래량": "N/A"
+                    "거래대금": "N/A"
                 }
             
         except Exception as e:
@@ -2462,15 +2462,15 @@ class AIChartAnalyzer:
             return {
                 "거래일": "N/A",
                 "거래대금": "N/A",
-                "거래률": "N/A",
+                "거래율": "N/A",
                 "순위": "N/A",
                 "유통주식수": "N/A",
-                "거래량": "N/A"
+                "거래대금": "N/A"
             }
     
-    def _add_trading_info_to_result(self, result: Dict[str, Any], stock_code: str, result_type: str, chart_type: str = "일봉", ai_result_text: str = "", trading_type: str = "거래량") -> Dict[str, Any]:
+    def _add_trading_info_to_result(self, result: Dict[str, Any], stock_code: str, result_type: str, chart_type: str = "일봉", ai_result_text: str = "", trading_type: str = "거래대금") -> Dict[str, Any]:
         """
-        결과에 거래일, 거래대금, 거래률, 순위, 유통주식수, 거래량 정보 추가
+        결과에 거래일, 거래대금, 거래율, 순위, 유통주식수, 거래량 정보 추가
         
         Args:
             result (Dict[str, Any]): 기존 결과 딕셔너리
@@ -2481,13 +2481,13 @@ class AIChartAnalyzer:
                 - "fallback": 기본 fallback 결과 생성 시
             chart_type (str): 차트 타입 (일봉, 주봉, 월봉)
             ai_result_text (str): AI 분석 결과 텍스트 (거래일 추출용)
-            trading_type (str): 거래 타입 (거래량, 거래률)
+            trading_type (str): 거래 타입 (거래대금, 거래율)
                 
         Returns:
             Dict[str, Any]: 거래정보가 추가된 결과 딕셔너리
             
         Note:
-            - 종목정보 섹션에 거래일, 거래대금, 거래률, 순위, 유통주식수, 거래량, 타입 필드 추가
+            - 종목정보 섹션에 거래일, 거래대금, 거래율, 순위, 유통주식수, 거래량, 타입 필드 추가
             - DB 조회 실패 시 모든 값이 "N/A"로 설정
             - result_type은 디버깅 및 유지보수 목적으로 사용
         """
@@ -2502,10 +2502,10 @@ class AIChartAnalyzer:
                 # 기존 종목정보에 추가
                 result["종목정보"]["거래일"] = trading_info["거래일"]
                 result["종목정보"]["거래대금"] = trading_info["거래대금"]
-                result["종목정보"]["거래률"] = trading_info["거래률"]
+                result["종목정보"]["거래율"] = trading_info["거래율"]
                 result["종목정보"]["순위"] = trading_info["순위"]
                 result["종목정보"]["유통주식수"] = trading_info["유통주식수"]
-                result["종목정보"]["거래량"] = trading_info["거래량"]
+                result["종목정보"]["거래대금"] = trading_info["거래대금"]
                 result["종목정보"]["거래타입"] = trading_type
                 result["종목정보"]["타입"] = result_type
                 print(f"✅ 거래정보 추가 완료 ({result_type}, {trading_type}): {trading_info}")
@@ -2518,16 +2518,16 @@ class AIChartAnalyzer:
             if "종목정보" in result:
                 result["종목정보"]["거래일"] = "N/A"
                 result["종목정보"]["거래대금"] = "N/A"
-                result["종목정보"]["거래률"] = "N/A"
+                result["종목정보"]["거래율"] = "N/A"
                 result["종목정보"]["순위"] = "N/A"
                 result["종목정보"]["유통주식수"] = "N/A"
-                result["종목정보"]["거래량"] = "N/A"
+                result["종목정보"]["거래대금"] = "N/A"
                 result["종목정보"]["거래타입"] = trading_type
                 result["종목정보"]["타입"] = result_type
         
         return result
 
-    def _create_basic_fallback_result(self, stock_name: str, chart_type: str, ai_response: str, error_type: str, stock_code: str = "000000", trading_type: str = "거래량") -> Dict[str, Any]:
+    def _create_basic_fallback_result(self, stock_name: str, chart_type: str, ai_response: str, error_type: str, stock_code: str = "000000", trading_type: str = "거래대금") -> Dict[str, Any]:
         """기본 fallback 결과 생성"""
         result = {
             "종목정보": {
@@ -2897,7 +2897,7 @@ class AIChartAnalyzer:
                 if chart_data:
                     json_info += f"\n**최근 5개 거래일 데이터:**\n"
                     for i, data_point in enumerate(chart_data[-5:]):
-                        json_info += f"- {data_point['date']}: 시가 {data_point['open']:,.0f}, 고가 {data_point['high']:,.0f}, 저가 {data_point['low']:,.0f}, 종가 {data_point['close']:,.0f}, 거래량 {data_point['volume']:,}\n"
+                        json_info += f"- {data_point['date']}: 시가 {data_point['open']:,.0f}, 고가 {data_point['high']:,.0f}, 저가 {data_point['low']:,.0f}, 종가 {data_point['close']:,.0f}, 거래대금 {data_point['volume']:,}\n"
                 
                 additional_info += json_info
                 print(f"✅ JSON 데이터 로드 완료")
@@ -2923,7 +2923,7 @@ class AIChartAnalyzer:
                 
                 # 최근 5개 데이터 추가
                 for i, row in csv_data.tail(5).iterrows():
-                    csv_info += f"- {row.iloc[0]}: 시가 {row['Open']:,.0f}, 고가 {row['High']:,.0f}, 저가 {row['Low']:,.0f}, 종가 {row['Close']:,.0f}, 거래량 {row['Volume']:,}\n"
+                    csv_info += f"- {row.iloc[0]}: 시가 {row['Open']:,.0f}, 고가 {row['High']:,.0f}, 저가 {row['Low']:,.0f}, 종가 {row['Close']:,.0f}, 거래대금 {row['Volume']:,}\n"
                 
                 additional_info += csv_info
                 print(f"✅ CSV 데이터 로드 완료")
@@ -3305,6 +3305,7 @@ def main():
                 stock_code = stock_info.get("종목번호", "000000")
                 
                 # 개별 분석 JSON 파일 경로 생성
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 individual_json_filename = f"individual_analysis_{selected_chart_type}_{stock_name}_{stock_code}_{timestamp}.json"
                 individual_json_path = os.path.join(output_dir, individual_json_filename)
                 
@@ -3796,9 +3797,9 @@ class SummaryFileGenerator:
                         if "거래대금" in stock_info:
                             summary_item["거래대금"] = stock_info["거래대금"]
                         
-                        # 거래률 정보 추가
-                        if "거래률" in stock_info:
-                            summary_item["거래률"] = stock_info["거래률"]
+                        # 거래율 정보 추가
+                        if "거래율" in stock_info:
+                            summary_item["거래율"] = stock_info["거래율"]
                         
                         # 순위 정보 추가
                         if "순위" in stock_info:
@@ -3808,9 +3809,9 @@ class SummaryFileGenerator:
                         if "유통주식수" in stock_info:
                             summary_item["유통주식수"] = stock_info["유통주식수"]
                         
-                        # 거래량 정보 추가
-                        if "거래량" in stock_info:
-                            summary_item["거래량"] = stock_info["거래량"]
+                        # 거래대금 정보 추가
+                        if "거래대금" in stock_info:
+                            summary_item["거래대금"] = stock_info["거래대금"]
                     
                     # 하이브리드 방식: 상세 정보는 개별 워드 파일에서 확인하도록 안내
                     summary_item["주요정보"] = {
@@ -3960,7 +3961,7 @@ class SummaryFileGenerator:
             analysis_results (list): 분석 결과 리스트
             
         Returns:
-            str: 거래타입 (거래량/거래률) 또는 ""
+            str: 거래타입 (거래대금/거래율) 또는 ""
         """
         try:
             for result in analysis_results:
@@ -4065,7 +4066,7 @@ class SummaryFileGenerator:
         Args:
             doc: Word 문서 객체
             consolidated_result (dict): 통합 요약 결과
-            trading_type (str): 거래 타입 (거래량/거래률)
+            trading_type (str): 거래 타입 (거래대금/거래율)
         """
         try:
             # stock_details에서 데이터 추출
@@ -4074,8 +4075,8 @@ class SummaryFileGenerator:
                 print("⚠️ stock_details 데이터가 없습니다.")
                 return
             
-            # 거래대금 또는 거래률 기준으로 정렬
-            sort_key = "거래대금" if trading_type == "거래량" else "거래률"
+            # 거래대금 또는 거래율 기준으로 정렬
+            sort_key = "거래대금" if trading_type == "거래대금" else "거래율"
             
             # 정렬 가능한 데이터만 필터링하고 정렬
             sortable_stocks = []
@@ -4083,12 +4084,12 @@ class SummaryFileGenerator:
                 if sort_key in stock and stock[sort_key] != "N/A":
                     try:
                         # 거래대금: "149억원" -> 149
-                        # 거래률: "72.47%" -> 72.47
+                        # 거래율: "72.47%" -> 72.47
                         value_str = stock[sort_key]
                         if sort_key == "거래대금":
                             # "149억원" -> 149
                             value = float(value_str.replace("억원", "").replace(",", ""))
-                        else:  # 거래률
+                        else:  # 거래율
                             # "72.47%" -> 72.47
                             value = float(value_str.replace("%", "").replace(",", ""))
                         
@@ -4119,8 +4120,8 @@ class SummaryFileGenerator:
             
             # 헤더 설정
             header_cells = table.rows[0].cells
-            header_texts = ['순위', '거래율' if trading_type == "거래률" else '거래대금', '종목명', 
-                           '순위', '거래율' if trading_type == "거래률" else '거래대금', '종목명']
+            header_texts = ['순위', '거래율' if trading_type == "거래율" else '거래대금', '종목명', 
+                           '순위', '거래율' if trading_type == "거래율" else '거래대금', '종목명']
             
             for i, header_text in enumerate(header_texts):
                 header_cells[i].text = header_text
@@ -4247,7 +4248,7 @@ class SummaryFileGenerator:
             summary_meta = consolidated_result.get("summary_meta", {}) if consolidated_result else {}
             trading_date = summary_meta.get("trading_date", "N/A")
             chart_type_from_meta = summary_meta.get("chart_type", chart_type)
-            trading_type_from_meta = summary_meta.get("trading_type", "거래량")
+            trading_type_from_meta = summary_meta.get("trading_type", "거래대금")
             
             # 거래일 형식 변환 (YYYY-MM-DD → M월 D일)
             formatted_trading_date = "N/A"

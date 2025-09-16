@@ -71,8 +71,8 @@ except AttributeError:
     fm.findfont('DejaVu Sans', rebuild_if_missing=True)
 
 def get_weekly_stock_data(stock_code):
-    """국내 주식 주봉 데이터 조회 (2년/104주) - DB에서 조회"""
-    print(f"🔍 {stock_code} 2년(104주) 주봉 시세 조회 중...")
+    """국내 주식 주봉 데이터 조회 (5년/260주) - DB에서 조회"""
+    print(f"🔍 {stock_code} 5년(260주) 주봉 시세 조회 중...")
     print("   📅 주봉 데이터는 거래일 기준으로 제공되며, 주말/공휴일은 포함되지 않습니다.")
     
     try:
@@ -84,20 +84,20 @@ def get_weekly_stock_data(stock_code):
             print("   ❌ 데이터베이스 연결 실패")
             return None
         
-        # 2년(104주) 전 날짜 계산 - 실제 최신 거래일 기준으로 설정
+        # 5년(260주) 전 날짜 계산 - 실제 최신 거래일 기준으로 설정
         # 먼저 해당 종목의 최신 거래일을 조회
         latest_date_query = "SELECT MAX(trade_date) as latest_date FROM daily_data WHERE stock_code = %s"
         latest_date_result = db.fetch_one(latest_date_query, (stock_code,))
         
         if latest_date_result and latest_date_result['latest_date']:
             end_date = latest_date_result['latest_date']
-            start_date = end_date - timedelta(days=104*7)  # 2년 = 104주 * 7일
+            start_date = end_date - timedelta(days=260*7)  # 5년 = 260주 * 7일
             print(f"   📅 DB 최신 거래일: {end_date}")
             print(f"   📅 조회 시작일: {start_date}")
         else:
             # 최신 거래일이 없으면 현재 날짜 기준으로 설정
             end_date = datetime.now().date()
-            start_date = end_date - timedelta(days=104*7)
+            start_date = end_date - timedelta(days=260*7)
             print(f"   ⚠️ 최신 거래일을 찾을 수 없어 현재 날짜 기준으로 설정")
             print(f"   📅 현재 날짜: {end_date}")
             print(f"   📅 조회 시작일: {start_date}")
@@ -452,8 +452,9 @@ def save_weekly_data_to_db(db, stock_code, weekly_data):
         insert_query = """
         INSERT INTO weekly_data 
         (stock_code, week_start, open, high, low, close, volume,
-         ma5, ma20, ma60, rsi, stoch_k, stoch_d, bb_upper, bb_middle, bb_lower)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+         ma4, ma5, ma10, ma20, ma60, rsi, stoch_k, stoch_d, bb_upper, bb_middle, bb_lower,
+         macd, macd_signal, macd_histogram, adx, plus_di, minus_di)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         
         params_list = []
@@ -466,16 +467,28 @@ def save_weekly_data_to_db(db, stock_code, weekly_data):
                 float(row['Low']),
                 float(row['Close']),
                 int(row['Volume']),
-                # ✅ 보조지표 추가
+                # ✅ 이동평균선 (4주, 5주, 10주, 20주, 60주)
+                float(row.get('MA4', 0)) if pd.notna(row.get('MA4')) else None,
                 float(row.get('MA5', 0)) if pd.notna(row.get('MA5')) else None,
+                float(row.get('MA10', 0)) if pd.notna(row.get('MA10')) else None,
                 float(row.get('MA20', 0)) if pd.notna(row.get('MA20')) else None,
                 float(row.get('MA60', 0)) if pd.notna(row.get('MA60')) else None,
+                # ✅ 기타 보조지표
                 float(row.get('RSI', 0)) if pd.notna(row.get('RSI')) else None,
                 float(row.get('Stoch_K', 0)) if pd.notna(row.get('Stoch_K')) else None,
                 float(row.get('Stoch_D', 0)) if pd.notna(row.get('Stoch_D')) else None,
+                # ✅ 볼린저밴드
                 float(row.get('BB_Upper', 0)) if pd.notna(row.get('BB_Upper')) else None,
                 float(row.get('BB_Middle', 0)) if pd.notna(row.get('BB_Middle')) else None,
-                float(row.get('BB_Lower', 0)) if pd.notna(row.get('BB_Lower')) else None
+                float(row.get('BB_Lower', 0)) if pd.notna(row.get('BB_Lower')) else None,
+                # ✅ MACD
+                float(row.get('MACD', 0)) if pd.notna(row.get('MACD')) else None,
+                float(row.get('MACD_Signal', 0)) if pd.notna(row.get('MACD_Signal')) else None,
+                float(row.get('MACD_Histogram', 0)) if pd.notna(row.get('MACD_Histogram')) else None,
+                # ✅ ADX 관련 지표
+                float(row.get('ADX', 0)) if pd.notna(row.get('ADX')) else None,
+                float(row.get('Plus_DI', 0)) if pd.notna(row.get('Plus_DI')) else None,
+                float(row.get('Minus_DI', 0)) if pd.notna(row.get('Minus_DI')) else None
             )
             params_list.append(params)
         
@@ -572,49 +585,66 @@ def calculate_technical_indicators(df, stock_code=None):
             # ADX 계산 (14주 기준)
             adx_period = 14
             
+            # True Range 계산 (수정된 버전)
+            df['TR'] = np.maximum(
+                df['High'] - df['Low'],
+                np.maximum(
+                    np.abs(df['High'] - df['Close'].shift(1)),
+                    np.abs(df['Low'] - df['Close'].shift(1))
+                )
+            )
+            
+            # ATR 계산 (Wilder's smoothing)
+            df['ATR'] = df['TR'].rolling(window=adx_period, min_periods=1).mean()
+            
             # +DM, -DM 계산
             high_diff = df['High'].diff()
             low_diff = df['Low'].diff()
             
-            plus_dm = np.where((high_diff > low_diff) & (high_diff > 0), high_diff, 0)
-            minus_dm = np.where((low_diff > high_diff) & (low_diff > 0), -low_diff, 0)
-        
-            # True Range 계산
-            tr1 = df['High'] - df['Low']
-            tr2 = np.abs(df['High'] - df['Close'].shift(1))
-            tr3 = np.abs(df['Low'] - df['Close'].shift(1))
-            # pandas의 maximum 함수 사용 (numpy 대신) - NaN 값 처리
-            true_range_df = pd.concat([tr1, tr2, tr3], axis=1)
-            true_range_df = true_range_df.fillna(0)  # NaN 값을 0으로 채움
-            true_range = true_range_df.max(axis=1)
+            # +DM 계산: High의 증가가 Low의 감소보다 클 때
+            df['Plus_DM'] = np.where(
+                (high_diff > low_diff) & (high_diff > 0), 
+                high_diff, 
+                0
+            )
             
-            # ATR 계산
-            atr = true_range.rolling(window=adx_period).mean()
+            # -DM 계산: Low의 감소가 High의 증가보다 클 때
+            df['Minus_DM'] = np.where(
+                (low_diff > high_diff) & (low_diff > 0), 
+                low_diff, 
+                0
+            )
             
-            # +DI, -DI 계산
-            plus_dm_avg = pd.Series(plus_dm).rolling(window=adx_period).mean()
-            minus_dm_avg = pd.Series(minus_dm).rolling(window=adx_period).mean()
+            # +DI, -DI 계산 (Wilder's smoothing)
+            df['Plus_DI'] = (df['Plus_DM'].rolling(window=adx_period, min_periods=1).mean() / df['ATR']) * 100
+            df['Minus_DI'] = (df['Minus_DM'].rolling(window=adx_period, min_periods=1).mean() / df['ATR']) * 100
             
-            df['Plus_DI'] = (plus_dm_avg / atr) * 100
-            df['Minus_DI'] = (minus_dm_avg / atr) * 100
+            # DX 계산 (0으로 나누기 방지)
+            di_sum = df['Plus_DI'] + df['Minus_DI']
+            df['DX'] = np.where(
+                di_sum != 0,
+                np.abs(df['Plus_DI'] - df['Minus_DI']) / di_sum * 100,
+                0
+            )
             
-            # DX 계산
-            dx = np.abs(df['Plus_DI'] - df['Minus_DI']) / (df['Plus_DI'] + df['Minus_DI']) * 100
+            # ADX 계산 (DX의 평균, Wilder's smoothing)
+            df['ADX'] = df['DX'].rolling(window=adx_period, min_periods=1).mean()
             
-            # ADX 계산 (DX의 평균)
-            df['ADX'] = dx.rolling(window=adx_period).mean()
-        
-            # NaN 값 처리
-            df['ADX'] = df['ADX'].fillna(0)
-            df['Plus_DI'] = df['Plus_DI'].fillna(0)
-            df['Minus_DI'] = df['Minus_DI'].fillna(0)
+            # 초기 기간 NaN 처리 (계산 불가능한 기간)
+            df['ADX'] = df['ADX'].where(df.index >= df.index[adx_period-1])
+            df['Plus_DI'] = df['Plus_DI'].where(df.index >= df.index[adx_period-1])
+            df['Minus_DI'] = df['Minus_DI'].where(df.index >= df.index[adx_period-1])
             
+            # 불필요한 중간 컬럼 제거
+            df.drop(['TR', 'ATR', 'Plus_DM', 'Minus_DM', 'DX'], axis=1, inplace=True)
+            
+            print(f"   ADX 계산 결과: 유효값 {df['ADX'].count()}개, NaN {df['ADX'].isna().sum()}개")
             print(f"   ✅ ADX 계산 완료")
         except Exception as e:
             print(f"   ⚠️ ADX 계산 실패: {e}")
-            df['ADX'] = 0.0
-            df['Plus_DI'] = 0.0
-            df['Minus_DI'] = 0.0
+            df['ADX'] = np.nan
+            df['Plus_DI'] = np.nan
+            df['Minus_DI'] = np.nan
         
         print(f"   ✅ 주봉 기술적 지표 계산 완료")
         print(f"   📊 계산된 지표: MA4/10/20/40, 볼린저밴드, MACD, RSI, ADX, 스토캐스틱")
@@ -892,8 +922,8 @@ def create_weekly_stock_chart(hist, stock_code):
         traceback.print_exc()
         return None, None
     
-    # 차트 생성 (3개 패널: 메인차트, 거래량, 스토캐스틱)
-    fig, axes = plt.subplots(3, 1, figsize=(12, 10), height_ratios=[8, 2, 2])
+    # 차트 생성 (6개 패널: 메인차트, 거래량, 스토캐스틱, RSI, MACD, ADX)
+    fig, axes = plt.subplots(6, 1, figsize=(12, 16), height_ratios=[6, 2, 2, 2, 2, 2])
     
     # 종목명 가져오기 (DB에서) - 차트 제목용
     chart_stock_name = stock_code  # 기본값
@@ -943,11 +973,8 @@ def create_weekly_stock_chart(hist, stock_code):
     
     # 이동평균선 추가 (웹 트레이딩 스타일 유지) - 주봉 차트 설정
     ax1.plot(df.index, df['MA4'], color='#F59E0B', linewidth=2.0, alpha=0.9, label='4주선', marker='None', linestyle='-')
-    ax1.plot(df.index, df['MA5'], color='#FF7F50', linewidth=2.0, alpha=0.9, label='5주선', marker='None', linestyle='-')
     ax1.plot(df.index, df['MA10'], color='#8B5CF6', linewidth=2.0, alpha=0.9, label='10주선', marker='None', linestyle='-')
     ax1.plot(df.index, df['MA20'], color='#06B6D4', linewidth=2.0, alpha=0.9, label='20주선', marker='None', linestyle='-')
-    ax1.plot(df.index, df['MA40'], color='#84CC16', linewidth=2.0, alpha=0.9, label='40주선', marker='None', linestyle='-')
-    ax1.plot(df.index, df['MA60'], color='#DC2626', linewidth=2.0, alpha=0.9, label='60주선', marker='None', linestyle='-')
     
     # 메인 차트 설정
     #ax1.set_title('볼린저 밴드와 이동평균선이 포함된 가격 차트', fontsize=14, fontweight='bold')
@@ -1008,6 +1035,45 @@ def create_weekly_stock_chart(hist, stock_code):
     # Y축을 오른쪽으로 이동
     ax3.yaxis.set_label_position('right')
     ax3.yaxis.tick_right()
+    
+    # 4. RSI 차트 (네 번째 패널)
+    ax4 = axes[3]
+    ax4.plot(df.index, df['RSI'], color='#8B5CF6', linewidth=2.0, label='RSI', marker='None', linestyle='-')
+    ax4.axhline(y=70, color='#EF4444', linestyle='--', alpha=0.8, linewidth=1.5, label='과매수')
+    ax4.axhline(y=30, color='#10B981', linestyle='--', alpha=0.8, linewidth=1.5, label='과매도')
+    ax4.axhline(y=50, color='#6B7280', linestyle='-', alpha=0.5, linewidth=1.0, label='중립')
+    ax4.set_ylim(0, 100)
+    ax4.set_title('RSI (Relative Strength Index)', fontsize=12, fontweight='bold')
+    ax4.legend(loc='upper left', fontsize=10, framealpha=0.9)
+    ax4.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+    ax4.yaxis.set_label_position('right')
+    ax4.yaxis.tick_right()
+    
+    # 5. MACD 차트 (다섯 번째 패널)
+    ax5 = axes[4]
+    ax5.plot(df.index, df['MACD'], color='#3B82F6', linewidth=2.0, label='MACD', marker='None', linestyle='-')
+    ax5.plot(df.index, df['MACD_Signal'], color='#F59E0B', linewidth=2.0, label='Signal', marker='None', linestyle='-')
+    ax5.bar(df.index, df['MACD_Histogram'], color=np.where(df['MACD_Histogram'] >= 0, '#10B981', '#EF4444'), 
+            alpha=0.7, width=0.8, label='Histogram')
+    ax5.axhline(y=0, color='#6B7280', linestyle='-', alpha=0.5, linewidth=1.0)
+    ax5.set_title('MACD (Moving Average Convergence Divergence)', fontsize=12, fontweight='bold')
+    ax5.legend(loc='upper left', fontsize=10, framealpha=0.9)
+    ax5.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+    ax5.yaxis.set_label_position('right')
+    ax5.yaxis.tick_right()
+    
+    # 6. ADX 차트 (여섯 번째 패널)
+    ax6 = axes[5]
+    ax6.plot(df.index, df['ADX'], color='#DC2626', linewidth=2.0, label='ADX', marker='None', linestyle='-')
+    ax6.plot(df.index, df['Plus_DI'], color='#10B981', linewidth=2.0, label='+DI', marker='None', linestyle='-')
+    ax6.plot(df.index, df['Minus_DI'], color='#EF4444', linewidth=2.0, label='-DI', marker='None', linestyle='-')
+    ax6.axhline(y=25, color='#6B7280', linestyle='--', alpha=0.8, linewidth=1.5, label='강한 추세')
+    ax6.set_ylim(0, 100)
+    ax6.set_title('ADX (Average Directional Index)', fontsize=12, fontweight='bold')
+    ax6.legend(loc='upper left', fontsize=10, framealpha=0.9)
+    ax6.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+    ax6.yaxis.set_label_position('right')
+    ax6.yaxis.tick_right()
     
     # X축 날짜 설정 - 하단에만 표시 (스타일 변경: 글자 크기 50% 증가, 가로 표시)
     for i, ax in enumerate(axes):
@@ -1190,7 +1256,9 @@ def save_chart_data_to_json(chart_data, stock_code, stock_name):
             },
             "technical_indicators": {
                 "latest_values": {
+                    "ma4": float(chart_data_clean['MA4'].iloc[-1]) if 'MA4' in chart_data_clean else None,
                     "ma5": float(chart_data_clean['MA5'].iloc[-1]) if 'MA5' in chart_data_clean else None,
+                    "ma10": float(chart_data_clean['MA10'].iloc[-1]) if 'MA10' in chart_data_clean else None,
                     "ma20": float(chart_data_clean['MA20'].iloc[-1]) if 'MA20' in chart_data_clean else None,
                     "ma60": float(chart_data_clean['MA60'].iloc[-1]) if 'MA60' in chart_data_clean else None,
                     "rsi": float(chart_data_clean['RSI'].iloc[-1]) if 'RSI' in chart_data_clean else None,
@@ -1210,8 +1278,8 @@ def save_chart_data_to_json(chart_data, stock_code, stock_name):
             "chart_data": []
         }
         
-        # 차트 데이터 추가 (최근 30개 데이터만 - AI 분석에 충분)
-        recent_data = chart_data_clean.tail(30)
+        # 차트 데이터 추가 (전체 5년 데이터 - ADX 등 모든 지표 포함)
+        recent_data = chart_data_clean  # 전체 데이터 사용
         for date, row in recent_data.iterrows():
             # 각 주의 주차 정보 계산
             week_info = get_week_number_local(date)
@@ -1229,8 +1297,12 @@ def save_chart_data_to_json(chart_data, stock_code, stock_name):
             }
             
             # 기술적 지표 추가
+            if 'MA4' in row:
+                data_point["ma4"] = float(row['MA4'])
             if 'MA5' in row:
                 data_point["ma5"] = float(row['MA5'])
+            if 'MA10' in row:
+                data_point["ma10"] = float(row['MA10'])
             if 'MA20' in row:
                 data_point["ma20"] = float(row['MA20'])
             if 'MA60' in row:

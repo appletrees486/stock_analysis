@@ -109,8 +109,8 @@ def get_monthly_stock_data_from_db(stock_code):
         # 월봉 데이터 조회 (보조지표 포함)
         monthly_query = """
         SELECT month_start, open, high, low, close, volume,
-               ma5, ma20, ma60, cci, adx, plus_di, minus_di,
-               bb_upper, bb_middle, bb_lower
+               ma5, ma20, ma60, ma6, ma12, ma24, cci, adx, plus_di, minus_di,
+               bb_upper, bb_middle, bb_lower, macd, macd_signal, macd_histogram, rsi
         FROM monthly_data 
         WHERE stock_code = %s 
         AND month_start >= %s 
@@ -131,8 +131,8 @@ def get_monthly_stock_data_from_db(stock_code):
             
             # 컬럼명을 기존 형식과 맞춤
             df.columns = ['Open', 'High', 'Low', 'Close', 'Volume', 
-                         'MA5', 'MA20', 'MA60', 'CCI', 'ADX', 'Plus_DI', 'Minus_DI',
-                         'BB_Upper', 'BB_Middle', 'BB_Lower']
+                         'MA5', 'MA20', 'MA60', 'MA6', 'MA12', 'MA24', 'CCI', 'ADX', 'Plus_DI', 'Minus_DI',
+                         'BB_Upper', 'BB_Middle', 'BB_Lower', 'MACD', 'MACD_Signal', 'MACD_Histogram', 'RSI']
             
             print(f"   ✅ DB에서 월봉 데이터 {len(df)}개월 조회 완료")
             print(f"   📅 데이터 기간: {df.index[0].strftime('%Y-%m')} ~ {df.index[-1].strftime('%Y-%m')}")
@@ -303,14 +303,17 @@ def save_monthly_to_db(stock_code, monthly_df):
         monthly_insert_sql = """
         INSERT INTO monthly_data 
         (stock_code, month_start, open, high, low, close, volume,
-         ma5, ma20, ma60, cci, adx, plus_di, minus_di, bb_upper, bb_middle, bb_lower)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+         ma5, ma20, ma60, ma6, ma12, ma24, cci, adx, plus_di, minus_di, 
+         bb_upper, bb_middle, bb_lower, macd, macd_signal, macd_histogram, rsi)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
         open = VALUES(open), high = VALUES(high), low = VALUES(low), 
         close = VALUES(close), volume = VALUES(volume),
         ma5 = VALUES(ma5), ma20 = VALUES(ma20), ma60 = VALUES(ma60),
+        ma6 = VALUES(ma6), ma12 = VALUES(ma12), ma24 = VALUES(ma24),
         cci = VALUES(cci), adx = VALUES(adx), plus_di = VALUES(plus_di), minus_di = VALUES(minus_di),
         bb_upper = VALUES(bb_upper), bb_middle = VALUES(bb_middle), bb_lower = VALUES(bb_lower),
+        macd = VALUES(macd), macd_signal = VALUES(macd_signal), macd_histogram = VALUES(macd_histogram), rsi = VALUES(rsi),
         updated_at = CURRENT_TIMESTAMP
         """
         
@@ -324,16 +327,28 @@ def save_monthly_to_db(stock_code, monthly_df):
                 float(row['Low']),
                 float(row['Close']),
                 int(row['Volume']),
+                # 기존 이동평균선
                 float(row.get('MA5', 0)) if pd.notna(row.get('MA5')) else None,
                 float(row.get('MA20', 0)) if pd.notna(row.get('MA20')) else None,
                 float(row.get('MA60', 0)) if pd.notna(row.get('MA60')) else None,
+                # 새로운 이동평균선
+                float(row.get('MA6', 0)) if pd.notna(row.get('MA6')) else None,
+                float(row.get('MA12', 0)) if pd.notna(row.get('MA12')) else None,
+                float(row.get('MA24', 0)) if pd.notna(row.get('MA24')) else None,
+                # 기존 보조지표
                 float(row.get('CCI', 0)) if pd.notna(row.get('CCI')) else None,
                 float(row.get('ADX', 0)) if pd.notna(row.get('ADX')) else None,
                 float(row.get('Plus_DI', 0)) if pd.notna(row.get('Plus_DI')) else None,
                 float(row.get('Minus_DI', 0)) if pd.notna(row.get('Minus_DI')) else None,
+                # 볼린저밴드
                 float(row.get('BB_Upper', 0)) if pd.notna(row.get('BB_Upper')) else None,
                 float(row.get('BB_Middle', 0)) if pd.notna(row.get('BB_Middle')) else None,
-                float(row.get('BB_Lower', 0)) if pd.notna(row.get('BB_Lower')) else None
+                float(row.get('BB_Lower', 0)) if pd.notna(row.get('BB_Lower')) else None,
+                # 새로운 보조지표
+                float(row.get('MACD', 0)) if pd.notna(row.get('MACD')) else None,
+                float(row.get('MACD_Signal', 0)) if pd.notna(row.get('MACD_Signal')) else None,
+                float(row.get('MACD_Histogram', 0)) if pd.notna(row.get('MACD_Histogram')) else None,
+                float(row.get('RSI', 0)) if pd.notna(row.get('RSI')) else None
             )
             
             if db.execute_query(monthly_insert_sql, monthly_data):
@@ -369,7 +384,16 @@ def update_monthly_in_db(stock_code, monthly_df):
         
         if latest_result and latest_result['latest_date']:
             latest_existing_date = latest_result['latest_date']
-            new_data = monthly_df[monthly_df.index > latest_existing_date]
+            # datetime64[ns]와 date 타입 비교 문제 해결
+            if hasattr(latest_existing_date, 'date'):
+                latest_existing_date = latest_existing_date.date()
+            elif hasattr(latest_existing_date, 'to_pydatetime'):
+                latest_existing_date = latest_existing_date.to_pydatetime().date()
+            
+            # monthly_df의 인덱스를 date로 변환하여 비교
+            monthly_df_copy = monthly_df.copy()
+            monthly_df_copy.index = monthly_df_copy.index.date
+            new_data = monthly_df_copy[monthly_df_copy.index > latest_existing_date]
             
             if not new_data.empty:
                 print(f"   📅 새로운 월봉 데이터 {len(new_data)}개월 업데이트")
@@ -504,14 +528,16 @@ def calculate_technical_indicators(df, stock_code=None):
         except Exception as e:
             print(f"   ⚠️ 데이터 타입 변환 중 오류: {e}")
         
-        # 이동평균선 (월간 기준) - SMA 3/5/6/12/20/24/60개월
+        # 이동평균선 (월간 기준) - 6/12/24개월만 사용 (차트 표시용)
+        df['MA6'] = df['Close'].rolling(window=6).mean()   # DB 저장용
+        df['MA12'] = df['Close'].rolling(window=12).mean() # DB 저장용
+        df['MA24'] = df['Close'].rolling(window=24).mean() # DB 저장용
+        
+        # 기존 호환성을 위한 이동평균선 (DB 저장용)
         df['MA3'] = df['Close'].rolling(window=3).mean()
-        df['MA5'] = df['Close'].rolling(window=5).mean()  # DB 저장용
-        df['MA6'] = df['Close'].rolling(window=6).mean()
-        df['MA12'] = df['Close'].rolling(window=12).mean()
-        df['MA20'] = df['Close'].rolling(window=20).mean()  # DB 저장용
-        df['MA24'] = df['Close'].rolling(window=24).mean()
-        df['MA60'] = df['Close'].rolling(window=60).mean()  # DB 저장용 장기 추세
+        df['MA5'] = df['Close'].rolling(window=5).mean()   # DB 저장용
+        df['MA20'] = df['Close'].rolling(window=20).mean() # DB 저장용
+        df['MA60'] = df['Close'].rolling(window=60).mean() # DB 저장용 장기 추세
         
         # 볼린저 밴드 계산 (20개월,2) - 변동성 스퀴즈/돌파
         df['BB_Middle'] = df['Close'].rolling(window=20).mean()
@@ -529,13 +555,14 @@ def calculate_technical_indicators(df, stock_code=None):
         df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
         df['MACD_Histogram'] = df['MACD'] - df['MACD_Signal']
         
-        # RSI 계산 (14) - 표준 공식
+        # RSI 계산 (14) - 표준 공식 (DB 저장용)
         delta = df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
         rs = gain / loss.replace(0, np.nan)
         df['RSI'] = 100 - (100 / (1 + rs))
         df['RSI'] = df['RSI'].fillna(50)  # NaN 값은 중립값 50으로 설정
+        print(f"   ✅ RSI 계산 완료")
         
         # CCI (Commodity Channel Index) 계산
         try:
@@ -943,8 +970,8 @@ def create_monthly_stock_chart(hist, stock_code):
         traceback.print_exc()
         return None, None
     
-    # 차트 생성 (4개 패널: 메인차트, 거래량, CCI, ADX)
-    fig, axes = plt.subplots(4, 1, figsize=(12, 13), height_ratios=[8, 2, 2, 2])
+    # 차트 생성 (4개 패널: 메인차트, 거래량, MACD, RSI)
+    fig, axes = plt.subplots(4, 1, figsize=(12, 12), height_ratios=[6, 2, 2, 2])
     
     # 종목명 가져오기 (DB에서) - 차트 제목용
     chart_stock_name = stock_code  # 기본값
@@ -992,16 +1019,10 @@ def create_monthly_stock_chart(hist, stock_code):
             ax1.plot([i, i], [row['Low'], row['High']], color=color, linewidth=1.0, marker='None', linestyle='-')
             ax1.plot([i, i], [row['Open'], row['Close']], color=color, linewidth=3.0, marker='None', linestyle='-')
     
-    # 이동평균선 추가 (웹 트레이딩 스타일 유지) - 월봉 차트 설정
-    ax1.plot(range(len(df)), df['MA3'], color='#F59E0B', linewidth=2.0, alpha=0.9, label='3개월선', marker='None', linestyle='-')
-    ax1.plot(range(len(df)), df['MA5'], color='#FF7F50', linewidth=2.0, alpha=0.9, label='5개월선', marker='None', linestyle='-')
+    # 이동평균선 추가 (6, 12, 24개월선만 표시) - 월봉 차트 설정
+    ax1.plot(range(len(df)), df['MA6'], color='#F59E0B', linewidth=2.0, alpha=0.9, label='6개월선', marker='None', linestyle='-')
     ax1.plot(range(len(df)), df['MA12'], color='#8B5CF6', linewidth=2.0, alpha=0.9, label='12개월선', marker='None', linestyle='-')
-    ax1.plot(range(len(df)), df['MA20'], color='#06B6D4', linewidth=2.0, alpha=0.9, label='20개월선', marker='None', linestyle='-')
-    ax1.plot(range(len(df)), df['MA60'], color='#84CC16', linewidth=2.0, alpha=0.9, label='60개월선', marker='None', linestyle='-')
-    
-    # 피봇 지지·저항선 추가
-    ax1.axhline(y=df['Pivot_Resistance'].iloc[-1], color='#EF4444', linestyle='--', alpha=0.8, linewidth=2.0, label='피봇 저항선')
-    ax1.axhline(y=df['Pivot_Support'].iloc[-1], color='#10B981', linestyle='--', alpha=0.8, linewidth=2.0, label='피봇 지지선')
+    ax1.plot(range(len(df)), df['MA24'], color='#06B6D4', linewidth=2.0, alpha=0.9, label='24개월선', marker='None', linestyle='-')
     
     # 메인 차트 설정
     #ax1.set_title('이동평균선이 포함된 가격 차트', fontsize=14, fontweight='bold')
@@ -1047,14 +1068,14 @@ def create_monthly_stock_chart(hist, stock_code):
     ax2.yaxis.set_label_position('right')
     ax2.yaxis.tick_right()
     
-    # 3. CCI 차트 (세 번째 패널) - 웹 트레이딩 스타일 유지
+    # 3. MACD 차트 (세 번째 패널) - 웹 트레이딩 스타일 유지
     ax3 = axes[2]
-    ax3.plot(range(len(df)), df['CCI'], color='#3B82F6', linewidth=2.0, label='CCI', marker='None', linestyle='-')
-    ax3.axhline(y=100, color='#EF4444', linestyle='--', alpha=0.8, linewidth=1.5, label='과매수')
-    ax3.axhline(y=-100, color='#10B981', linestyle='--', alpha=0.8, linewidth=1.5, label='과매도')
-    ax3.axhline(y=0, color='#6B7280', linestyle='-', alpha=0.6, linewidth=1.0, label='중립')
-    ax3.set_title('CCI (상품채널지수)', fontsize=12, fontweight='bold')
-    # ax3.set_ylabel('CCI', fontsize=10, fontweight='bold')  # 차트명 삭제
+    ax3.plot(range(len(df)), df['MACD'], color='#3B82F6', linewidth=2.0, label='MACD', marker='None', linestyle='-')
+    ax3.plot(range(len(df)), df['MACD_Signal'], color='#EF4444', linewidth=2.0, alpha=0.8, label='Signal', marker='None', linestyle='-')
+    ax3.bar(range(len(df)), df['MACD_Histogram'], color='#10B981', alpha=0.6, width=0.8, label='Histogram')
+    ax3.axhline(y=0, color='#6B7280', linestyle='-', alpha=0.6, linewidth=1.0, label='제로선')
+    ax3.set_title('MACD (이동평균수렴확산)', fontsize=12, fontweight='bold')
+    # ax3.set_ylabel('MACD', fontsize=10, fontweight='bold')  # 차트명 삭제
     ax3.legend(loc='upper left', fontsize=10, framealpha=0.9)  # 왼쪽 정렬로 변경
     ax3.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
     
@@ -1062,26 +1083,19 @@ def create_monthly_stock_chart(hist, stock_code):
     ax3.yaxis.set_label_position('right')
     ax3.yaxis.tick_right()
     
-    # 4. ADX 차트 (네 번째 패널) - 웹 트레이딩 스타일 유지
+    # 4. RSI 차트 (네 번째 패널) - 웹 트레이딩 스타일 유지
     ax4 = axes[3]
-    
-    # ADX 값이 유효한지 확인하고 플롯
-    if not df['ADX'].isna().all() and not df['Plus_DI'].isna().all() and not df['Minus_DI'].isna().all():
-        ax4.plot(range(len(df)), df['ADX'], color='#8B5CF6', linewidth=2.5, label='ADX', marker='None', linestyle='-')
-        ax4.plot(range(len(df)), df['Plus_DI'], color='#10B981', linewidth=2.0, alpha=0.8, label='+DI', marker='None', linestyle='-')
-        ax4.plot(range(len(df)), df['Minus_DI'], color='#EF4444', linewidth=2.0, alpha=0.8, label='-DI', marker='None', linestyle='-')
-        ax4.axhline(y=25, color='#6B7280', linestyle='--', alpha=0.8, linewidth=1.5, label='추세 임계값')
-        ax4.set_title('ADX (평균방향지수)', fontsize=12, fontweight='bold')
-        # ax4.set_ylabel('ADX/+DI/-DI', fontsize=10, fontweight='bold')  # 차트명 삭제
-        ax4.legend(fontsize=10, framealpha=0.9)
-        ax4.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
-    else:
-        # ADX 데이터가 유효하지 않은 경우 메시지 표시
-        ax4.text(0.5, 0.5, 'ADX 데이터를 계산할 수 없습니다\n(데이터가 부족하거나 오류가 발생했습니다)', 
-                transform=ax4.transAxes, ha='center', va='center', fontsize=12)
-        ax4.set_title('ADX (평균방향지수) - 데이터 오류', fontsize=12, fontweight='bold')
-        # ax4.set_ylabel('ADX/+DI/-DI', fontsize=10, fontweight='bold')  # 차트명 삭제
-        ax4.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+    ax4.plot(range(len(df)), df['RSI'], color='#8B5CF6', linewidth=2.0, label='RSI', marker='None', linestyle='-')
+    ax4.axhline(y=70, color='#EF4444', linestyle='--', alpha=0.8, linewidth=1.5, label='과매수')
+    ax4.axhline(y=30, color='#10B981', linestyle='--', alpha=0.8, linewidth=1.5, label='과매도')
+    ax4.axhline(y=50, color='#6B7280', linestyle='-', alpha=0.6, linewidth=1.0, label='중립')
+    ax4.fill_between(range(len(df)), 70, 100, alpha=0.1, color='#EF4444', label='과매수 구간')
+    ax4.fill_between(range(len(df)), 0, 30, alpha=0.1, color='#10B981', label='과매도 구간')
+    ax4.set_title('RSI (상대강도지수)', fontsize=12, fontweight='bold')
+    # ax4.set_ylabel('RSI', fontsize=10, fontweight='bold')  # 차트명 삭제
+    ax4.legend(loc='upper left', fontsize=10, framealpha=0.9)
+    ax4.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+    ax4.set_ylim(0, 100)  # RSI는 0-100 범위
     
     # Y축을 오른쪽으로 이동
     ax4.yaxis.set_label_position('right')
@@ -1261,14 +1275,19 @@ def save_chart_data_to_json(chart_data, stock_code, stock_name):
             },
             "technical_indicators": {
                 "latest_values": {
-                    "ma5": float(chart_data_clean['MA5'].iloc[-1]) if 'MA5' in chart_data_clean else None,
-                    "ma10": float(chart_data_clean['MA10'].iloc[-1]) if 'MA10' in chart_data_clean else None,
-                    "ma20": float(chart_data_clean['MA20'].iloc[-1]) if 'MA20' in chart_data_clean else None,
-                    "ma60": float(chart_data_clean['MA60'].iloc[-1]) if 'MA60' in chart_data_clean else None,
-                    "cci": float(chart_data_clean['CCI'].iloc[-1]) if 'CCI' in chart_data_clean else None,
-                    "adx": float(chart_data_clean['ADX'].iloc[-1]) if 'ADX' in chart_data_clean else None,
-                    "plus_di": float(chart_data_clean['Plus_DI'].iloc[-1]) if 'Plus_DI' in chart_data_clean else None,
-                    "minus_di": float(chart_data_clean['Minus_DI'].iloc[-1]) if 'Minus_DI' in chart_data_clean else None
+                    # 이동평균선 (차트 표시용)
+                    "ma6": float(chart_data_clean['MA6'].iloc[-1]) if 'MA6' in chart_data_clean else None,
+                    "ma12": float(chart_data_clean['MA12'].iloc[-1]) if 'MA12' in chart_data_clean else None,
+                    "ma24": float(chart_data_clean['MA24'].iloc[-1]) if 'MA24' in chart_data_clean else None,
+                    # 보조지표 (차트 표시용)
+                    "macd": float(chart_data_clean['MACD'].iloc[-1]) if 'MACD' in chart_data_clean else None,
+                    "macd_signal": float(chart_data_clean['MACD_Signal'].iloc[-1]) if 'MACD_Signal' in chart_data_clean else None,
+                    "macd_histogram": float(chart_data_clean['MACD_Histogram'].iloc[-1]) if 'MACD_Histogram' in chart_data_clean else None,
+                    "rsi": float(chart_data_clean['RSI'].iloc[-1]) if 'RSI' in chart_data_clean else None,
+                    # 볼린저밴드 (차트 표시용)
+                    "bb_upper": float(chart_data_clean['BB_Upper'].iloc[-1]) if 'BB_Upper' in chart_data_clean else None,
+                    "bb_middle": float(chart_data_clean['BB_Middle'].iloc[-1]) if 'BB_Middle' in chart_data_clean else None,
+                    "bb_lower": float(chart_data_clean['BB_Lower'].iloc[-1]) if 'BB_Lower' in chart_data_clean else None
                 }
             },
             "chart_data": []
@@ -1286,23 +1305,30 @@ def save_chart_data_to_json(chart_data, stock_code, stock_name):
                 "volume": int(row['Volume'])
             }
             
-            # 기술적 지표 추가
-            if 'MA5' in row:
-                data_point["ma5"] = float(row['MA5'])
-            if 'MA10' in row:
-                data_point["ma10"] = float(row['MA10'])
-            if 'MA20' in row:
-                data_point["ma20"] = float(row['MA20'])
-            if 'MA60' in row:
-                data_point["ma60"] = float(row['MA60'])
-            if 'CCI' in row:
-                data_point["cci"] = float(row['CCI'])
-            if 'ADX' in row:
-                data_point["adx"] = float(row['ADX'])
-            if 'Plus_DI' in row:
-                data_point["plus_di"] = float(row['Plus_DI'])
-            if 'Minus_DI' in row:
-                data_point["minus_di"] = float(row['Minus_DI'])
+            # 기술적 지표 추가 (차트 표시용만)
+            # 이동평균선
+            if 'MA6' in row:
+                data_point["ma6"] = float(row['MA6'])
+            if 'MA12' in row:
+                data_point["ma12"] = float(row['MA12'])
+            if 'MA24' in row:
+                data_point["ma24"] = float(row['MA24'])
+            # 보조지표
+            if 'MACD' in row:
+                data_point["macd"] = float(row['MACD'])
+            if 'MACD_Signal' in row:
+                data_point["macd_signal"] = float(row['MACD_Signal'])
+            if 'MACD_Histogram' in row:
+                data_point["macd_histogram"] = float(row['MACD_Histogram'])
+            if 'RSI' in row:
+                data_point["rsi"] = float(row['RSI'])
+            # 볼린저밴드
+            if 'BB_Upper' in row:
+                data_point["bb_upper"] = float(row['BB_Upper'])
+            if 'BB_Middle' in row:
+                data_point["bb_middle"] = float(row['BB_Middle'])
+            if 'BB_Lower' in row:
+                data_point["bb_lower"] = float(row['BB_Lower'])
             
             json_data["chart_data"].append(data_point)
         

@@ -93,8 +93,8 @@ except:
         print("⚠️ 한글 로케일 설정 실패")
 
 def get_stock_data(stock_code):
-    """국내 주식 일봉 데이터 조회 (6개월/120거래일) - DB에서 조회"""
-    print(f"🔍 {stock_code} 6개월(120거래일) 일봉 시세 조회 중...")
+    """국내 주식 일봉 데이터 조회 (2년/240거래일) - DB에서 조회"""
+    print(f"🔍 {stock_code} 2년(240거래일) 일봉 시세 조회 중...")
     print("   📅 일봉 데이터는 거래일 기준으로 제공되며, 주말/공휴일은 포함되지 않습니다.")
     
     try:
@@ -113,13 +113,13 @@ def get_stock_data(stock_code):
         
         if latest_date_result and latest_date_result['latest_date']:
             end_date = latest_date_result['latest_date']
-            start_date = end_date - timedelta(days=120)  # 120거래일 = 약 6개월
+            start_date = end_date - timedelta(days=240)  # 240거래일 = 약 2년
             print(f"   📅 DB 최신 거래일: {end_date}")
             print(f"   📅 조회 시작일: {start_date}")
         else:
             # 최신 거래일이 없으면 현재 날짜 기준으로 설정
             end_date = datetime.now().date()
-            start_date = end_date - timedelta(days=120)  # 120거래일 = 약 6개월
+            start_date = end_date - timedelta(days=240)  # 240거래일 = 약 2년
             print(f"   ⚠️ 최신 거래일을 찾을 수 없어 현재 날짜 기준으로 설정")
             print(f"   📅 현재 날짜: {end_date}")
             print(f"   📅 조회 시작일: {start_date}")
@@ -1158,8 +1158,8 @@ def create_stock_chart(hist, stock_code):
     import gc
     gc.collect()
     
-    # 차트 이미지 파일 경로와 종목명을 반환
-    return filepath, stock_name
+    # 차트 이미지 파일 경로, 종목명, 보조지표 데이터를 반환
+    return filepath, stock_name, df
 
 def save_chart_data_to_json(chart_data, stock_code, stock_name, additional_info=None):
     """차트 데이터를 JSON으로 저장 - Gemini AI 최적화"""
@@ -1237,8 +1237,9 @@ def save_chart_data_to_json(chart_data, stock_code, stock_name, additional_info=
             "chart_data": []
         }
         
-        # 차트 데이터 추가 (최근 30개 데이터만 - AI 분석에 충분)
-        recent_data = chart_data_clean.tail(30)
+        # 차트 데이터 추가 (전체 데이터 또는 최근 30개 데이터)
+        # recent_data = chart_data_clean.tail(30)  # 최근 30개만
+        recent_data = chart_data_clean  # 전체 데이터 저장
         for date, row in recent_data.iterrows():
             data_point = {
                 "date": date.strftime('%Y-%m-%d'),
@@ -2426,8 +2427,8 @@ def main():
         # 일봉 차트 생성
         chart_result = create_stock_chart(hist, stock_code)
         
-        if chart_result and len(chart_result) == 2:
-            chart_path, stock_name = chart_result
+        if chart_result and len(chart_result) == 3:
+            chart_path, stock_name, chart_data_with_indicators = chart_result
             print(f"\n✅ 일봉 분석이 완료되었습니다!")
             print(f"📈 차트 이미지: {chart_path}")
             print(f"🏢 종목명: {stock_name}")
@@ -2438,15 +2439,15 @@ def main():
                 from ai_chart_analysis import AIChartAnalyzer
                 ai_analyzer = AIChartAnalyzer()
                 
-                # JSON 데이터 저장
-                json_data_path = save_chart_data_to_json(hist, stock_code, stock_name)
+                # JSON 데이터 저장 (보조지표 포함 데이터 사용)
+                json_data_path = save_chart_data_to_json(chart_data_with_indicators, stock_code, stock_name)
                 
                 # AI 분석 실행
                 analysis_result = ai_analyzer.analyze_chart_image(
                     image_path=chart_path,
                     stock_name=stock_name,
                     chart_type="일봉",
-                    chart_data=hist,
+                    chart_data=chart_data_with_indicators,
                     json_data_path=json_data_path
                 )
                 

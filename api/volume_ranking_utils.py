@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-거래량 랭킹 데이터 관리 모듈
-일/주/월별 거래량 및 거래률 상위 50개 종목 조회
+거래대금 랭킹 데이터 관리 모듈
+일/주/월별 거래대금 및 거래율 상위 50개 종목 조회
 stock_data_collector.py의 증분 및 검증 방식 적용
 """
 
@@ -16,7 +16,7 @@ from korean_holiday_manager import KoreanHolidayManager
 logger = logging.getLogger(__name__)
 
 class VolumeRankingDataManager:
-    """거래량 랭킹 데이터 관리 클래스"""
+    """거래대금 랭킹 데이터 관리 클래스"""
     
     def __init__(self):
         """초기화"""
@@ -31,7 +31,7 @@ class VolumeRankingDataManager:
         self._cache_ttl = 3600  # 1시간
         
     def get_daily_volume_ranking(self, date: str = None, limit: int = 50) -> List[Dict[str, Any]]:
-        """일일 거래량 상위 종목 조회"""
+        """일일 거래대금 상위 종목 조회"""
         try:
             if date is None:
                 date = datetime.now().strftime('%Y-%m-%d')
@@ -43,7 +43,7 @@ class VolumeRankingDataManager:
                 if datetime.now().timestamp() - cache_data['timestamp'] < self._cache_ttl:
                     return cache_data['data']
             
-            # 데이터베이스에서 조회 (거래량 기준)
+            # 데이터베이스에서 조회 (거래대금 기준)
             query = """
                 SELECT 
                     d.stock_code,
@@ -75,10 +75,10 @@ class VolumeRankingDataManager:
                         'stock_name': row['stock_name'],
                         'market_type': row['market_type'],
                         'volume': row['volume'],
-                        'outstanding_shares': 0,  # 거래량 기준에서는 유통주식수 없음
-                        'close_price': 0,  # 거래량 기준에서는 종가 정보 없음
-                        'total_amount': 0,  # 거래량 기준에서는 거래대금 정보 없음
-                        'turnover_rate': 0.0  # 거래률 정보 없음
+                        'outstanding_shares': 0,  # 거래대금 기준에서는 유통주식수 없음
+                        'close_price': 0,  # 거래대금 기준에서는 종가 정보 없음
+                        'total_amount': 0,  # 거래대금 기준에서는 거래대금 정보 없음
+                        'turnover_rate': 0.0  # 거래율 정보 없음
                     })
                 
                 # 캐시 저장
@@ -93,11 +93,11 @@ class VolumeRankingDataManager:
                 self.db_manager.disconnect()
             
         except Exception as e:
-            logger.error(f"일일 거래량 랭킹 조회 실패: {e}")
+            logger.error(f"일일 거래대금 랭킹 조회 실패: {e}")
             return []
     
     def get_daily_turnover_ranking(self, date: str = None, limit: int = 50) -> List[Dict[str, Any]]:
-        """일일 거래률 상위 종목 조회 (실제 거래률 계산)"""
+        """일일 거래율 상위 종목 조회 (실제 거래율 계산)"""
         try:
             if date is None:
                 date = datetime.now().strftime('%Y-%m-%d')
@@ -150,8 +150,8 @@ class VolumeRankingDataManager:
                         'volume': row['volume'],
                         'trade_date': str(row['trade_date']) if row['trade_date'] else None,
                         'outstanding_shares': row['outstanding_shares'],
-                        'close_price': 0,  # 거래률 기준에서는 종가 정보 없음
-                        'total_amount': 0,  # 거래률 기준에서는 거래대금 정보 없음
+                        'close_price': 0,  # 거래율 기준에서는 종가 정보 없음
+                        'total_amount': 0,  # 거래율 기준에서는 거래대금 정보 없음
                         'turnover_rate': float(row['turnover_rate']) if row['turnover_rate'] is not None else 0.0
                     })
                 
@@ -161,18 +161,18 @@ class VolumeRankingDataManager:
                     'timestamp': datetime.now().timestamp()
                 }
                 
-                logger.info(f"일일 거래률 랭킹 조회 완료: {date} - {len(formatted_results)}개 종목")
+                logger.info(f"일일 거래율 랭킹 조회 완료: {date} - {len(formatted_results)}개 종목")
                 return formatted_results
                 
             finally:
                 self.db_manager.disconnect()
             
         except Exception as e:
-            logger.error(f"일일 거래률 랭킹 조회 실패: {e}")
+            logger.error(f"일일 거래율 랭킹 조회 실패: {e}")
             return []
     
     def get_weekly_volume_ranking(self, week_start: str = None, limit: int = 50) -> List[Dict[str, Any]]:
-        """주간 거래량 상위 종목 조회"""
+        """주간 거래대금 상위 종목 조회"""
         try:
             if week_start is None:
                 # 현재 주의 월요일 찾기
@@ -188,7 +188,7 @@ class VolumeRankingDataManager:
                     # 캐시된 전체 데이터에서 limit만큼 반환
                     return cache_data['data'][:limit]
             
-            # 주간 거래량 집계 (월~금)
+            # 주간 거래대금 집계 (월~금)
             week_end = (datetime.strptime(week_start, '%Y-%m-%d') + timedelta(days=6)).strftime('%Y-%m-%d')
             
             # 캐시를 위해 더 많은 데이터를 조회 (최대 1000개)
@@ -228,10 +228,10 @@ class VolumeRankingDataManager:
                         'market_type': row['market_type'],
                         'total_volume': row['total_volume'],
                         'volume': row['total_volume'],  # 프론트엔드 호환성을 위해 추가
-                        'outstanding_shares': 0,  # 주봉 거래량 기준에서는 유통주식수 없음
-                        'close_price': 0,  # 주봉 거래량 기준에서는 종가 정보 없음
-                        'total_amount': 0,  # 주봉 거래량 기준에서는 거래대금 정보 없음
-                        'turnover_rate': 0.0,  # 거래률 계산 불가
+                        'outstanding_shares': 0,  # 주봉 거래대금 기준에서는 유통주식수 없음
+                        'close_price': 0,  # 주봉 거래대금 기준에서는 종가 정보 없음
+                        'total_amount': 0,  # 주봉 거래대금 기준에서는 거래대금 정보 없음
+                        'turnover_rate': 0.0,  # 거래율 계산 불가
                         'trading_days': row['trading_days']
                     })
                 
@@ -248,11 +248,11 @@ class VolumeRankingDataManager:
                 self.db_manager.disconnect()
             
         except Exception as e:
-            logger.error(f"주간 거래량 랭킹 조회 실패: {e}")
+            logger.error(f"주간 거래대금 랭킹 조회 실패: {e}")
             return []
     
     def get_weekly_turnover_ranking(self, week_start: str = None, limit: int = 50) -> List[Dict[str, Any]]:
-        """주간 거래률 상위 종목 조회 (실제 거래률 계산)"""
+        """주간 거래율 상위 종목 조회 (실제 거래율 계산)"""
         try:
             if week_start is None:
                 # 현재 주의 월요일 찾기
@@ -268,7 +268,7 @@ class VolumeRankingDataManager:
                     # 캐시된 전체 데이터에서 limit만큼 반환
                     return cache_data['data'][:limit]
             
-            # 주간 거래률 계산 (월~금)
+            # 주간 거래율 계산 (월~금)
             week_end = (datetime.strptime(week_start, '%Y-%m-%d') + timedelta(days=6)).strftime('%Y-%m-%d')
             
             # 캐시를 위해 더 많은 데이터를 조회 (최대 1000개)
@@ -316,9 +316,9 @@ class VolumeRankingDataManager:
                         'market_type': row['market_type'],
                         'total_volume': row['total_volume'],
                         'volume': row['total_volume'],  # 프론트엔드 호환성을 위해 추가
-                        'outstanding_shares': row['avg_shares'],  # 주봉 거래률 기준에서는 유통주식수 있음
-                        'close_price': 0,  # 주봉 거래률 기준에서는 종가 정보 없음
-                        'total_amount': 0,  # 주봉 거래률 기준에서는 거래대금 정보 없음
+                        'outstanding_shares': row['avg_shares'],  # 주봉 거래율 기준에서는 유통주식수 있음
+                        'close_price': 0,  # 주봉 거래율 기준에서는 종가 정보 없음
+                        'total_amount': 0,  # 주봉 거래율 기준에서는 거래대금 정보 없음
                         'turnover_rate': float(row['turnover_rate']) if row['turnover_rate'] is not None else 0.0,
                         'trading_days': row['trading_days']
                     })
@@ -329,7 +329,7 @@ class VolumeRankingDataManager:
                     'timestamp': datetime.now().timestamp()
                 }
                 
-                logger.info(f"주간 거래률 랭킹 조회 완료: {week_start}~{week_end} - {len(formatted_results)}개 종목")
+                logger.info(f"주간 거래율 랭킹 조회 완료: {week_start}~{week_end} - {len(formatted_results)}개 종목")
                 # 요청된 limit만큼 반환
                 return formatted_results[:limit]
                 
@@ -337,11 +337,11 @@ class VolumeRankingDataManager:
                 self.db_manager.disconnect()
             
         except Exception as e:
-            logger.error(f"주간 거래률 랭킹 조회 실패: {e}")
+            logger.error(f"주간 거래율 랭킹 조회 실패: {e}")
             return []
     
     def get_monthly_volume_ranking(self, year_month: str = None, limit: int = 50) -> List[Dict[str, Any]]:
-        """월간 거래량 상위 종목 조회"""
+        """월간 거래대금 상위 종목 조회"""
         try:
             if year_month is None:
                 year_month = datetime.now().strftime('%Y-%m')
@@ -353,7 +353,7 @@ class VolumeRankingDataManager:
                 if datetime.now().timestamp() - cache_data['timestamp'] < self._cache_ttl:
                     return cache_data['data']
             
-            # 월간 거래량 집계 (1일~말일)
+            # 월간 거래대금 집계 (1일~말일)
             month_start = f"{year_month}-01"
             next_month = datetime.strptime(year_month, '%Y-%m') + timedelta(days=32)
             month_end = (next_month.replace(day=1) - timedelta(days=1)).strftime('%Y-%m-%d')
@@ -392,10 +392,10 @@ class VolumeRankingDataManager:
                         'market_type': row['market_type'],
                         'total_volume': row['total_volume'],
                         'volume': row['total_volume'],  # 프론트엔드 호환성을 위해 추가
-                        'outstanding_shares': 0,  # 월봉 거래량 기준에서는 유통주식수 없음
-                        'close_price': 0,  # 월봉 거래량 기준에서는 종가 정보 없음
-                        'total_amount': 0,  # 월봉 거래량 기준에서는 거래대금 정보 없음
-                        'turnover_rate': 0.0,  # 거래률 계산 불가
+                        'outstanding_shares': 0,  # 월봉 거래대금 기준에서는 유통주식수 없음
+                        'close_price': 0,  # 월봉 거래대금 기준에서는 종가 정보 없음
+                        'total_amount': 0,  # 월봉 거래대금 기준에서는 거래대금 정보 없음
+                        'turnover_rate': 0.0,  # 거래율 계산 불가
                         'trading_days': row['trading_days']
                     })
                 
@@ -411,11 +411,11 @@ class VolumeRankingDataManager:
                 self.db_manager.disconnect()
             
         except Exception as e:
-            logger.error(f"월간 거래량 랭킹 조회 실패: {e}")
+            logger.error(f"월간 거래대금 랭킹 조회 실패: {e}")
             return []
     
     def get_monthly_turnover_ranking(self, year_month: str = None, limit: int = 50) -> List[Dict[str, Any]]:
-        """월간 거래률 상위 종목 조회 (실제 거래률 계산)"""
+        """월간 거래율 상위 종목 조회 (실제 거래율 계산)"""
         try:
             if year_month is None:
                 year_month = datetime.now().strftime('%Y-%m')
@@ -427,7 +427,7 @@ class VolumeRankingDataManager:
                 if datetime.now().timestamp() - cache_data['timestamp'] < self._cache_ttl:
                     return cache_data['data']
             
-            # 월간 거래률 계산 (1일~말일)
+            # 월간 거래율 계산 (1일~말일)
             month_start = f"{year_month}-01"
             next_month = datetime.strptime(year_month, '%Y-%m') + timedelta(days=32)
             month_end = (next_month.replace(day=1) - timedelta(days=1)).strftime('%Y-%m-%d')
@@ -474,9 +474,9 @@ class VolumeRankingDataManager:
                         'market_type': row['market_type'],
                         'total_volume': row['total_volume'],
                         'volume': row['total_volume'],  # 프론트엔드 호환성을 위해 추가
-                        'outstanding_shares': row['avg_shares'],  # 월봉 거래률 기준에서는 유통주식수 있음
-                        'close_price': 0,  # 월봉 거래률 기준에서는 종가 정보 없음
-                        'total_amount': 0,  # 월봉 거래률 기준에서는 거래대금 정보 없음
+                        'outstanding_shares': row['avg_shares'],  # 월봉 거래율 기준에서는 유통주식수 있음
+                        'close_price': 0,  # 월봉 거래율 기준에서는 종가 정보 없음
+                        'total_amount': 0,  # 월봉 거래율 기준에서는 거래대금 정보 없음
                         'turnover_rate': float(row['turnover_rate']) if row['turnover_rate'] is not None else 0.0,
                         'trading_days': row['trading_days']
                     })
@@ -487,14 +487,14 @@ class VolumeRankingDataManager:
                     'timestamp': datetime.now().timestamp()
                 }
                 
-                logger.info(f"월간 거래률 랭킹 조회 완료: {year_month} - {len(formatted_results)}개 종목")
+                logger.info(f"월간 거래율 랭킹 조회 완료: {year_month} - {len(formatted_results)}개 종목")
                 return formatted_results
                 
             finally:
                 self.db_manager.disconnect()
             
         except Exception as e:
-            logger.error(f"월간 거래률 랭킹 조회 실패: {e}")
+            logger.error(f"월간 거래율 랭킹 조회 실패: {e}")
             return []
     
     def clear_cache(self):
@@ -502,4 +502,4 @@ class VolumeRankingDataManager:
         self._daily_cache.clear()
         self._weekly_cache.clear()
         self._monthly_cache.clear()
-        logger.info("거래량 랭킹 캐시가 초기화되었습니다.")
+        logger.info("거래대금 랭킹 캐시가 초기화되었습니다.")

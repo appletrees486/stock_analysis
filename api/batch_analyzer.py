@@ -875,7 +875,7 @@ class BatchAnalyzer:
                 "거래대금_통계": {"총합": 0, "평균": 0, "최대": 0, "최소": float('inf'), "단위": "원"},
                 "거래률_통계": {"총합": 0, "평균": 0, "최대": 0, "최소": float('inf'), "단위": "%"},
                 "순위_통계": {"1위": 0, "10위이내": 0, "50위이내": 0, "100위이내": 0},
-                "거래타입_분포": {"거래량": 0, "거래률": 0},
+                "거래타입_분포": {"거래대금": 0, "거래율": 0},
                 "유통주식수_통계": {"총합": 0, "평균": 0, "최대": 0, "최소": float('inf'), "단위": "주"},
                 "거래량_통계": {"총합": 0, "평균": 0, "최대": 0, "최소": float('inf'), "단위": "주"}
             }
@@ -914,8 +914,8 @@ class BatchAnalyzer:
                             trading_stats["거래대금_통계"]["최대"] = max(trading_stats["거래대금_통계"]["최대"], trading_amount)
                             trading_stats["거래대금_통계"]["최소"] = min(trading_stats["거래대금_통계"]["최소"], trading_amount)
                         
-                        # 거래률 파싱 및 통계 수집
-                        turnover_rate_str = trading_info.get("거래률", "0%")
+                        # 거래율 파싱 및 통계 수집
+                        turnover_rate_str = trading_info.get("거래율", "0%")
                         turnover_rate = self._parse_percentage(turnover_rate_str)
                         if turnover_rate > 0:
                             trading_stats["거래률_통계"]["총합"] += turnover_rate
@@ -935,7 +935,7 @@ class BatchAnalyzer:
                             trading_stats["순위_통계"]["100위이내"] += 1
                         
                         # 거래타입 분포 수집
-                        trading_type = trading_info.get("거래타입", "거래량")
+                        trading_type = trading_info.get("거래타입", "거래대금")
                         if trading_type in trading_stats["거래타입_분포"]:
                             trading_stats["거래타입_분포"][trading_type] += 1
                         
@@ -947,8 +947,8 @@ class BatchAnalyzer:
                             trading_stats["유통주식수_통계"]["최대"] = max(trading_stats["유통주식수_통계"]["최대"], shares)
                             trading_stats["유통주식수_통계"]["최소"] = min(trading_stats["유통주식수_통계"]["최소"], shares)
                         
-                        # 거래량 파싱 및 통계 수집
-                        volume_str = trading_info.get("거래량", "0주")
+                        # 거래대금 파싱 및 통계 수집
+                        volume_str = trading_info.get("거래대금", "0주")
                         volume = self._parse_shares(volume_str)
                         if volume > 0:
                             trading_stats["거래량_통계"]["총합"] += volume
@@ -1158,7 +1158,7 @@ class BatchAnalyzer:
                                 run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
                 
                 # 거래정보 섹션 추가
-                if "거래일" in stock_info or "거래대금" in stock_info or "거래률" in stock_info:
+                if "거래일" in stock_info or "거래대금" in stock_info or "거래율" in stock_info:
                     doc.add_heading('💰 거래정보', level=2)
                     
                     # 거래정보 테이블 생성
@@ -1169,28 +1169,28 @@ class BatchAnalyzer:
                     trading_header = trading_table.rows[0].cells
                     trading_header[0].text = '거래일'
                     trading_header[1].text = '거래대금'
-                    trading_header[2].text = '거래률'
+                    trading_header[2].text = '거래율'
                     
                     # 거래정보 데이터
                     trading_data = trading_table.rows[1].cells
                     trading_data[0].text = stock_info.get("거래일", "N/A")
                     trading_data[1].text = stock_info.get("거래대금", "N/A")
-                    trading_data[2].text = stock_info.get("거래률", "N/A")
+                    trading_data[2].text = stock_info.get("거래율", "N/A")
                     
                     # 순위 및 기타 정보 테이블
-                    if "순위" in stock_info or "유통주식수" in stock_info or "거래량" in stock_info:
+                    if "순위" in stock_info or "유통주식수" in stock_info or "거래대금" in stock_info:
                         trading_table2 = doc.add_table(rows=2, cols=3)
                         trading_table2.style = 'Table Grid'
                         
                         trading_header2 = trading_table2.rows[0].cells
                         trading_header2[0].text = '순위'
                         trading_header2[1].text = '유통주식수'
-                        trading_header2[2].text = '거래량'
+                        trading_header2[2].text = '거래대금'
                         
                         trading_data2 = trading_table2.rows[1].cells
                         trading_data2[0].text = stock_info.get("순위", "N/A")
                         trading_data2[1].text = stock_info.get("유통주식수", "N/A")
-                        trading_data2[2].text = stock_info.get("거래량", "N/A")
+                        trading_data2[2].text = stock_info.get("거래대금", "N/A")
                         
                         # 거래정보 테이블들에 한글 폰트 적용
                         for table in [trading_table, trading_table2]:
@@ -1263,7 +1263,7 @@ class BatchAnalyzer:
                         trading_info = stock_data["종목정보"]
                         
                         # 거래타입 정보 가져오기 (total_analysis JSON에서 직접)
-                        trading_type = trading_info.get("거래타입", "거래량")
+                        trading_type = trading_info.get("거래타입", "거래대금")
                         
                         # 디버깅을 위한 로그
                         logger.info(f"종목 {stock_code} 거래타입: {trading_type}")
@@ -1276,14 +1276,14 @@ class BatchAnalyzer:
                         }.get(chart_type, "일일")
                         
                         # 거래 타입별 문구 생성
-                        if trading_type == "거래률" and "거래률" in trading_info:
-                            turnover_rate = trading_info.get("거래률")
-                            volume = trading_info.get("거래량", "N/A")
+                        if trading_type == "거래율" and "거래율" in trading_info:
+                            turnover_rate = trading_info.get("거래율")
+                            volume = trading_info.get("거래대금", "N/A")
                             outstanding_shares = trading_info.get("유통주식수", "N/A")
                             ranking = trading_info.get("순위", "N/A")
                             
                             if turnover_rate and turnover_rate != "N/A":
-                                # 거래률 기준 문구 - ai_chart_analysis.py 로직 참조
+                                # 거래율 기준 문구 - ai_chart_analysis.py 로직 참조
                                 rate_value = turnover_rate.replace("%", "").strip()
                                 if rate_value.replace(".", "").isdigit() and volume != "N/A" and outstanding_shares != "N/A":
                                     # 거래량과 유통주식수에서 숫자만 추출
@@ -1295,7 +1295,7 @@ class BatchAnalyzer:
                                     else:
                                         trading_info_text = f"위 주식의 {period_text} 거래률은 {turnover_rate}로 전체 종목 중 상위 {ranking}를 차지하여 분석 대상에 포함되었습니다."
                                 else:
-                                    trading_info_text = f"위 주식의 {period_text} 거래률 정보를 확인할 수 없어 분석 대상에 포함되었습니다."
+                                    trading_info_text = f"위 주식의 {period_text} 거래율 정보를 확인할 수 없어 분석 대상에 포함되었습니다."
                                 
                                 para_trading = doc.add_paragraph(trading_info_text)
                                 for run in para_trading.runs:
@@ -1304,7 +1304,7 @@ class BatchAnalyzer:
                                 doc.add_paragraph()
                         
                         else:
-                            # 거래량 기준 문구 (기본값) - ai_chart_analysis.py 로직 참조
+                            # 거래대금 기준 문구 (기본값) - ai_chart_analysis.py 로직 참조
                             total_trading_amount = trading_info.get("거래대금")
                             trading_rank = trading_info.get("순위", "N/A")
                             
@@ -1372,7 +1372,7 @@ class BatchAnalyzer:
                     candle = stock_data["오늘의일봉"]
                     p_candle1 = doc.add_paragraph(f"종가: {candle.get('종가', 'N/A')}원")
                     p_candle2 = doc.add_paragraph(f"등락률: {candle.get('등락률', 'N/A')}%")
-                    p_candle3 = doc.add_paragraph(f"거래량: {candle.get('거래량', 'N/A')}주")
+                    p_candle3 = doc.add_paragraph(f"거래대금: {candle.get('거래대금', 'N/A')}주")
                     p_candle4 = doc.add_paragraph(f"주요 특징: {candle.get('주요특징', 'N/A')}")
                     
                     for p in [p_candle1, p_candle2, p_candle3, p_candle4]:
@@ -1389,7 +1389,7 @@ class BatchAnalyzer:
                     candle = stock_data["이번주봉"]
                     p_candle1 = doc.add_paragraph(f"종가: {candle.get('종가', 'N/A')}원")
                     p_candle2 = doc.add_paragraph(f"등락률: {candle.get('등락률', 'N/A')}%")
-                    p_candle3 = doc.add_paragraph(f"거래량: {candle.get('거래량', 'N/A')}주")
+                    p_candle3 = doc.add_paragraph(f"거래대금: {candle.get('거래대금', 'N/A')}주")
                     p_candle4 = doc.add_paragraph(f"주요 특징: {candle.get('주요특징', 'N/A')}")
                     
                     for p in [p_candle1, p_candle2, p_candle3, p_candle4]:
@@ -1406,7 +1406,7 @@ class BatchAnalyzer:
                     candle = stock_data["이번월봉"]
                     p_candle1 = doc.add_paragraph(f"종가: {candle.get('종가', 'N/A')}원")
                     p_candle2 = doc.add_paragraph(f"등락률: {candle.get('등락률', 'N/A')}%")
-                    p_candle3 = doc.add_paragraph(f"거래량: {candle.get('거래량', 'N/A')}주")
+                    p_candle3 = doc.add_paragraph(f"거래대금: {candle.get('거래대금', 'N/A')}주")
                     p_candle4 = doc.add_paragraph(f"주요 특징: {candle.get('주요특징', 'N/A')}")
                     
                     for p in [p_candle1, p_candle2, p_candle3, p_candle4]:
@@ -1498,16 +1498,16 @@ class BatchAnalyzer:
                     
                     detail = stock_data["세부분석"]
                     
-                    # 가격 및 거래량 분석
+                    # 가격 및 거래대금 분석
                     if "가격및거래량" in detail:
-                        sub_heading1 = doc.add_heading('가격 및 거래량', level=2)
+                        sub_heading1 = doc.add_heading('가격 및 거래대금', level=2)
                         for run in sub_heading1.runs:
                             run.font.name = '맑은 고딕'
                             run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
                         
                         price_vol = detail["가격및거래량"]
                         if "거래량비교" in price_vol:
-                            p_detail1 = doc.add_paragraph(f"거래량 비교: {price_vol.get('거래량비교', 'N/A')}")
+                            p_detail1 = doc.add_paragraph(f"거래대금 비교: {price_vol.get('거래량비교', 'N/A')}")
                         if "주요가격대" in price_vol:
                             p_detail2 = doc.add_paragraph(f"주요 가격대: {price_vol.get('주요가격대', 'N/A')}")
                         if "박스권분석" in price_vol:
@@ -1663,14 +1663,14 @@ class BatchAnalyzer:
                             run.font.name = '맑은 고딕'
                             run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
                 
-                # 거래률 통계
+                # 거래율 통계
                 if trading_stats.get("거래률_통계", {}).get("총합", 0) > 0:
-                    doc.add_heading('📈 거래률 통계', level=2)
+                    doc.add_heading('📈 거래율 통계', level=2)
                     
                     rate_stats = trading_stats["거래률_통계"]
-                    p_rate1 = doc.add_paragraph(f"평균 거래률: {rate_stats.get('평균', 0):.2f}%")
-                    p_rate2 = doc.add_paragraph(f"최대 거래률: {rate_stats.get('최대', 0):.2f}%")
-                    p_rate3 = doc.add_paragraph(f"최소 거래률: {rate_stats.get('최소', 0):.2f}%")
+                    p_rate1 = doc.add_paragraph(f"평균 거래율: {rate_stats.get('평균', 0):.2f}%")
+                    p_rate2 = doc.add_paragraph(f"최대 거래율: {rate_stats.get('최대', 0):.2f}%")
+                    p_rate3 = doc.add_paragraph(f"최소 거래율: {rate_stats.get('최소', 0):.2f}%")
                     
                     for p in [p_rate1, p_rate2, p_rate3]:
                         for run in p.runs:
@@ -1697,8 +1697,8 @@ class BatchAnalyzer:
                     doc.add_heading('📋 거래타입 분포', level=2)
                     
                     type_stats = trading_stats["거래타입_분포"]
-                    p_type1 = doc.add_paragraph(f"거래량 기준: {type_stats.get('거래량', 0)}개 종목")
-                    p_type2 = doc.add_paragraph(f"거래률 기준: {type_stats.get('거래률', 0)}개 종목")
+                    p_type1 = doc.add_paragraph(f"거래대금 기준: {type_stats.get('거래대금', 0)}개 종목")
+                    p_type2 = doc.add_paragraph(f"거래율 기준: {type_stats.get('거래율', 0)}개 종목")
                     
                     for p in [p_type1, p_type2]:
                         for run in p.runs:
