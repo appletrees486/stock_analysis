@@ -12,6 +12,7 @@ from typing import Dict, Any, List, Optional
 from database_config import DatabaseManager
 from market_status_detector import MarketStatusDetector
 from korean_holiday_manager import KoreanHolidayManager
+from ranking_calculator import RankingCalculator
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ class VolumeRankingDataManager:
         self.db_manager = DatabaseManager()
         self.market_detector = MarketStatusDetector()
         self.holiday_manager = KoreanHolidayManager()
+        self.ranking_calculator = RankingCalculator()
         
         # 캐시 설정
         self._daily_cache = {}
@@ -43,54 +45,16 @@ class VolumeRankingDataManager:
                 if datetime.now().timestamp() - cache_data['timestamp'] < self._cache_ttl:
                     return cache_data['data']
             
-            # 데이터베이스에서 조회 (거래대금 기준)
-            query = """
-                SELECT 
-                    d.stock_code,
-                    s.stock_name,
-                    s.market_type,
-                    d.volume,
-                    d.trade_date
-                FROM daily_data d
-                JOIN stocks s ON d.stock_code = s.stock_code
-                WHERE d.trade_date = %s
-                ORDER BY d.volume DESC
-                LIMIT %s
-            """
+            # RankingCalculator를 사용하여 거래대금 순위 조회
+            results = self.ranking_calculator.get_volume_ranking(date, "일봉", limit=limit, trading_type="거래대금")
             
-            # 데이터베이스 연결 및 쿼리 실행
-            if not self.db_manager.connect():
-                logger.error("데이터베이스 연결 실패")
-                return []
-                
-            try:
-                self.db_manager.execute_query(query, (date, limit))
-                results = self.db_manager.cursor.fetchall()
-                
-                # 결과 포맷팅
-                formatted_results = []
-                for row in results:
-                    formatted_results.append({
-                        'stock_code': row['stock_code'],
-                        'stock_name': row['stock_name'],
-                        'market_type': row['market_type'],
-                        'volume': row['volume'],
-                        'outstanding_shares': 0,  # 거래대금 기준에서는 유통주식수 없음
-                        'close_price': 0,  # 거래대금 기준에서는 종가 정보 없음
-                        'total_amount': 0,  # 거래대금 기준에서는 거래대금 정보 없음
-                        'turnover_rate': 0.0  # 거래율 정보 없음
-                    })
-                
-                # 캐시 저장
-                self._daily_cache[cache_key] = {
-                    'data': formatted_results,
-                    'timestamp': datetime.now().timestamp()
-                }
-                
-                return formatted_results
-                
-            finally:
-                self.db_manager.disconnect()
+            # 캐시에 저장
+            self._daily_cache[cache_key] = {
+                'data': results,
+                'timestamp': datetime.now().timestamp()
+            }
+            
+            return results
             
         except Exception as e:
             logger.error(f"일일 거래대금 랭킹 조회 실패: {e}")
@@ -109,63 +73,17 @@ class VolumeRankingDataManager:
                 if datetime.now().timestamp() - cache_data['timestamp'] < self._cache_ttl:
                     return cache_data['data']
             
-            # 새로운 구조: daily_data의 outstanding_shares 사용
-            query = """
-                SELECT 
-                    d.stock_code,
-                    s.stock_name,
-                    s.market_type,
-                    d.volume,
-                    d.trade_date,
-                    d.outstanding_shares,
-                    CASE 
-                        WHEN d.outstanding_shares > 0 
-                        THEN ROUND((d.volume / d.outstanding_shares) * 100, 2)
-                        ELSE 0 
-                    END as turnover_rate
-                FROM daily_data d
-                JOIN stocks s ON d.stock_code = s.stock_code
-                WHERE d.trade_date = %s
-                AND d.outstanding_shares > 0  -- 유통주식수가 있는 데이터만
-                ORDER BY turnover_rate DESC
-                LIMIT %s
-            """
+            # RankingCalculator를 사용하여 거래율 순위 조회
+            results = self.ranking_calculator.get_turnover_ranking(date, "일봉", limit=limit)
             
-            # 데이터베이스 연결 및 쿼리 실행
-            if not self.db_manager.connect():
-                logger.error("데이터베이스 연결 실패")
-                return []
-                
-            try:
-                self.db_manager.execute_query(query, (date, limit))
-                results = self.db_manager.cursor.fetchall()
-                
-                # 결과 포맷팅
-                formatted_results = []
-                for row in results:
-                    formatted_results.append({
-                        'stock_code': row['stock_code'],
-                        'stock_name': row['stock_name'],
-                        'market_type': row['market_type'],
-                        'volume': row['volume'],
-                        'trade_date': str(row['trade_date']) if row['trade_date'] else None,
-                        'outstanding_shares': row['outstanding_shares'],
-                        'close_price': 0,  # 거래율 기준에서는 종가 정보 없음
-                        'total_amount': 0,  # 거래율 기준에서는 거래대금 정보 없음
-                        'turnover_rate': float(row['turnover_rate']) if row['turnover_rate'] is not None else 0.0
-                    })
-                
-                # 캐시 저장
-                self._daily_cache[cache_key] = {
-                    'data': formatted_results,
-                    'timestamp': datetime.now().timestamp()
-                }
-                
-                logger.info(f"일일 거래율 랭킹 조회 완료: {date} - {len(formatted_results)}개 종목")
-                return formatted_results
-                
-            finally:
-                self.db_manager.disconnect()
+            # 캐시에 저장
+            self._daily_cache[cache_key] = {
+                'data': results,
+                'timestamp': datetime.now().timestamp()
+            }
+            
+            logger.info(f"일일 거래율 랭킹 조회 완료: {date} - {len(results)}개 종목")
+            return results
             
         except Exception as e:
             logger.error(f"일일 거래율 랭킹 조회 실패: {e}")
@@ -188,64 +106,16 @@ class VolumeRankingDataManager:
                     # 캐시된 전체 데이터에서 limit만큼 반환
                     return cache_data['data'][:limit]
             
-            # 주간 거래대금 집계 (월~금)
-            week_end = (datetime.strptime(week_start, '%Y-%m-%d') + timedelta(days=6)).strftime('%Y-%m-%d')
+            # RankingCalculator를 사용하여 주간 거래대금 순위 조회
+            results = self.ranking_calculator.get_volume_ranking(week_start, "주봉", limit=limit, trading_type="거래대금")
             
-            # 캐시를 위해 더 많은 데이터를 조회 (최대 1000개)
-            cache_limit = max(1000, limit)
+            # 캐시에 저장
+            self._weekly_cache[cache_key] = {
+                'data': results,
+                'timestamp': datetime.now().timestamp()
+            }
             
-            query = """
-                SELECT 
-                    d.stock_code,
-                    s.stock_name,
-                    s.market_type,
-                    SUM(d.volume) as total_volume,
-                    COUNT(d.trade_date) as trading_days
-                FROM daily_data d
-                JOIN stocks s ON d.stock_code = s.stock_code
-                WHERE d.trade_date BETWEEN %s AND %s
-                AND WEEKDAY(d.trade_date) < 5
-                GROUP BY d.stock_code, s.stock_name, s.market_type
-                ORDER BY total_volume DESC
-                LIMIT %s
-            """
-            
-            # 데이터베이스 연결 및 쿼리 실행
-            if not self.db_manager.connect():
-                logger.error("데이터베이스 연결 실패")
-                return []
-                
-            try:
-                self.db_manager.execute_query(query, (week_start, week_end, cache_limit))
-                results = self.db_manager.cursor.fetchall()
-                
-                # 결과 포맷팅
-                formatted_results = []
-                for row in results:
-                    formatted_results.append({
-                        'stock_code': row['stock_code'],
-                        'stock_name': row['stock_name'],
-                        'market_type': row['market_type'],
-                        'total_volume': row['total_volume'],
-                        'volume': row['total_volume'],  # 프론트엔드 호환성을 위해 추가
-                        'outstanding_shares': 0,  # 주봉 거래대금 기준에서는 유통주식수 없음
-                        'close_price': 0,  # 주봉 거래대금 기준에서는 종가 정보 없음
-                        'total_amount': 0,  # 주봉 거래대금 기준에서는 거래대금 정보 없음
-                        'turnover_rate': 0.0,  # 거래율 계산 불가
-                        'trading_days': row['trading_days']
-                    })
-                
-                # 캐시 저장 (전체 데이터)
-                self._weekly_cache[cache_key] = {
-                    'data': formatted_results,
-                    'timestamp': datetime.now().timestamp()
-                }
-                
-                # 요청된 limit만큼 반환
-                return formatted_results[:limit]
-                
-            finally:
-                self.db_manager.disconnect()
+            return results[:limit]
             
         except Exception as e:
             logger.error(f"주간 거래대금 랭킹 조회 실패: {e}")
@@ -268,73 +138,16 @@ class VolumeRankingDataManager:
                     # 캐시된 전체 데이터에서 limit만큼 반환
                     return cache_data['data'][:limit]
             
-            # 주간 거래율 계산 (월~금)
-            week_end = (datetime.strptime(week_start, '%Y-%m-%d') + timedelta(days=6)).strftime('%Y-%m-%d')
+            # RankingCalculator를 사용하여 주간 거래율 순위 조회
+            results = self.ranking_calculator.get_turnover_ranking(week_start, "주봉", limit=limit)
             
-            # 캐시를 위해 더 많은 데이터를 조회 (최대 1000개)
-            cache_limit = max(1000, limit)
+            # 캐시에 저장
+            self._weekly_cache[cache_key] = {
+                'data': results,
+                'timestamp': datetime.now().timestamp()
+            }
             
-            # 새로운 구조: daily_data의 outstanding_shares 사용
-            query = """
-                SELECT 
-                    d.stock_code,
-                    s.stock_name,
-                    s.market_type,
-                    SUM(d.volume) as total_volume,
-                    COUNT(d.trade_date) as trading_days,
-                    AVG(d.outstanding_shares) as avg_shares,
-                    CASE 
-                        WHEN AVG(d.outstanding_shares) > 0 
-                        THEN ROUND((SUM(d.volume) / AVG(d.outstanding_shares)) * 100, 2)
-                        ELSE 0 
-                    END as turnover_rate
-                FROM daily_data d
-                JOIN stocks s ON d.stock_code = s.stock_code
-                WHERE d.trade_date BETWEEN %s AND %s
-                AND d.outstanding_shares > 0  -- 유통주식수가 있는 데이터만
-                GROUP BY d.stock_code, s.stock_name, s.market_type
-                HAVING COUNT(d.trade_date) >= 3  -- 최소 3일 이상 거래된 종목만
-                ORDER BY turnover_rate DESC
-                LIMIT %s
-            """
-            
-            # 데이터베이스 연결 및 쿼리 실행
-            if not self.db_manager.connect():
-                logger.error("데이터베이스 연결 실패")
-                return []
-                
-            try:
-                self.db_manager.execute_query(query, (week_start, week_end, cache_limit))
-                results = self.db_manager.cursor.fetchall()
-                
-                # 결과 포맷팅
-                formatted_results = []
-                for row in results:
-                    formatted_results.append({
-                        'stock_code': row['stock_code'],
-                        'stock_name': row['stock_name'],
-                        'market_type': row['market_type'],
-                        'total_volume': row['total_volume'],
-                        'volume': row['total_volume'],  # 프론트엔드 호환성을 위해 추가
-                        'outstanding_shares': row['avg_shares'],  # 주봉 거래율 기준에서는 유통주식수 있음
-                        'close_price': 0,  # 주봉 거래율 기준에서는 종가 정보 없음
-                        'total_amount': 0,  # 주봉 거래율 기준에서는 거래대금 정보 없음
-                        'turnover_rate': float(row['turnover_rate']) if row['turnover_rate'] is not None else 0.0,
-                        'trading_days': row['trading_days']
-                    })
-                
-                # 캐시 저장 (전체 데이터)
-                self._weekly_cache[cache_key] = {
-                    'data': formatted_results,
-                    'timestamp': datetime.now().timestamp()
-                }
-                
-                logger.info(f"주간 거래율 랭킹 조회 완료: {week_start}~{week_end} - {len(formatted_results)}개 종목")
-                # 요청된 limit만큼 반환
-                return formatted_results[:limit]
-                
-            finally:
-                self.db_manager.disconnect()
+            return results[:limit]
             
         except Exception as e:
             logger.error(f"주간 거래율 랭킹 조회 실패: {e}")
@@ -353,62 +166,16 @@ class VolumeRankingDataManager:
                 if datetime.now().timestamp() - cache_data['timestamp'] < self._cache_ttl:
                     return cache_data['data']
             
-            # 월간 거래대금 집계 (1일~말일)
-            month_start = f"{year_month}-01"
-            next_month = datetime.strptime(year_month, '%Y-%m') + timedelta(days=32)
-            month_end = (next_month.replace(day=1) - timedelta(days=1)).strftime('%Y-%m-%d')
+            # RankingCalculator를 사용하여 월간 거래대금 순위 조회
+            results = self.ranking_calculator.get_volume_ranking(year_month, "월봉", limit=limit, trading_type="거래대금")
             
-            query = """
-                SELECT 
-                    d.stock_code,
-                    s.stock_name,
-                    s.market_type,
-                    SUM(d.volume) as total_volume,
-                    COUNT(d.trade_date) as trading_days
-                FROM daily_data d
-                JOIN stocks s ON d.stock_code = s.stock_code
-                WHERE d.trade_date BETWEEN %s AND %s
-                AND WEEKDAY(d.trade_date) < 5
-                GROUP BY d.stock_code, s.stock_name, s.market_type
-                ORDER BY total_volume DESC
-                LIMIT %s
-            """
+            # 캐시에 저장
+            self._monthly_cache[cache_key] = {
+                'data': results,
+                'timestamp': datetime.now().timestamp()
+            }
             
-            # 데이터베이스 연결 및 쿼리 실행
-            if not self.db_manager.connect():
-                logger.error("데이터베이스 연결 실패")
-                return []
-                
-            try:
-                self.db_manager.execute_query(query, (month_start, month_end, limit))
-                results = self.db_manager.cursor.fetchall()
-                
-                # 결과 포맷팅
-                formatted_results = []
-                for row in results:
-                    formatted_results.append({
-                        'stock_code': row['stock_code'],
-                        'stock_name': row['stock_name'],
-                        'market_type': row['market_type'],
-                        'total_volume': row['total_volume'],
-                        'volume': row['total_volume'],  # 프론트엔드 호환성을 위해 추가
-                        'outstanding_shares': 0,  # 월봉 거래대금 기준에서는 유통주식수 없음
-                        'close_price': 0,  # 월봉 거래대금 기준에서는 종가 정보 없음
-                        'total_amount': 0,  # 월봉 거래대금 기준에서는 거래대금 정보 없음
-                        'turnover_rate': 0.0,  # 거래율 계산 불가
-                        'trading_days': row['trading_days']
-                    })
-                
-                # 캐시 저장
-                self._monthly_cache[cache_key] = {
-                    'data': formatted_results,
-                    'timestamp': datetime.now().timestamp()
-                }
-                
-                return formatted_results
-                
-            finally:
-                self.db_manager.disconnect()
+            return results
             
         except Exception as e:
             logger.error(f"월간 거래대금 랭킹 조회 실패: {e}")
@@ -427,71 +194,16 @@ class VolumeRankingDataManager:
                 if datetime.now().timestamp() - cache_data['timestamp'] < self._cache_ttl:
                     return cache_data['data']
             
-            # 월간 거래율 계산 (1일~말일)
-            month_start = f"{year_month}-01"
-            next_month = datetime.strptime(year_month, '%Y-%m') + timedelta(days=32)
-            month_end = (next_month.replace(day=1) - timedelta(days=1)).strftime('%Y-%m-%d')
+            # RankingCalculator를 사용하여 월간 거래율 순위 조회
+            results = self.ranking_calculator.get_turnover_ranking(year_month, "월봉", limit=limit)
             
-            # 새로운 구조: daily_data의 outstanding_shares 사용
-            query = """
-                SELECT 
-                    d.stock_code,
-                    s.stock_name,
-                    s.market_type,
-                    SUM(d.volume) as total_volume,
-                    COUNT(d.trade_date) as trading_days,
-                    AVG(d.outstanding_shares) as avg_shares,
-                    CASE 
-                        WHEN AVG(d.outstanding_shares) > 0 
-                        THEN ROUND((SUM(d.volume) / AVG(d.outstanding_shares)) * 100, 2)
-                        ELSE 0 
-                    END as turnover_rate
-                FROM daily_data d
-                JOIN stocks s ON d.stock_code = s.stock_code
-                WHERE d.trade_date BETWEEN %s AND %s
-                AND d.outstanding_shares > 0  -- 유통주식수가 있는 데이터만
-                GROUP BY d.stock_code, s.stock_name, s.market_type
-                HAVING COUNT(d.trade_date) >= 10  -- 최소 10일 이상 거래된 종목만
-                ORDER BY turnover_rate DESC
-                LIMIT %s
-            """
+            # 캐시에 저장
+            self._monthly_cache[cache_key] = {
+                'data': results,
+                'timestamp': datetime.now().timestamp()
+            }
             
-            # 데이터베이스 연결 및 쿼리 실행
-            if not self.db_manager.connect():
-                logger.error("데이터베이스 연결 실패")
-                return []
-                
-            try:
-                self.db_manager.execute_query(query, (month_start, month_end, limit))
-                results = self.db_manager.cursor.fetchall()
-                
-                # 결과 포맷팅
-                formatted_results = []
-                for row in results:
-                    formatted_results.append({
-                        'stock_code': row['stock_code'],
-                        'stock_name': row['stock_name'],
-                        'market_type': row['market_type'],
-                        'total_volume': row['total_volume'],
-                        'volume': row['total_volume'],  # 프론트엔드 호환성을 위해 추가
-                        'outstanding_shares': row['avg_shares'],  # 월봉 거래율 기준에서는 유통주식수 있음
-                        'close_price': 0,  # 월봉 거래율 기준에서는 종가 정보 없음
-                        'total_amount': 0,  # 월봉 거래율 기준에서는 거래대금 정보 없음
-                        'turnover_rate': float(row['turnover_rate']) if row['turnover_rate'] is not None else 0.0,
-                        'trading_days': row['trading_days']
-                    })
-                
-                # 캐시 저장
-                self._monthly_cache[cache_key] = {
-                    'data': formatted_results,
-                    'timestamp': datetime.now().timestamp()
-                }
-                
-                logger.info(f"월간 거래율 랭킹 조회 완료: {year_month} - {len(formatted_results)}개 종목")
-                return formatted_results
-                
-            finally:
-                self.db_manager.disconnect()
+            return results
             
         except Exception as e:
             logger.error(f"월간 거래율 랭킹 조회 실패: {e}")

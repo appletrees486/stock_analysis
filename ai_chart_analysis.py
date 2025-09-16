@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 # from api.volume_ranking_utils import VolumeRankingDataManager  # 제거: 사이드 임팩트 방지
 import re
 from week_calculator import WeekCalculator, get_week_number, get_week_number_string, parse_week_string, get_week_start_date
+from ranking_calculator import RankingCalculator
 
 class StockNameMapper:
     """종목번호와 종목명 매핑 클래스 (DB 기반)"""
@@ -382,6 +383,9 @@ class AIChartAnalyzer:
         
         # 종목명 매퍼 초기화 (DB 기반)
         self.stock_mapper = StockNameMapper(db_config)
+        
+        # 순위 계산기 초기화
+        self.ranking_calculator = RankingCalculator(db_config)
         
         # 프롬프트 매니저 초기화 (DB 기반)
         if db_config:
@@ -1517,139 +1521,6 @@ class AIChartAnalyzer:
             print(f"❌ 월봉 날짜 파싱 오류: {e}")
             return None
 
-    def _calculate_stock_ranking(self, stock_code: str, target_date: str, chart_type: str, volume: float, trading_type: str = "거래대금") -> int:
-        """
-        종목의 거래대금/거래율 순위 계산
-        
-        Args:
-            stock_code (str): 종목코드
-            target_date (str): 대상 날짜/기간
-            chart_type (str): 차트 타입
-            volume (float): 해당 종목의 거래대금
-            trading_type (str): 거래 타입 (거래대금, 거래율)
-            
-        Returns:
-            int: 순위 (1부터 시작)
-        """
-        try:
-            from database_config import DatabaseManager
-            db = DatabaseManager()
-            
-            if not db.connect():
-                return 1  # DB 연결 실패 시 1위로 설정
-            
-            if chart_type == "일봉":
-                # 일봉 순위 계산 (거래타입에 따라 분기)
-                print(f"🔍 일봉 순위 계산: {trading_type} 기준")
-                if trading_type == "거래율":
-                    # 거래율 기준 순위 계산
-                    print(f"📊 거래율 기준 쿼리 실행: {target_date}, {volume}")
-                    query = """
-                    SELECT COUNT(*) + 1 as ranking
-                    FROM daily_data 
-                    WHERE trade_date = %s 
-                    AND turnover_rate > %s
-                    """
-                    params = (target_date, volume)
-                else:
-                    # 거래대금 기준 순위 계산 (기본값)
-                    print(f"📊 거래대금 기준 쿼리 실행: {target_date}, {volume}")
-                    query = """
-                    SELECT COUNT(*) + 1 as ranking
-                    FROM daily_data 
-                    WHERE trade_date = %s 
-                    AND volume > %s
-                    """
-                    params = (target_date, volume)
-                
-            elif chart_type == "주봉":
-                # 주봉 순위 계산 (거래타입에 따라 분기) - week_calculator 모듈 사용
-                try:
-                    # target_date를 주 시작일로 가정하고 주 종료일 계산
-                    target_datetime = datetime.strptime(target_date, '%Y-%m-%d')
-                    year, week = get_week_number(target_datetime)
-                    week_start = WeekCalculator.get_week_start_date(year, week)
-                    week_end = WeekCalculator.get_week_end_date(year, week)
-                    
-                    print(f"📅 주봉 순위 계산 기간: {week_start.strftime('%Y-%m-%d')} ~ {week_end.strftime('%Y-%m-%d')}")
-                    
-                except Exception as e:
-                    print(f"❌ 주차 계산 실패: {e}")
-                    return 1  # 주차 계산 실패 시 1위로 설정
-                
-                if trading_type == "거래율":
-                    # 거래율 기준 주봉 순위 계산
-                    query = """
-                    SELECT COUNT(*) + 1 as ranking
-                    FROM (
-                        SELECT stock_code, AVG(turnover_rate) as avg_turnover_rate
-                        FROM daily_data 
-                        WHERE trade_date BETWEEN %s AND %s
-                        AND WEEKDAY(trade_date) < 5
-                        GROUP BY stock_code
-                        HAVING avg_turnover_rate > %s
-                    ) as weekly_turnover_rates
-                    """
-                    params = (week_start, week_end, volume)
-                else:
-                    # 거래량 기준 주봉 순위 계산 (기본값)
-                    query = """
-                    SELECT COUNT(*) + 1 as ranking
-                    FROM (
-                        SELECT stock_code, SUM(volume) as total_volume
-                        FROM daily_data 
-                        WHERE trade_date BETWEEN %s AND %s
-                        AND WEEKDAY(trade_date) < 5
-                        GROUP BY stock_code
-                        HAVING total_volume > %s
-                    ) as weekly_volumes
-                    """
-                    params = (week_start, week_end, volume)
-                
-            elif chart_type == "월봉":
-                # 월봉 순위 계산 (거래타입에 따라 분기)
-                if trading_type == "거래율":
-                    # 거래율 기준 월봉 순위 계산
-                    query = """
-                    SELECT COUNT(*) + 1 as ranking
-                    FROM (
-                        SELECT stock_code, AVG(turnover_rate) as avg_turnover_rate
-                        FROM daily_data 
-                        WHERE DATE_FORMAT(trade_date, '%%Y-%%m') = %s
-                        GROUP BY stock_code
-                        HAVING avg_turnover_rate > %s
-                    ) as monthly_turnover_rates
-                    """
-                    params = (target_date, volume)
-                else:
-                    # 거래대금 기준 월봉 순위 계산 (기본값)
-                    query = """
-                    SELECT COUNT(*) + 1 as ranking
-                    FROM (
-                        SELECT stock_code, SUM(volume) as total_volume
-                        FROM daily_data 
-                        WHERE DATE_FORMAT(trade_date, '%%Y-%%m') = %s
-                        GROUP BY stock_code
-                        HAVING total_volume > %s
-                    ) as monthly_volumes
-                    """
-                    params = (target_date, volume)
-            
-            else:
-                db.disconnect()
-                return 1
-            
-            result = db.fetch_one(query, params)
-            db.disconnect()
-            
-            if result and result['ranking']:
-                return int(result['ranking'])
-            else:
-                return 1
-                
-        except Exception as e:
-            print(f"❌ {stock_code} 순위 계산 실패: {e}")
-            return 1
 
     def _get_individual_stock_trading_data(self, stock_code: str, target_date: str, period_type: str) -> Optional[Dict[str, Any]]:
         """
@@ -1782,183 +1653,7 @@ class AIChartAnalyzer:
             print(f"❌ {stock_code} 개별 거래 데이터 조회 실패: {e}")
             return None
 
-    def _get_daily_ranking_data(self, target_date: str, trading_type: str = "거래대금") -> list:
-        """일봉 전체 순위 데이터 조회 (거래타입별 분기)"""
-        try:
-            from database_config import DatabaseManager
-            db = DatabaseManager()
-            
-            if not db.connect():
-                print("⚠️ DB 연결 실패 - 일봉 순위 조회 불가")
-                return []
-            
-            if trading_type == "거래율":
-                # 거래율 기준 일봉 순위
-                query = """
-                SELECT 
-                    stock_code,
-                    SUM(volume) as total_volume,
-                    SUM(volume * close) as total_amount,
-                    AVG(outstanding_shares) as avg_shares,
-                    (SUM(volume) / AVG(outstanding_shares)) * 100 as turnover_rate,
-                    ROW_NUMBER() OVER (ORDER BY (SUM(volume) / AVG(outstanding_shares)) * 100 DESC) as ranking
-                FROM daily_data 
-                WHERE trade_date = %s
-                AND outstanding_shares > 0
-                GROUP BY stock_code
-                HAVING SUM(volume) > 0 AND AVG(outstanding_shares) > 0
-                ORDER BY turnover_rate DESC
-                """
-            else:
-                # 거래대금 기준 일봉 순위 (기본값)
-                query = """
-                SELECT 
-                    stock_code,
-                    SUM(volume) as total_volume,
-                    SUM(volume * close) as total_amount,
-                    AVG(outstanding_shares) as avg_shares,
-                    (SUM(volume) / AVG(outstanding_shares)) * 100 as turnover_rate,
-                    ROW_NUMBER() OVER (ORDER BY SUM(volume) DESC) as ranking
-                FROM daily_data 
-                WHERE trade_date = %s
-                GROUP BY stock_code
-                HAVING SUM(volume) > 0
-                ORDER BY total_volume DESC
-                """
-            
-            results = db.fetch_all(query, (target_date,))
-            db.disconnect()
-            
-            return results
-            
-        except Exception as e:
-            print(f"❌ 일봉 순위 데이터 조회 실패: {e}")
-            return []
 
-    def _get_weekly_ranking_data(self, week_start: str, trading_type: str = "거래대금") -> list:
-        """주간 전체 순위 데이터 조회 (거래타입별 분기)"""
-        try:
-            from database_config import DatabaseManager
-            db = DatabaseManager()
-            
-            if not db.connect():
-                print("⚠️ DB 연결 실패 - 주간 순위 조회 불가")
-                return []
-            
-            # week_calculator 모듈을 사용하여 주 종료일 계산
-            try:
-                week_start_datetime = datetime.strptime(week_start, '%Y-%m-%d')
-                year, week = get_week_number(week_start_datetime)
-                week_start_date = WeekCalculator.get_week_start_date(year, week)
-                week_end_date = WeekCalculator.get_week_end_date(year, week)
-                week_end = week_end_date.strftime('%Y-%m-%d')
-                print(f"📅 주간 랭킹 조회 기간: {week_start_date.strftime('%Y-%m-%d')} ~ {week_end} ({trading_type} 기준)")
-            except Exception as e:
-                print(f"❌ 주차 계산 실패: {e}")
-                return []
-            
-            if trading_type == "거래율":
-                # 거래율 기준 주간 순위
-                query = """
-                SELECT 
-                    stock_code,
-                    SUM(volume) as total_volume,
-                    SUM(volume * close) as total_amount,
-                    AVG(outstanding_shares) as avg_shares,
-                    (SUM(volume) / AVG(outstanding_shares)) * 100 as turnover_rate,
-                    ROW_NUMBER() OVER (ORDER BY (SUM(volume) / AVG(outstanding_shares)) * 100 DESC) as ranking
-                FROM daily_data 
-                WHERE trade_date BETWEEN %s AND %s
-                AND WEEKDAY(trade_date) < 5
-                AND outstanding_shares > 0
-                GROUP BY stock_code
-                HAVING SUM(volume) > 0 AND AVG(outstanding_shares) > 0
-                ORDER BY turnover_rate DESC
-                """
-            else:
-                # 거래량 기준 주간 순위 (기본값)
-                query = """
-                SELECT 
-                    stock_code,
-                    SUM(volume) as total_volume,
-                    SUM(volume * close) as total_amount,
-                    AVG(outstanding_shares) as avg_shares,
-                    (SUM(volume) / AVG(outstanding_shares)) * 100 as turnover_rate,
-                    ROW_NUMBER() OVER (ORDER BY SUM(volume) DESC) as ranking
-                FROM daily_data 
-                WHERE trade_date BETWEEN %s AND %s
-                AND WEEKDAY(trade_date) < 5
-                GROUP BY stock_code
-                HAVING SUM(volume) > 0
-                ORDER BY total_volume DESC
-                """
-            
-            results = db.fetch_all(query, (week_start_date, week_end_date))
-            db.disconnect()
-            
-            return results if results else []
-            
-        except Exception as e:
-            print(f"❌ 주간 순위 데이터 조회 실패: {e}")
-            return []
-    
-    def _get_monthly_ranking_data(self, year_month: str, trading_type: str = "거래대금") -> list:
-        """월간 전체 순위 데이터 조회 (거래타입별 분기)"""
-        try:
-            from database_config import DatabaseManager
-            db = DatabaseManager()
-            
-            if not db.connect():
-                print("⚠️ DB 연결 실패 - 월간 순위 조회 불가")
-                return []
-            
-            # year_month를 년도와 월로 분리
-            year, month = year_month.split('-')
-            
-            if trading_type == "거래율":
-                # 거래율 기준 월봉 순위
-                query = """
-                SELECT 
-                    stock_code,
-                    SUM(volume) as total_volume,
-                    SUM(volume * close) as total_amount,
-                    AVG(outstanding_shares) as avg_shares,
-                    (SUM(volume) / AVG(outstanding_shares)) * 100 as turnover_rate,
-                    ROW_NUMBER() OVER (ORDER BY (SUM(volume) / AVG(outstanding_shares)) * 100 DESC) as ranking
-                FROM daily_data 
-                WHERE YEAR(trade_date) = %s AND MONTH(trade_date) = %s
-                AND WEEKDAY(trade_date) < 5
-                AND outstanding_shares > 0
-                GROUP BY stock_code
-                HAVING SUM(volume) > 0 AND AVG(outstanding_shares) > 0
-                ORDER BY turnover_rate DESC
-                """
-            else:
-                # 거래대금 기준 월봉 순위 (기본값)
-                query = """
-                SELECT 
-                    stock_code,
-                    SUM(volume) as total_volume,
-                    SUM(volume * close) as total_amount,
-                    AVG(outstanding_shares) as avg_shares,
-                    (SUM(volume) / AVG(outstanding_shares)) * 100 as turnover_rate,
-                    ROW_NUMBER() OVER (ORDER BY SUM(volume) DESC) as ranking
-                FROM daily_data 
-                WHERE YEAR(trade_date) = %s AND MONTH(trade_date) = %s
-                AND WEEKDAY(trade_date) < 5
-                GROUP BY stock_code
-                HAVING SUM(volume) > 0
-                ORDER BY total_volume DESC
-                """
-            
-            results = db.fetch_all(query, (year, month))
-            db.disconnect()
-            
-            return results if results else []
-            
-        except Exception as e:
-            print(f"❌ 월간 순위 데이터 조회 실패: {e}")
-            return []
 
     def _calculate_week_number(self, date: datetime) -> str:
         """
@@ -2175,7 +1870,7 @@ class AIChartAnalyzer:
                         print(f"📊 {stock_code} 개별 거래 데이터 조회 완료")
                         
                         # 전체 순위 데이터 조회 (거래타입 전달)
-                        ranking_data = self._get_daily_ranking_data(target_date, trading_type)
+                        ranking_data = self.ranking_calculator.get_volume_ranking(target_date, "일봉", limit=50, trading_type=trading_type)
                         print(f"📊 일봉 전체 순위 데이터 조회 완료: {len(ranking_data)}개 종목 ({trading_type} 기준)")
                 
                 elif chart_type == "주봉":
@@ -2252,7 +1947,7 @@ class AIChartAnalyzer:
                         print(f"📊 {stock_code} 주봉 개별 거래 데이터 조회 완료")
                         
                         # 전체 순위 데이터 조회 (거래타입 전달)
-                        ranking_data = self._get_weekly_ranking_data(week_start, trading_type)
+                        ranking_data = self.ranking_calculator.get_volume_ranking(week_start, "주봉", limit=50, trading_type=trading_type)
                         print(f"📊 주봉 전체 순위 데이터 조회 완료: {len(ranking_data)}개 종목 ({trading_type} 기준)")
                     else:
                         ranking_data = []
@@ -2300,7 +1995,7 @@ class AIChartAnalyzer:
                         print(f"📊 {stock_code} 월봉 개별 거래 데이터 조회 완료")
                         
                         # 전체 순위 데이터 조회 (거래타입 전달)
-                        ranking_data = self._get_monthly_ranking_data(year_month, trading_type)
+                        ranking_data = self.ranking_calculator.get_volume_ranking(year_month, "월봉", limit=50, trading_type=trading_type)
                         print(f"📊 월봉 전체 순위 데이터 조회 완료: {len(ranking_data)}개 종목 ({trading_type} 기준)")
                     else:
                         print(f"⚠️ year_month가 None이어서 데이터 조회 불가")
