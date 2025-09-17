@@ -475,6 +475,20 @@ class AIChartAnalyzer:
         self.timeout = 300
         self.max_image_size = 1500
         print("⚠️ 기본 설정값을 사용합니다.")
+    
+    # def get_weekly_indicators_from_db(self, stock_code: str, weeks: int = 260) -> Optional[Dict[str, Any]]:
+    #     """
+    #     weekly_data 테이블에서 보조지표 데이터를 불러오기 (5년/260주 기준) - 사용하지 않음
+    #     
+    #     Args:
+    #         stock_code (str): 종목번호
+    #         weeks (int): 조회할 주 수 (기본 260주 = 5년)
+    #         
+    #     Returns:
+    #         Dict[str, Any]: 보조지표 데이터 또는 None
+    #     """
+    #     # 주봉 분석 통일화로 인해 사용하지 않음 - JSON 파일을 통일된 방식으로 사용
+    #     pass
 
     def encode_image_to_base64(self, image_path: str) -> str:
         """
@@ -617,11 +631,11 @@ class AIChartAnalyzer:
             # 3. 차트 유형에 따른 프롬프트 선택
             prompt = self.prompts.get_prompt(chart_type)
             
-            # 4. 추가 데이터 파일들 로드 및 프롬프트에 추가
-            additional_data_info = self._load_additional_data_files(json_data_path, csv_data_path, text_summary_path)
+            # 4. JSON 데이터 파일 로드 및 프롬프트에 추가 (모든 차트 타입에서 통일된 방식)
+            additional_data_info = self._load_additional_data_files(json_data_path, None, None)
             if additional_data_info:
                 prompt += f"\n\n{additional_data_info}"
-                print(f"✅ 추가 데이터 파일 정보가 프롬프트에 추가되었습니다.")
+                print(f"✅ JSON 데이터 정보가 프롬프트에 추가되었습니다.")
             
             # 5. 차트 데이터 정보를 프롬프트에 추가 (기존 방식)
             if chart_data is not None and hasattr(chart_data, 'empty') and not chart_data.empty:
@@ -1348,19 +1362,8 @@ class AIChartAnalyzer:
                     
                     # 거래 타입별 문구 생성
                     if trading_type == "거래율" and turnover_rate != "N/A":
-                        # 거래율 기준 문구 - 사용자 요구사항에 맞게 수정
-                        rate_value = turnover_rate.replace("%", "").strip()
-                        if rate_value.replace(".", "").isdigit() and volume != "N/A" and outstanding_shares != "N/A":
-                            # 거래량과 유통주식수에서 숫자만 추출
-                            volume_clean = volume.replace(",", "").replace("주", "").strip()
-                            shares_clean = outstanding_shares.replace(",", "").replace("주", "").strip()
-                            
-                            if volume_clean.isdigit() and shares_clean.isdigit():
-                                trading_info_text = f"위 주식의 {period_text} 거래대금금은 {volume}로 유통주식수 {outstanding_shares} 대비 {turnover_rate}로 전체 종목 중 상위 {ranking}를 차지하여 분석 대상에 포함되었습니다."
-                            else:
-                                trading_info_text = f"위 주식의 {period_text} 거래율은 {turnover_rate}로 전체 종목 중 상위 {ranking}를 차지하여 분석 대상에 포함되었습니다."
-                        else:
-                            trading_info_text = f"위 주식의 {period_text} 거래율 정보를 확인할 수 없어 분석 대상에 포함되었습니다."
+                        # 거래율 기준 문구 - 간단하게 수정
+                        trading_info_text = f"위 주식의 {period_text} 거래율은 {turnover_rate}로 전체 종목 중 상위 {ranking}를 차지하여 분석 대상에 포함되었습니다."
                     else:
                         # 거래대금 기준 문구 - 사용자 요구사항에 맞게 수정
                         if total_amount != "N/A":
@@ -1472,6 +1475,13 @@ class AIChartAnalyzer:
             "AI분석결과": ai_response
         }
         
+        # 차트 데이터 추가 (볼린저밴드 등 기술적 지표 포함)
+        if chart_data is not None and not chart_data.empty:
+            print(f"📊 차트 데이터를 JSON에 포함시킵니다: {len(chart_data)}개 레코드")
+            result = self._add_chart_data_to_result(result, chart_data, chart_type)
+        else:
+            print(f"⚠️ 차트 데이터가 없어 JSON에 포함하지 않습니다.")
+        
         # 거래정보 추가 (JSON 파싱 실패)
         # AI 응답이 JSON 형식이 아니거나 파싱에 실패한 경우 실행됨
         # 현재 가장 많이 사용되는 경로 (AI 응답이 JSON 형식이 아니기 때문)
@@ -1479,6 +1489,170 @@ class AIChartAnalyzer:
         result = self._add_trading_info_to_result(result, stock_code, "파싱실패", chart_type, ai_response, trading_type)
         
         return result
+
+    def _add_chart_data_to_result(self, result: Dict[str, Any], chart_data: pd.DataFrame, chart_type: str) -> Dict[str, Any]:
+        """
+        차트 데이터를 JSON 결과에 추가 (볼린저밴드 등 기술적 지표 포함)
+        
+        Args:
+            result (Dict[str, Any]): 기존 결과 딕셔너리
+            chart_data (pd.DataFrame): 차트 데이터 (OHLCV + 기술적 지표)
+            chart_type (str): 차트 타입 (일봉, 주봉, 월봉)
+            
+        Returns:
+            Dict[str, Any]: 차트 데이터가 추가된 결과 딕셔너리
+        """
+        try:
+            print(f"📊 차트 데이터 JSON 변환 시작: {chart_type}")
+            
+            # 시간대 정보 제거
+            chart_data_clean = chart_data.copy()
+            if chart_data_clean.index.tz is not None:
+                chart_data_clean.index = chart_data_clean.index.tz_localize(None)
+                print("   🔧 시간대 정보를 제거했습니다.")
+            
+            # 메타데이터 추가
+            result["차트데이터"] = {
+                "metadata": {
+                    "chart_type": chart_type,
+                    "data_period": {
+                        "start": chart_data_clean.index[0].strftime('%Y-%m-%d'),
+                        "end": chart_data_clean.index[-1].strftime('%Y-%m-%d')
+                    },
+                    "total_records": len(chart_data_clean)
+                },
+                "summary": {
+                    "latest_close": float(chart_data_clean['Close'].iloc[-1]),
+                    "latest_volume": int(chart_data_clean['Volume'].iloc[-1]),
+                    "price_change": float(chart_data_clean['Close'].iloc[-1] - chart_data_clean['Open'].iloc[0]),
+                    "price_change_pct": float(((chart_data_clean['Close'].iloc[-1] / chart_data_clean['Open'].iloc[0]) - 1) * 100),
+                    "highest_price": float(chart_data_clean['High'].max()),
+                    "lowest_price": float(chart_data_clean['Low'].min()),
+                    "avg_volume": float(chart_data_clean['Volume'].mean())
+                },
+                "technical_indicators": {
+                    "latest_values": {}
+                },
+                "chart_data": []
+            }
+            
+            # 기술적 지표 최신값 추가
+            technical_indicators = result["차트데이터"]["technical_indicators"]["latest_values"]
+            
+            # 이동평균선
+            if 'MA5' in chart_data_clean.columns:
+                technical_indicators["ma5"] = float(chart_data_clean['MA5'].iloc[-1])
+            if 'MA20' in chart_data_clean.columns:
+                technical_indicators["ma20"] = float(chart_data_clean['MA20'].iloc[-1])
+            if 'MA60' in chart_data_clean.columns:
+                technical_indicators["ma60"] = float(chart_data_clean['MA60'].iloc[-1])
+            if 'MA6' in chart_data_clean.columns:
+                technical_indicators["ma6"] = float(chart_data_clean['MA6'].iloc[-1])
+            if 'MA12' in chart_data_clean.columns:
+                technical_indicators["ma12"] = float(chart_data_clean['MA12'].iloc[-1])
+            if 'MA24' in chart_data_clean.columns:
+                technical_indicators["ma24"] = float(chart_data_clean['MA24'].iloc[-1])
+            
+            # 볼린저밴드 (중요!)
+            if 'BB_Upper' in chart_data_clean.columns:
+                technical_indicators["bb_upper"] = float(chart_data_clean['BB_Upper'].iloc[-1])
+            if 'BB_Middle' in chart_data_clean.columns:
+                technical_indicators["bb_middle"] = float(chart_data_clean['BB_Middle'].iloc[-1])
+            if 'BB_Lower' in chart_data_clean.columns:
+                technical_indicators["bb_lower"] = float(chart_data_clean['BB_Lower'].iloc[-1])
+            
+            # MACD
+            if 'MACD' in chart_data_clean.columns:
+                technical_indicators["macd"] = float(chart_data_clean['MACD'].iloc[-1])
+            if 'MACD_Signal' in chart_data_clean.columns:
+                technical_indicators["macd_signal"] = float(chart_data_clean['MACD_Signal'].iloc[-1])
+            if 'MACD_Histogram' in chart_data_clean.columns:
+                technical_indicators["macd_histogram"] = float(chart_data_clean['MACD_Histogram'].iloc[-1])
+            
+            # RSI
+            if 'RSI' in chart_data_clean.columns:
+                technical_indicators["rsi"] = float(chart_data_clean['RSI'].iloc[-1])
+            
+            # CCI
+            if 'CCI' in chart_data_clean.columns:
+                technical_indicators["cci"] = float(chart_data_clean['CCI'].iloc[-1])
+            
+            # ADX
+            if 'ADX' in chart_data_clean.columns:
+                technical_indicators["adx"] = float(chart_data_clean['ADX'].iloc[-1])
+            if 'Plus_DI' in chart_data_clean.columns:
+                technical_indicators["plus_di"] = float(chart_data_clean['Plus_DI'].iloc[-1])
+            if 'Minus_DI' in chart_data_clean.columns:
+                technical_indicators["minus_di"] = float(chart_data_clean['Minus_DI'].iloc[-1])
+            
+            # 최근 30개 데이터 추가 (AI 분석에 충분)
+            recent_data = chart_data_clean.tail(30)
+            for date, row in recent_data.iterrows():
+                data_point = {
+                    "date": date.strftime('%Y-%m-%d'),
+                    "open": float(row['Open']),
+                    "high": float(row['High']),
+                    "low": float(row['Low']),
+                    "close": float(row['Close']),
+                    "volume": int(row['Volume'])
+                }
+                
+                # 기술적 지표 추가
+                if 'MA5' in row:
+                    data_point["ma5"] = float(row['MA5'])
+                if 'MA20' in row:
+                    data_point["ma20"] = float(row['MA20'])
+                if 'MA60' in row:
+                    data_point["ma60"] = float(row['MA60'])
+                if 'MA6' in row:
+                    data_point["ma6"] = float(row['MA6'])
+                if 'MA12' in row:
+                    data_point["ma12"] = float(row['MA12'])
+                if 'MA24' in row:
+                    data_point["ma24"] = float(row['MA24'])
+                
+                # 볼린저밴드 (중요!)
+                if 'BB_Upper' in row:
+                    data_point["bb_upper"] = float(row['BB_Upper'])
+                if 'BB_Middle' in row:
+                    data_point["bb_middle"] = float(row['BB_Middle'])
+                if 'BB_Lower' in row:
+                    data_point["bb_lower"] = float(row['BB_Lower'])
+                
+                # MACD
+                if 'MACD' in row:
+                    data_point["macd"] = float(row['MACD'])
+                if 'MACD_Signal' in row:
+                    data_point["macd_signal"] = float(row['MACD_Signal'])
+                if 'MACD_Histogram' in row:
+                    data_point["macd_histogram"] = float(row['MACD_Histogram'])
+                
+                # RSI
+                if 'RSI' in row:
+                    data_point["rsi"] = float(row['RSI'])
+                
+                # CCI
+                if 'CCI' in row:
+                    data_point["cci"] = float(row['CCI'])
+                
+                # ADX
+                if 'ADX' in row:
+                    data_point["adx"] = float(row['ADX'])
+                if 'Plus_DI' in row:
+                    data_point["plus_di"] = float(row['Plus_DI'])
+                if 'Minus_DI' in row:
+                    data_point["minus_di"] = float(row['Minus_DI'])
+                
+                result["차트데이터"]["chart_data"].append(data_point)
+            
+            print(f"✅ 차트 데이터 JSON 변환 완료: {len(result['차트데이터']['chart_data'])}개 레코드")
+            print(f"📊 포함된 기술적 지표: {list(technical_indicators.keys())}")
+            
+            return result
+            
+        except Exception as e:
+            print(f"❌ 차트 데이터 JSON 변환 중 오류: {e}")
+            return result
 
     def _parse_weekly_date(self, date_text: str) -> str:
         """
@@ -2557,14 +2731,14 @@ class AIChartAnalyzer:
             return f"{len(analysis_results)}개 종목의 {chart_type} 차트 분석이 완료되었습니다."
 
 
-    def _load_additional_data_files(self, json_data_path: str, csv_data_path: str, text_summary_path: str) -> str:
+    def _load_additional_data_files(self, json_data_path: str, csv_data_path: str = None, text_summary_path: str = None) -> str:
         """
-        추가 데이터 파일들을 로드하고 프롬프트용 텍스트로 변환
+        JSON 데이터 파일을 로드하고 프롬프트용 텍스트로 변환 (CSV/텍스트 파일은 제거됨)
         
         Args:
             json_data_path (str): JSON 데이터 파일 경로
-            csv_data_path (str): CSV 데이터 파일 경로
-            text_summary_path (str): 텍스트 요약 파일 경로
+            csv_data_path (str, optional): CSV 데이터 파일 경로 (사용하지 않음)
+            text_summary_path (str, optional): 텍스트 요약 파일 경로 (사용하지 않음)
             
         Returns:
             str: 프롬프트에 추가할 데이터 정보 텍스트
@@ -2604,6 +2778,14 @@ class AIChartAnalyzer:
                     if value is not None:
                         if 'ma' in indicator.lower():
                             json_info += f"- {indicator.upper()}: {value:,.0f}원\n"
+                        elif indicator.lower() in ['adx', 'plus_di', 'minus_di']:
+                            json_info += f"- {indicator.upper()}: {value:.2f}\n"
+                        elif indicator.lower() == 'rsi':
+                            json_info += f"- {indicator.upper()}: {value:.1f}\n"
+                        elif 'macd' in indicator.lower():
+                            json_info += f"- {indicator.upper()}: {value:.2f}\n"
+                        elif 'bb_' in indicator.lower():
+                            json_info += f"- {indicator.upper()}: {value:,.0f}원\n"
                         else:
                             json_info += f"- {indicator.upper()}: {value:.2f}\n"
                 
@@ -2620,49 +2802,7 @@ class AIChartAnalyzer:
             except Exception as e:
                 print(f"❌ JSON 데이터 파일 로드 실패: {e}")
         
-        # 2. CSV 데이터 파일 로드
-        if csv_data_path and os.path.exists(csv_data_path):
-            try:
-                print(f"📊 CSV 데이터 파일 로드 중: {csv_data_path}")
-                import pandas as pd
-                csv_data = pd.read_csv(csv_data_path, encoding='utf-8-sig')
-                
-                csv_info = f"""
-**CSV 데이터 정보:**
-- 파일 경로: {csv_data_path}
-- 데이터 수: {len(csv_data)}개
-- 컬럼: {', '.join(csv_data.columns.tolist())}
-
-**최근 5개 데이터:**
-"""
-                
-                # 최근 5개 데이터 추가
-                for i, row in csv_data.tail(5).iterrows():
-                    csv_info += f"- {row.iloc[0]}: 시가 {row['Open']:,.0f}, 고가 {row['High']:,.0f}, 저가 {row['Low']:,.0f}, 종가 {row['Close']:,.0f}, 거래대금 {row['Volume']:,}\n"
-                
-                additional_info += csv_info
-                print(f"✅ CSV 데이터 로드 완료")
-                
-            except Exception as e:
-                print(f"❌ CSV 데이터 파일 로드 실패: {e}")
-        
-        # 3. 텍스트 요약 파일 로드
-        if text_summary_path and os.path.exists(text_summary_path):
-            try:
-                print(f"📊 텍스트 요약 파일 로드 중: {text_summary_path}")
-                with open(text_summary_path, 'r', encoding='utf-8') as f:
-                    text_content = f.read()
-                
-                text_info = f"""
-**텍스트 요약 정보:**
-{text_content}
-"""
-                
-                additional_info += text_info
-                print(f"✅ 텍스트 요약 로드 완료")
-                
-            except Exception as e:
-                print(f"❌ 텍스트 요약 파일 로드 실패: {e}")
+        # CSV와 텍스트 파일은 JSON 데이터와 중복되므로 제거 (성능 최적화)
         
         return additional_info
 
@@ -3848,7 +3988,7 @@ class SummaryFileGenerator:
             
             # 각 칸의 너비 설정 (Inches 단위)
             # 순위: 0.5인치 (50% 줄임), 거래율/거래대금: 1.2인치, 종목명: 1.8인치
-            column_widths = [0.5, 1.2, 1.8, 0.5, 1.2, 1.8]  # 6개 칸의 너비
+            column_widths = [0.7, 1.0, 1.8, 0.7, 1.0, 1.8]  # 6개 칸의 너비
             
             for i, width in enumerate(column_widths):
                 table.columns[i].width = Inches(width)

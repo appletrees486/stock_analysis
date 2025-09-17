@@ -92,19 +92,60 @@ class VolumeRankingDataManager:
     def get_weekly_volume_ranking(self, week_start: str = None, limit: int = 50) -> List[Dict[str, Any]]:
         """주간 거래대금 상위 종목 조회"""
         try:
+            logger.info(f"🔍 get_weekly_volume_ranking 호출: week_start='{week_start}', limit={limit}")
+            
             if week_start is None:
                 # 현재 주의 월요일 찾기
                 today = datetime.now()
                 days_since_monday = today.weekday()
                 week_start = (today - timedelta(days=days_since_monday)).strftime('%Y-%m-%d')
+                logger.info(f"🔍 week_start가 None이어서 현재 주로 설정: {week_start}")
+            else:
+                # week_start 값 검증 및 수정
+                try:
+                    # 날짜 파싱
+                    week_start_date = datetime.strptime(week_start, '%Y-%m-%d').date()
+                    logger.info(f"🔍 파싱된 week_start: {week_start_date}")
+                    
+                    # 해당 날짜가 월요일인지 확인
+                    if week_start_date.weekday() != 0:  # 0 = 월요일
+                        logger.warning(f"⚠️ week_start가 월요일이 아닙니다: {week_start_date} (요일: {week_start_date.weekday()})")
+                        
+                        # 가장 가까운 월요일로 수정
+                        days_to_monday = week_start_date.weekday()
+                        corrected_week_start = week_start_date - timedelta(days=days_to_monday)
+                        logger.info(f"🔧 week_start를 월요일로 수정: {week_start} → {corrected_week_start}")
+                        week_start = corrected_week_start.strftime('%Y-%m-%d')
+                    else:
+                        logger.info(f"✅ week_start가 올바른 월요일입니다: {week_start_date}")
+                        
+                except ValueError as e:
+                    logger.error(f"❌ week_start 날짜 형식 오류: {week_start} - {e}")
+                    # 현재 주의 월요일로 fallback
+                    today = datetime.now()
+                    days_since_monday = today.weekday()
+                    week_start = (today - timedelta(days=days_since_monday)).strftime('%Y-%m-%d')
+                    logger.info(f"🔧 week_start를 현재 주 월요일로 설정: {week_start}")
             
             # 캐시 확인 (주간 데이터는 공유하므로 limit 없이 캐시)
             cache_key = f"weekly_volume_{week_start}"
+            
+            # 기존 캐시 삭제 (필드명 변경으로 인해)
             if cache_key in self._weekly_cache:
-                cache_data = self._weekly_cache[cache_key]
-                if datetime.now().timestamp() - cache_data['timestamp'] < self._cache_ttl:
-                    # 캐시된 전체 데이터에서 limit만큼 반환
-                    return cache_data['data'][:limit]
+                del self._weekly_cache[cache_key]
+            
+            # ranking_calculator의 캐시도 초기화
+            self.ranking_calculator._cache.clear()
+            
+            # 캐시 완전 무시
+            print(f"🔍 VolumeRankingDataManager 캐시 무시")
+            
+            # 캐시 확인 (새로 생성된 데이터만 사용)
+            # if cache_key in self._weekly_cache:
+            #     cache_data = self._weekly_cache[cache_key]
+            #     if datetime.now().timestamp() - cache_data['timestamp'] < self._cache_ttl:
+            #         # 캐시된 데이터 반환
+            #         return cache_data['data'][:limit]
             
             # RankingCalculator를 사용하여 주간 거래대금 순위 조회
             results = self.ranking_calculator.get_volume_ranking(week_start, "주봉", limit=limit, trading_type="거래대금")

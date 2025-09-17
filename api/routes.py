@@ -336,6 +336,11 @@ def get_weekly_volume_ranking():
         week_start = request.args.get('week_start', '')
         limit = int(request.args.get('limit', 50))
         
+        # 디버깅 로그 추가
+        logger.info(f"🔍 받은 week_start 파라미터: '{week_start}'")
+        logger.info(f"🔍 받은 limit 파라미터: {limit}")
+        logger.info(f"🔍 전체 요청 파라미터: {dict(request.args)}")
+        
         # VolumeRankingDataManager 사용
         manager = VolumeRankingDataManager()
         result = manager.get_weekly_volume_ranking(week_start, limit)

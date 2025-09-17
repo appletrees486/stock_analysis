@@ -1217,31 +1217,11 @@ class BatchAnalyzer:
                         # 거래 타입별 문구 생성
                         if trading_type == "거래율" and "거래율" in trading_info:
                             turnover_rate = trading_info.get("거래율")
-                            volume = trading_info.get("거래대금", "N/A")
-                            outstanding_shares = trading_info.get("유통주식수", "N/A")
                             ranking = trading_info.get("순위", "N/A")
                             
                             if turnover_rate and turnover_rate != "N/A":
-                                # 거래율 기준 문구 - ai_chart_analysis.py 로직 참조
-                                rate_value = turnover_rate.replace("%", "").strip()
-                                if rate_value.replace(".", "").isdigit() and volume != "N/A" and outstanding_shares != "N/A":
-                                    # 거래량과 유통주식수에서 숫자만 추출
-                                    volume_clean = volume.replace(",", "").replace("주", "").strip()
-                                    shares_clean = outstanding_shares.replace(",", "").replace("주", "").strip()
-                                    
-                                    # 거래율에 천단위 쉼표 적용
-                                    try:
-                                        rate_numeric = float(rate_value)
-                                        formatted_turnover_rate = f"{rate_numeric:,.2f}%"
-                                    except:
-                                        formatted_turnover_rate = turnover_rate
-                                    
-                                    if volume_clean.isdigit() and shares_clean.isdigit():
-                                        trading_info_text = f"위 주식의 {period_text} 거래량은 {volume}로 유통주식수 {outstanding_shares} 대비 {formatted_turnover_rate}로 전체 종목 중 상위 {ranking}를 차지하여 분석 대상에 포함되었습니다."
-                                    else:
-                                        trading_info_text = f"위 주식의 {period_text} 거래율은 {formatted_turnover_rate}로 전체 종목 중 상위 {ranking}를 차지하여 분석 대상에 포함되었습니다."
-                                else:
-                                    trading_info_text = f"위 주식의 {period_text} 거래율 정보를 확인할 수 없어 분석 대상에 포함되었습니다."
+                                # 거래율 기준 문구 - 간단하게 수정
+                                trading_info_text = f"위 주식의 {period_text} 거래율은 {turnover_rate}로 전체 종목 중 상위 {ranking}를 차지하여 분석 대상에 포함되었습니다."
                                 
                                 para_trading = doc.add_paragraph(trading_info_text)
                                 for run in para_trading.runs:
@@ -1250,31 +1230,12 @@ class BatchAnalyzer:
                                 doc.add_paragraph()
                         
                         else:
-                            # 거래대금 기준 문구 (기본값) - ai_chart_analysis.py 로직 참조
+                            # 거래대금 기준 문구 (기본값) - 간단하게 수정
                             total_trading_amount = trading_info.get("거래대금")
                             trading_rank = trading_info.get("순위", "N/A")
                             
                             if total_trading_amount and total_trading_amount != "N/A":
-                                # 거래대금 파싱 함수 사용
-                                amount_numeric = self._parse_trading_amount(total_trading_amount)
-                                
-                                if amount_numeric > 0:
-                                    amount_billion = amount_numeric / 100_000_000  # 억원 단위로 변환
-                                    amount_text = f"{amount_billion:,.0f}억원"
-                                else:
-                                    amount_text = total_trading_amount  # 원본 문자열 사용
-                                
-                                # 순위에서 숫자만 추출
-                                if trading_rank and trading_rank != "N/A" and "위" in str(trading_rank):
-                                    rank_number = str(trading_rank).replace("위", "").strip()
-                                    if rank_number.isdigit():
-                                        rank_text = f"상위 {rank_number}위"
-                                    else:
-                                        rank_text = "순위 정보 없음"
-                                else:
-                                    rank_text = "순위 정보 없음"
-                                
-                                trading_info_text = f"위 주식의 {period_text} 거래량은 {amount_text}으로 전체 종목 중 {rank_text}를 차지하여 분석 대상에 포함되었습니다."
+                                trading_info_text = f"위 주식의 {period_text} 거래대금은 {total_trading_amount}으로 전체 종목 중 상위 {trading_rank}를 차지하여 분석 대상에 포함되었습니다."
                             else:
                                 trading_info_text = f"위 주식의 {period_text} 거래대금 정보를 확인할 수 없어 분석 대상에 포함되었습니다."
                             

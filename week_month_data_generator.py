@@ -103,7 +103,7 @@ class WeekMonthDataGenerator:
             self.db.disconnect()
     
     def generate_weekly_data(self, daily_df):
-        """일봉 데이터를 주봉 데이터로 변환 (보조지표 포함)"""
+        """일봉 데이터를 주봉 데이터로 변환 (보조지표 포함) - 미완성 주 제외"""
         try:
             if daily_df is None or daily_df.empty:
                 return None
@@ -111,11 +111,26 @@ class WeekMonthDataGenerator:
             # 주봉 데이터 생성
             weekly_data = []
             
+            # 현재 날짜 (미완성 주 제외를 위해)
+            current_date = datetime.now()
+            current_year = current_date.year
+            current_week = current_date.isocalendar()[1]  # ISO 주차
+            
             # 주차별로 그룹화 (월요일 시작)
             daily_df['week_start'] = daily_df.index.to_period('W-MON').asfreq('D')
             
             for week_start, week_group in daily_df.groupby('week_start'):
                 if week_group.empty:
+                    continue
+                
+                # 미완성 주 제외 로직 추가
+                week_start_date = week_start.to_timestamp()
+                week_year = week_start_date.year
+                week_week = week_start_date.isocalendar()[1]  # ISO 주차
+                
+                # 현재 주이거나 미래 주인 경우 제외
+                if week_year > current_year or (week_year == current_year and week_week >= current_week):
+                    logging.info(f"미완성 주 제외: {week_year}년 {week_week}주차")
                     continue
                 
                 # 주봉 OHLCV 계산
@@ -152,7 +167,7 @@ class WeekMonthDataGenerator:
             return None
     
     def generate_monthly_data(self, daily_df):
-        """일봉 데이터를 월봉 데이터로 변환 (보조지표 포함)"""
+        """일봉 데이터를 월봉 데이터로 변환 (보조지표 포함) - 미완성 월 제외"""
         try:
             if daily_df is None or daily_df.empty:
                 return None
@@ -160,11 +175,26 @@ class WeekMonthDataGenerator:
             # 월봉 데이터 생성
             monthly_data = []
             
+            # 현재 날짜 (미완성 월 제외를 위해)
+            current_date = datetime.now()
+            current_year = current_date.year
+            current_month = current_date.month
+            
             # 월별로 그룹화
             daily_df['month_start'] = daily_df.index.to_period('M').asfreq('D')
             
             for month_start, month_group in daily_df.groupby('month_start'):
                 if month_group.empty:
+                    continue
+                
+                # 미완성 월 제외 로직 추가
+                month_start_date = month_start.to_timestamp()
+                month_year = month_start_date.year
+                month_month = month_start_date.month
+                
+                # 현재 월이거나 미래 월인 경우 제외
+                if month_year > current_year or (month_year == current_year and month_month >= current_month):
+                    logging.info(f"미완성 월 제외: {month_year}년 {month_month}월")
                     continue
                 
                 # 월봉 OHLCV 계산

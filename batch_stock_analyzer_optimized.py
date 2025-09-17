@@ -219,18 +219,23 @@ def create_chart_fast(stock_code: str, chart_type_en: str) -> tuple[bool, object
             if hist is not None and not hist.empty:
                 module.analyze_stock_data(hist, stock_code)
                 chart_result = module.create_stock_chart(hist, stock_code)
-                if chart_result is not None and len(chart_result) == 2:
-                    # chart_result는 (chart_path, stock_name) 튜플
-                    chart_path, stock_name = chart_result
+                if chart_result is not None and len(chart_result) == 3:
+                    # chart_result는 (chart_path, stock_name, chart_data_with_indicators) 튜플
+                    chart_path, stock_name, chart_data_with_indicators = chart_result
                     # additional_info를 빈 딕셔너리로 설정 (AI 분석에 필요한 정보)
                     additional_info = {
                         "chart_path": chart_path,
                         "stock_name": stock_name
                     }
+                    return True, (chart_data_with_indicators, additional_info)
+                elif chart_result is not None and len(chart_result) == 2:
+                    # 기존 방식 호환성 유지 (보조지표 없음)
+                    chart_path, stock_name = chart_result
+                    additional_info = {
+                        "chart_path": chart_path,
+                        "stock_name": stock_name
+                    }
                     return True, (hist, additional_info)
-                elif chart_result is not None:
-                    # 기존 방식 호환성 유지
-                    return True, hist
                 else:
                     print(f"   ❌ {stock_code}: 차트 생성 실패")
                     return False, None
@@ -255,8 +260,11 @@ def create_chart_fast(stock_code: str, chart_type_en: str) -> tuple[bool, object
             if hist is not None and not hist.empty:
                 module.analyze_monthly_stock_data(hist, stock_code)
                 chart_result = module.create_monthly_stock_chart(hist, stock_code)
-                if chart_result is not None:
-                    return True, hist
+                if chart_result is not None and len(chart_result) == 3:
+                    # chart_result = (filepath, chart_stock_name, df)
+                    filepath, chart_stock_name, chart_data = chart_result
+                    print(f"   ✅ {stock_code}: 월봉 차트 생성 완료 (차트데이터 포함)")
+                    return True, chart_data  # 기술적 지표가 포함된 차트 데이터 반환
                 else:
                     print(f"   ❌ {stock_code}: 월봉 차트 생성 실패")
                     return False, None
@@ -355,24 +363,78 @@ def run_ai_analysis_fast(stock_name: str, stock_code: str, chart_type: str, char
             additional_info["trading_type"] = trading_type
             print(f"✅ 거래타입 추가: {trading_type}")
         
+        # 차트 타입별 JSON 파일 경로 찾기
+        json_data_path = ""
+        json_dir = "chart_data_json"
+        
+        if os.path.exists(json_dir):
+            import glob
+            
+            if chart_type in ['주봉', 'weekly', 'week']:
+                # 주봉 JSON 파일 패턴: weekly_종목명_종목번호_날짜.json
+                json_pattern = f"weekly_*_{stock_code}_*.json"
+                json_files = glob.glob(os.path.join(json_dir, json_pattern))
+                
+                if json_files:
+                    # 최신 파일 선택 (파일명 기준)
+                    json_files.sort(reverse=True)
+                    json_data_path = json_files[0]
+                    print(f"✅ 주봉 JSON 파일 발견: {json_data_path}")
+                else:
+                    print(f"⚠️ 주봉 JSON 파일을 찾을 수 없음: {json_pattern}")
+                    
+            elif chart_type in ['일봉', 'daily', 'day']:
+                # 일봉 JSON 파일 패턴: daily_종목명_종목번호_날짜.json
+                json_pattern = f"daily_*_{stock_code}_*.json"
+                json_files = glob.glob(os.path.join(json_dir, json_pattern))
+                
+                if json_files:
+                    # 최신 파일 선택 (파일명 기준)
+                    json_files.sort(reverse=True)
+                    json_data_path = json_files[0]
+                    print(f"✅ 일봉 JSON 파일 발견: {json_data_path}")
+                else:
+                    print(f"⚠️ 일봉 JSON 파일을 찾을 수 없음: {json_pattern}")
+                    
+            elif chart_type in ['월봉', 'monthly', 'month']:
+                # 월봉 JSON 파일 패턴: monthly_종목명_종목번호_날짜.json
+                json_pattern = f"monthly_*_{stock_code}_*.json"
+                json_files = glob.glob(os.path.join(json_dir, json_pattern))
+                
+                if json_files:
+                    # 최신 파일 선택 (파일명 기준)
+                    json_files.sort(reverse=True)
+                    json_data_path = json_files[0]
+                    print(f"✅ 월봉 JSON 파일 발견: {json_data_path}")
+                else:
+                    print(f"⚠️ 월봉 JSON 파일을 찾을 수 없음: {json_pattern}")
+        else:
+            print(f"⚠️ JSON 폴더가 존재하지 않음: {json_dir}")
+        
         # 차트 데이터가 있는 경우 AI 분석에 전달
         if chart_data is not None:
             print(f"📊 차트 데이터 포함하여 분석")
             print(f"📊 additional_info: {additional_info}")
+            if json_data_path:
+                print(f"📊 JSON 데이터 포함: {json_data_path}")
             result = analyzer.analyze_chart_image(
                 image_path, 
                 final_stock_name, 
                 chart_type, 
                 chart_data=chart_data,
+                json_data_path=json_data_path,
                 additional_info=additional_info
             )
         else:
             print(f"📊 차트 데이터 없이 분석")
             print(f"📊 additional_info: {additional_info}")
+            if json_data_path:
+                print(f"📊 JSON 데이터 포함: {json_data_path}")
             result = analyzer.analyze_chart_image(
                 image_path, 
                 final_stock_name, 
                 chart_type, 
+                json_data_path=json_data_path,
                 additional_info=additional_info
             )
         

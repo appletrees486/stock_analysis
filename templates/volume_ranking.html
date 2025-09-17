@@ -431,22 +431,27 @@
             }
         }
         
-        // ISO 8601 주차 계산 함수 (통일된 표준)
+        // ISO 8601 주차 계산 함수 (Python WeekCalculator와 동일한 방식)
         function getISOWeek(date) {
             const d = new Date(date.getTime());
             d.setHours(0, 0, 0, 0);
             
-            // ISO 8601: 1월 4일이 속한 주의 월요일을 1주차로 계산
+            // Python의 isocalendar()와 동일한 로직
+            // 1. 1월 4일이 속한 주의 월요일을 1주차로 계산
             const jan4 = new Date(d.getFullYear(), 0, 4);
-            const jan4Day = jan4.getDay() || 7; // 일요일이면 7로 변환
-            const weekStart = new Date(jan4.getTime() - (jan4Day - 1) * 86400000);
+            const jan4Weekday = jan4.getDay(); // 0=일요일, 1=월요일, ..., 6=토요일
+            
+            // JavaScript getDay()를 Python weekday()로 변환: (js_weekday + 6) % 7
+            const pythonWeekday = (jan4Weekday + 6) % 7;
+            const firstWeekStart = new Date(jan4.getTime() - pythonWeekday * 24 * 60 * 60 * 1000);
             
             // 해당 날짜가 속한 주의 월요일 계산
-            const dayOfWeek = d.getDay() || 7;
-            const monday = new Date(d.getTime() - (dayOfWeek - 1) * 86400000);
+            const dayOfWeek = d.getDay();
+            const pythonDayOfWeek = (dayOfWeek + 6) % 7;
+            const monday = new Date(d.getTime() - pythonDayOfWeek * 24 * 60 * 60 * 1000);
             
             // 주차 계산
-            const weekNo = Math.floor((monday.getTime() - weekStart.getTime()) / (7 * 86400000)) + 1;
+            const weekNo = Math.floor((monday.getTime() - firstWeekStart.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
             
             return weekNo;
         }
@@ -496,13 +501,29 @@
                 apiUrl = `/api/volume-ranking/${currentPeriod}/${currentRankingType}?date=${dateValue}`;
             } else if (currentPeriod === 'weekly') {
                 dateValue = document.getElementById('weeklyDate').value;
+                console.log('🔍 선택된 주간 값 (원본):', dateValue);
+                console.log('🔍 값의 타입:', typeof dateValue);
+                console.log('🔍 값의 길이:', dateValue ? dateValue.length : 'null/undefined');
+                
                 if (!dateValue) {
                     showMessage('주를 선택해주세요.', 'error');
                     return;
                 }
-                // ISO week 형식을 주 시작일로 변환
-                const weekStart = getWeekStartFromISOWeek(dateValue);
-                apiUrl = `/api/volume-ranking/${currentPeriod}/${currentRankingType}?week_start=${weekStart}`;
+                
+                // 브라우저가 반환하는 형식 확인
+                if (dateValue.includes('-W')) {
+                    console.log('🔍 ISO week 형식 감지:', dateValue);
+                    // ISO week 형식을 주 시작일로 변환
+                    const weekStart = getWeekStartFromISOWeek(dateValue);
+                    console.log('🔍 변환된 주 시작일:', weekStart);
+                    apiUrl = `/api/volume-ranking/${currentPeriod}/${currentRankingType}?week_start=${weekStart}`;
+                } else {
+                    console.log('🔍 다른 형식 감지, 직접 사용:', dateValue);
+                    // 다른 형식인 경우 직접 사용 (예: 2025-09-07)
+                    apiUrl = `/api/volume-ranking/${currentPeriod}/${currentRankingType}?week_start=${dateValue}`;
+                }
+                
+                console.log('🔍 최종 API URL:', apiUrl);
             } else if (currentPeriod === 'monthly') {
                 dateValue = document.getElementById('monthlyDate').value;
                 if (!dateValue) {
@@ -715,21 +736,42 @@
             }, 5000);
         }
 
-        // ISO 8601 주차에서 주 시작일(월요일) 계산 (통일된 표준)
+        // ISO 8601 주차에서 주 시작일(월요일) 계산 (Python WeekCalculator와 정확히 동일한 방식)
         function getWeekStartFromISOWeek(isoWeek) {
+            console.log(`🚀 새로운 getWeekStartFromISOWeek 함수 실행: ${isoWeek}`);
+            
             const [year, week] = isoWeek.split('-W');
             const yearNum = parseInt(year);
             const weekNum = parseInt(week);
             
-            // ISO 8601: 1월 4일이 속한 주의 월요일을 1주차로 계산
-            const jan4 = new Date(yearNum, 0, 4);
-            const jan4Day = jan4.getDay() || 7; // 일요일이면 7로 변환
-            const firstWeekStart = new Date(jan4.getTime() - (jan4Day - 1) * 86400000);
+            console.log(`🔍 파싱된 연도: ${yearNum}, 주차: ${weekNum}`);
             
-            // 요청된 주차의 월요일 계산
-            const weekStart = new Date(firstWeekStart.getTime() + (weekNum - 1) * 7 * 86400000);
+            // Python WeekCalculator.get_week_start_date와 정확히 동일한 로직
+            // 1. 1월 4일 생성 (년, 월-1, 일)
+            const jan4 = new Date(yearNum, 0, 4); // 월은 0부터 시작
+            const jan4Weekday = jan4.getDay(); // 0=일요일, 1=월요일, ..., 6=토요일
             
-            return weekStart.toISOString().split('T')[0];
+            console.log(`🔍 1월 4일: ${jan4.getFullYear()}-${String(jan4.getMonth() + 1).padStart(2, '0')}-${String(jan4.getDate()).padStart(2, '0')} (요일: ${jan4Weekday})`);
+            
+            // 2. 1월 4일이 속한 주의 월요일 계산
+            // Python: week_start = jan4 - timedelta(days=jan4_weekday)
+            // JavaScript getDay(): 0=일요일, 1=월요일, ..., 6=토요일
+            // Python weekday(): 0=월요일, 1=화요일, ..., 6=일요일
+            // 올바른 변환: JavaScript getDay()를 Python weekday()로 변환
+            const pythonWeekday = jan4Weekday === 0 ? 6 : jan4Weekday - 1;
+            console.log(`🔍 변환된 Python weekday: ${pythonWeekday}`);
+            const firstWeekStart = new Date(jan4.getTime() - pythonWeekday * 24 * 60 * 60 * 1000);
+            
+            console.log(`🔍 첫 주 시작일: ${firstWeekStart.getFullYear()}-${String(firstWeekStart.getMonth() + 1).padStart(2, '0')}-${String(firstWeekStart.getDate()).padStart(2, '0')}`);
+            
+            // 3. 요청된 주차의 월요일 계산
+            // Python: target_week_start = week_start + timedelta(weeks=week - 1)
+            const weekStart = new Date(firstWeekStart.getTime() + (weekNum - 1) * 7 * 24 * 60 * 60 * 1000);
+            
+            const result = `${weekStart.getFullYear()}-${String(weekStart.getMonth() + 1).padStart(2, '0')}-${String(weekStart.getDate()).padStart(2, '0')}`;
+            console.log(`🔍 최종 계산 결과: ${result}`);
+            
+            return result;
         }
 
         // 종목 코드 리스트 다운로드

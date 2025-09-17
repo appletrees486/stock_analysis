@@ -139,15 +139,24 @@ class RankingCalculator:
                 logger.error("DB 연결 실패")
                 return []
             
-            # 캐시 확인
+            # 캐시 확인 (필드명 변경으로 인해 캐시 무시)
             cache_key = f"{chart_type}_{trading_type}_{target_date}_{limit}"
-            if cache_key in self._cache:
-                cache_data = self._cache[cache_key]
-                if datetime.now().timestamp() - cache_data['timestamp'] < self._cache_ttl:
-                    return cache_data['data']
+            # 캐시 무시하고 항상 새로 생성
+            # if cache_key in self._cache:
+            #     cache_data = self._cache[cache_key]
+            #     if datetime.now().timestamp() - cache_data['timestamp'] < self._cache_ttl:
+            #         return cache_data['data']
+            
+            # 캐시 완전 초기화
+            self._cache.clear()
+            print(f"🔍 캐시 초기화 완료")
             
             # 시점별 쿼리 생성
             query, params = self._build_ranking_list_query(target_date, chart_type, trading_type, limit)
+            
+            # 디버깅: 쿼리와 파라미터 출력
+            print(f"🔍 쿼리: {query}")
+            print(f"🔍 파라미터: {params}")
             
             # 순위 리스트 조회
             results = db.fetch_all(query, params)
@@ -161,23 +170,23 @@ class RankingCalculator:
                     'stock_name': row['stock_name'],
                     'market_type': row['market_type'],
                     'volume': row['volume'],
-                    'transaction_amount': row.get('transaction_amount', 0),
+                    'trading_value': row.get('transaction_amount', 0),  # trading_value로 변경
                     'turnover_rate': row.get('turnover_rate', 0),
                     'outstanding_shares': row.get('outstanding_shares', 0),
                     'ranking': row.get('ranking', 0)
                 })
             
-            # 랭킹 타입에 따른 추가 정렬 (안전장치)
-            if trading_type == "거래율":
-                formatted_results.sort(key=lambda x: x.get('turnover_rate', 0) or 0, reverse=True)
-                # 정렬 후 순위 재할당
-                for i, item in enumerate(formatted_results):
-                    item['ranking'] = i + 1
-            elif trading_type == "거래대금":
-                formatted_results.sort(key=lambda x: x.get('transaction_amount', 0) or 0, reverse=True)
-                # 정렬 후 순위 재할당
-                for i, item in enumerate(formatted_results):
-                    item['ranking'] = i + 1
+            # # 랭킹 타입에 따른 추가 정렬 (안전장치) - 주석처리
+            # if trading_type == "거래율":
+            #     formatted_results.sort(key=lambda x: x.get('turnover_rate', 0) or 0, reverse=True)
+            #     # 정렬 후 순위 재할당
+            #     for i, item in enumerate(formatted_results):
+            #         item['ranking'] = i + 1
+            # elif trading_type == "거래대금":
+            #     formatted_results.sort(key=lambda x: x.get('transaction_amount', 0) or 0, reverse=True)
+            #     # 정렬 후 순위 재할당
+            #     for i, item in enumerate(formatted_results):
+            #         item['ranking'] = i + 1
             
             # 캐시 저장
             self._cache[cache_key] = {
