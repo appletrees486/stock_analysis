@@ -47,12 +47,16 @@ class StockDataCollector:
         self.db = DatabaseManager()
         self.market_detector = MarketStatusDetector()  # 시장 상태 감지기
         self.data_validator = EnhancedDataValidator()  # 데이터 검증기
-        self.batch_size = 100  # 배치 크기를 100으로 조정 (DB 연결 안정성)
-        self.delay_between_requests = 0.1  # 요청 간 딜레이 최적화 (0.3초 → 0.1초)
+        self.batch_size = 150  # 배치 크기를 150으로 증가 (속도 개선)
+        self.delay_between_requests = 0.05  # 요청 간 딜레이 최적화 (0.1초 → 0.05초)
         self.max_retries = 3  # 최대 재시도 횟수
         self.max_workers = 5  # 병렬 처리 워커 수를 5로 조정 (DB 연결 안정성)
         self.batch_delay = 2  # 배치 간 딜레이 감소 (10초 → 2초)
         self._db_lock = threading.Lock()  # DB 연결 동기화용 락
+        
+        # 유통주식수 배치 조회 최적화를 위한 캐시
+        self._shares_cache = {}  # {stock_code: {'total_shares': int, 'market_cap': float}}
+        self._shares_cache_date = None  # 캐시 생성 날짜
         
         # 진행률 업데이트 콜백 함수
         self.progress_callback = None
@@ -535,38 +539,53 @@ class StockDataCollector:
             return None
     
     def get_stock_data_pykrx(self, stock_code, stock_name, years=10):
-        """PyKrx를 사용한 주식 데이터 조회 (성능 최적화)"""
+        """PyKrx를 사용한 주식 데이터 조회 (성능 최적화) - 거래대금 포함"""
         try:
-            logging.info(f"📊 {stock_code} ({stock_name}) PyKrx로 {years}년치 데이터 조회 중...")
+            logging.info(f"📊 {stock_code} ({stock_name}) PyKrx로 {years}년치 데이터 조회 중... (거래대금 포함)")
             
             # 종료일 (오늘)
             end_date = datetime.now()
             # 시작일 (years년 전 해당 월의 1일)
             start_date = datetime(end_date.year - years, end_date.month, 1)
             
-            # PyKrx로 데이터 조회 (최적화된 방식)
+            # PyKrx로 데이터 조회 (거래대금 포함 - adjusted=False 옵션 사용)
             try:
-                # 1차 시도: 개별 종목 데이터 조회 (가장 빠름)
+                # 1차 시도: 개별 종목 데이터 조회 (거래대금 포함)
                 hist = stock.get_market_ohlcv_by_date(
                     fromdate=start_date.strftime('%Y%m%d'),
                     todate=end_date.strftime('%Y%m%d'),
-                    ticker=stock_code
+                    ticker=stock_code,
+                    adjusted=False  # 거래대금 포함을 위해 False로 설정
                 )
                 
                 if not hist.empty:
-                    # PyKrx 응답 구조에 맞춰 컬럼명 매핑 (6개 컬럼: 시가, 고가, 저가, 종가, 거래량, 등락률)
-                    if len(hist.columns) == 6:
-                        # 6개 컬럼인 경우: 시가, 고가, 저가, 종가, 거래량, 등락률
+                    # PyKrx 응답 구조에 맞춰 컬럼명 매핑 (7개 컬럼: 시가, 고가, 저가, 종가, 거래량, 거래대금, 등락률)
+                    if len(hist.columns) == 7:
+                        # 7개 컬럼인 경우: 시가, 고가, 저가, 종가, 거래량, 거래대금, 등락률
+                        hist.columns = ['Open', 'High', 'Low', 'Close', 'Volume', 'Trading_Value', 'Change_Rate']
+                        # 등락률 컬럼 제거 (기존 로직과 호환)
+                        hist = hist.drop('Change_Rate', axis=1)
+                    elif len(hist.columns) == 6:
+                        # 6개 컬럼인 경우: 시가, 고가, 저가, 종가, 거래량, 등락률 (거래대금 없음)
                         hist.columns = ['Open', 'High', 'Low', 'Close', 'Volume', 'Change_Rate']
                         # 등락률 컬럼 제거 (기존 로직과 호환)
                         hist = hist.drop('Change_Rate', axis=1)
+                        # 거래대금 계산 (거래량 × 종가)
+                        hist['Trading_Value'] = hist['Volume'] * hist['Close']
+                        logging.info(f"📊 {stock_code}: 거래대금 계산 완료 (거래량 × 종가)")
                     elif len(hist.columns) == 5:
                         # 5개 컬럼인 경우: 기존 방식 유지
                         hist.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+                        # 거래대금 계산 (거래량 × 종가)
+                        hist['Trading_Value'] = hist['Volume'] * hist['Close']
+                        logging.info(f"📊 {stock_code}: 거래대금 계산 완료 (거래량 × 종가)")
                     else:
                         logging.warning(f"⚠️ {stock_code}: 예상치 못한 컬럼 수 ({len(hist.columns)})")
                         # 기본 컬럼명으로 설정
                         hist.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+                        # 거래대금 계산 (거래량 × 종가)
+                        hist['Trading_Value'] = hist['Volume'] * hist['Close']
+                        logging.info(f"📊 {stock_code}: 거래대금 계산 완료 (거래량 × 종가)")
                     
                     logging.info(f"✅ {stock_code} ({stock_name}): PyKrx로 {len(hist)}일의 일봉 데이터 조회 완료")
                     logging.info(f"📅 기간: {hist.index[0].strftime('%Y-%m-%d')} ~ {hist.index[-1].strftime('%Y-%m-%d')}")
@@ -585,18 +604,31 @@ class StockDataCollector:
                 market_data = stock.get_market_ohlcv_by_date(
                     fromdate=start_date.strftime('%Y%m%d'),
                     todate=end_date.strftime('%Y%m%d'),
-                    ticker=stock_code
+                    ticker=stock_code,
+                    adjusted=False  # 거래대금 포함을 위해 False로 설정
                 )
                 
                 if not market_data.empty:
-                    # PyKrx 응답 구조에 맞춰 컬럼명 매핑
-                    if len(market_data.columns) == 6:
+                    # PyKrx 응답 구조에 맞춰 컬럼명 매핑 (거래대금 포함)
+                    if len(market_data.columns) == 7:
+                        market_data.columns = ['Open', 'High', 'Low', 'Close', 'Volume', 'Trading_Value', 'Change_Rate']
+                        market_data = market_data.drop('Change_Rate', axis=1)
+                    elif len(market_data.columns) == 6:
                         market_data.columns = ['Open', 'High', 'Low', 'Close', 'Volume', 'Change_Rate']
                         market_data = market_data.drop('Change_Rate', axis=1)
+                        # 거래대금 계산 (거래량 × 종가)
+                        market_data['Trading_Value'] = market_data['Volume'] * market_data['Close']
+                        logging.info(f"📊 {stock_code}: 거래대금 계산 완료 (거래량 × 종가)")
                     elif len(market_data.columns) == 5:
                         market_data.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+                        # 거래대금 계산 (거래량 × 종가)
+                        market_data['Trading_Value'] = market_data['Volume'] * market_data['Close']
+                        logging.info(f"📊 {stock_code}: 거래대금 계산 완료 (거래량 × 종가)")
                     else:
                         market_data.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+                        # 거래대금 계산 (거래량 × 종가)
+                        market_data['Trading_Value'] = market_data['Volume'] * market_data['Close']
+                        logging.info(f"📊 {stock_code}: 거래대금 계산 완료 (거래량 × 종가)")
                     
                     logging.info(f"✅ {stock_code} ({stock_name}): 개별 종목 데이터 재시도 성공")
                     return market_data
@@ -618,18 +650,31 @@ class StockDataCollector:
                         hist = stock.get_market_ohlcv_by_date(
                             fromdate=period_start.strftime('%Y%m%d'),
                             todate=end_date.strftime('%Y%m%d'),
-                            ticker=stock_code
+                            ticker=stock_code,
+                            adjusted=False  # 거래대금 포함을 위해 False로 설정
                         )
                         
                         if not hist.empty:
-                            # PyKrx 응답 구조에 맞춰 컬럼명 매핑
-                            if len(hist.columns) == 6:
+                            # PyKrx 응답 구조에 맞춰 컬럼명 매핑 (거래대금 포함)
+                            if len(hist.columns) == 7:
+                                hist.columns = ['Open', 'High', 'Low', 'Close', 'Volume', 'Trading_Value', 'Change_Rate']
+                                hist = hist.drop('Change_Rate', axis=1)
+                            elif len(hist.columns) == 6:
                                 hist.columns = ['Open', 'High', 'Low', 'Close', 'Volume', 'Change_Rate']
                                 hist = hist.drop('Change_Rate', axis=1)
+                                # 거래대금 계산 (거래량 × 종가)
+                                hist['Trading_Value'] = hist['Volume'] * hist['Close']
+                                logging.info(f"📊 {stock_code}: 거래대금 계산 완료 (거래량 × 종가)")
                             elif len(hist.columns) == 5:
                                 hist.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+                                # 거래대금 계산 (거래량 × 종가)
+                                hist['Trading_Value'] = hist['Volume'] * hist['Close']
+                                logging.info(f"📊 {stock_code}: 거래대금 계산 완료 (거래량 × 종가)")
                             else:
                                 hist.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+                                # 거래대금 계산 (거래량 × 종가)
+                                hist['Trading_Value'] = hist['Volume'] * hist['Close']
+                                logging.info(f"📊 {stock_code}: 거래대금 계산 완료 (거래량 × 종가)")
                             
                             logging.info(f"✅ {stock_code} ({stock_name}): {period_months}개월 데이터로 성공")
                             return hist
@@ -648,14 +693,14 @@ class StockDataCollector:
             return None
     
     def get_incremental_data_pykrx(self, stock_code, stock_name, start_date):
-        """PyKrx를 사용한 증분 데이터 조회 (성능 최적화)"""
+        """PyKrx를 사용한 증분 데이터 조회 (성능 최적화) - 거래대금 포함"""
         try:
-            logging.info(f"🔄 {stock_code} ({stock_name}) PyKrx로 증분 데이터 조회 중... (시작일: {start_date})")
+            logging.info(f"🔄 {stock_code} ({stock_name}) PyKrx로 증분 데이터 조회 중... (시작일: {start_date}, 거래대금 포함)")
             
             # 종료일 (오늘)
             end_date = datetime.now()
             
-            # PyKrx로 증분 데이터 조회 (최적화된 방식)
+            # PyKrx로 증분 데이터 조회 (거래대금 포함 - adjusted=False 옵션 사용)
             try:
                 # 1차 시도: 개별 종목 조회
                 # start_date가 문자열인 경우 datetime으로 변환
@@ -667,18 +712,31 @@ class StockDataCollector:
                 hist = stock.get_market_ohlcv_by_date(
                     fromdate=start_date_obj.strftime('%Y%m%d'),
                     todate=end_date.strftime('%Y%m%d'),
-                    ticker=stock_code
+                    ticker=stock_code,
+                    adjusted=False  # 거래대금 포함을 위해 False로 설정
                 )
                 
                 if not hist.empty:
-                    # PyKrx 응답 구조에 맞춰 컬럼명 매핑
-                    if len(hist.columns) == 6:
+                    # PyKrx 응답 구조에 맞춰 컬럼명 매핑 (거래대금 포함)
+                    if len(hist.columns) == 7:
+                        hist.columns = ['Open', 'High', 'Low', 'Close', 'Volume', 'Trading_Value', 'Change_Rate']
+                        hist = hist.drop('Change_Rate', axis=1)
+                    elif len(hist.columns) == 6:
                         hist.columns = ['Open', 'High', 'Low', 'Close', 'Volume', 'Change_Rate']
                         hist = hist.drop('Change_Rate', axis=1)
+                        # 거래대금 계산 (거래량 × 종가)
+                        hist['Trading_Value'] = hist['Volume'] * hist['Close']
+                        logging.info(f"📊 {stock_code}: 거래대금 계산 완료 (거래량 × 종가)")
                     elif len(hist.columns) == 5:
                         hist.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+                        # 거래대금 계산 (거래량 × 종가)
+                        hist['Trading_Value'] = hist['Volume'] * hist['Close']
+                        logging.info(f"📊 {stock_code}: 거래대금 계산 완료 (거래량 × 종가)")
                     else:
                         hist.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+                        # 거래대금 계산 (거래량 × 종가)
+                        hist['Trading_Value'] = hist['Volume'] * hist['Close']
+                        logging.info(f"📊 {stock_code}: 거래대금 계산 완료 (거래량 × 종가)")
                     
                     logging.info(f"✅ {stock_code} ({stock_name}): PyKrx로 {len(hist)}일의 증분 데이터 조회 완료")
                     logging.info(f"📅 기간: {hist.index[0].strftime('%Y-%m-%d')} ~ {hist.index[-1].strftime('%Y-%m-%d')}")
@@ -697,18 +755,31 @@ class StockDataCollector:
                 market_data = stock.get_market_ohlcv_by_date(
                     fromdate=start_date_obj.strftime('%Y%m%d'),
                     todate=end_date.strftime('%Y%m%d'),
-                    ticker=stock_code
+                    ticker=stock_code,
+                    adjusted=False  # 거래대금 포함을 위해 False로 설정
                 )
                 
                 if not market_data.empty:
-                    # PyKrx 응답 구조에 맞춰 컬럼명 매핑
-                    if len(market_data.columns) == 6:
+                    # PyKrx 응답 구조에 맞춰 컬럼명 매핑 (거래대금 포함)
+                    if len(market_data.columns) == 7:
+                        market_data.columns = ['Open', 'High', 'Low', 'Close', 'Volume', 'Trading_Value', 'Change_Rate']
+                        market_data = market_data.drop('Change_Rate', axis=1)
+                    elif len(market_data.columns) == 6:
                         market_data.columns = ['Open', 'High', 'Low', 'Close', 'Volume', 'Change_Rate']
                         market_data = market_data.drop('Change_Rate', axis=1)
+                        # 거래대금 계산 (거래량 × 종가)
+                        market_data['Trading_Value'] = market_data['Volume'] * market_data['Close']
+                        logging.info(f"📊 {stock_code}: 거래대금 계산 완료 (거래량 × 종가)")
                     elif len(market_data.columns) == 5:
                         market_data.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+                        # 거래대금 계산 (거래량 × 종가)
+                        market_data['Trading_Value'] = market_data['Volume'] * market_data['Close']
+                        logging.info(f"📊 {stock_code}: 거래대금 계산 완료 (거래량 × 종가)")
                     else:
                         market_data.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+                        # 거래대금 계산 (거래량 × 종가)
+                        market_data['Trading_Value'] = market_data['Volume'] * market_data['Close']
+                        logging.info(f"📊 {stock_code}: 거래대금 계산 완료 (거래량 × 종가)")
                     
                     logging.info(f"✅ {stock_code} ({stock_name}): 개별 종목 증분 데이터 재시도 성공")
                     return market_data
@@ -753,27 +824,123 @@ class StockDataCollector:
             else:
                 return 'KOSPI'
     
+    def load_shares_cache_from_pykrx(self) -> bool:
+        """PyKrx에서 전체 시장 유통주식수 데이터를 한 번에 로드하여 캐시에 저장"""
+        try:
+            if not PYKRX_AVAILABLE:
+                logging.error("❌ PyKrx 라이브러리가 설치되지 않았습니다.")
+                return False
+            
+            # 오늘 날짜
+            today = datetime.now().strftime('%Y%m%d')
+            
+            # 캐시가 이미 오늘 날짜로 로드되어 있으면 재사용
+            if self._shares_cache_date == today and self._shares_cache:
+                logging.info(f"✅ 유통주식수 캐시가 이미 로드되어 있습니다. ({len(self._shares_cache)}개 종목)")
+                return True
+            
+            logging.info(f"🚀 PyKrx에서 전체 시장 유통주식수 데이터 로드 중... (날짜: {today})")
+            start_time = time.time()
+            
+            # PyKrx에서 전체 시장 데이터 한 번에 조회
+            cap_data = stock.get_market_cap(today)
+            
+            if cap_data.empty:
+                logging.error("❌ PyKrx에서 전체 시장 데이터를 가져올 수 없습니다.")
+                return False
+            
+            # 캐시 초기화
+            self._shares_cache = {}
+            
+            # 모든 종목의 유통주식수 데이터를 캐시에 저장
+            for stock_code in cap_data.index:
+                try:
+                    row = cap_data.loc[stock_code]
+                    total_shares = int(row.get('상장주식수', 0))
+                    market_cap = float(row.get('시가총액', 0))
+                    
+                    if total_shares > 0:
+                        self._shares_cache[stock_code] = {
+                            'total_shares': total_shares,
+                            'market_cap': market_cap
+                        }
+                except Exception as e:
+                    logging.warning(f"⚠️ {stock_code} 캐시 저장 중 오류: {e}")
+                    continue
+            
+            # 캐시 날짜 업데이트
+            self._shares_cache_date = today
+            
+            load_time = time.time() - start_time
+            logging.info(f"✅ 유통주식수 캐시 로드 완료! ({len(self._shares_cache)}개 종목, {load_time:.2f}초)")
+            
+            return True
+            
+        except Exception as e:
+            logging.error(f"❌ 유통주식수 캐시 로드 중 오류: {e}")
+            return False
+    
     def get_stock_shares_info_from_pykrx(self, stock_code: str, market_type: str) -> Optional[Dict[str, Any]]:
-        """PyKrx에서 주식의 유통주식수 정보 조회 (성능 최적화)"""
+        """PyKrx에서 주식의 유통주식수 정보 조회 (배치 최적화 버전)"""
         try:
             if not PYKRX_AVAILABLE:
                 logging.error("❌ PyKrx 라이브러리가 설치되지 않았습니다.")
                 return None
             
-            logging.info(f"🔍 {stock_code} ({market_type}) PyKrx로 유통주식수 조회 중...")
+            # 1차 시도: 캐시에서 조회 (가장 빠름)
+            if stock_code in self._shares_cache:
+                cache_data = self._shares_cache[stock_code]
+                stock_data = {
+                    'stock_code': stock_code,
+                    'total_shares': cache_data['total_shares'],
+                    'market_cap': cache_data['market_cap'],
+                    'last_updated': datetime.now()
+                }
+                logging.debug(f"✅ {stock_code}: 캐시에서 유통주식수 {cache_data['total_shares']:,}주 조회")
+                return stock_data
+            
+            # 2차 시도: 캐시가 비어있으면 전체 시장 데이터 로드
+            if not self._shares_cache:
+                logging.info(f"🔄 {stock_code}: 캐시가 비어있어 전체 시장 데이터 로드 중...")
+                if not self.load_shares_cache_from_pykrx():
+                    logging.warning(f"⚠️ {stock_code}: 전체 시장 데이터 로드 실패")
+                    return None
+                
+                # 다시 캐시에서 조회 시도
+                if stock_code in self._shares_cache:
+                    cache_data = self._shares_cache[stock_code]
+                    stock_data = {
+                        'stock_code': stock_code,
+                        'total_shares': cache_data['total_shares'],
+                        'market_cap': cache_data['market_cap'],
+                        'last_updated': datetime.now()
+                    }
+                    logging.debug(f"✅ {stock_code}: 전체 로드 후 캐시에서 유통주식수 {cache_data['total_shares']:,}주 조회")
+                    return stock_data
+            
+            # 3차 시도: 개별 조회 (fallback)
+            logging.warning(f"⚠️ {stock_code}: 캐시에 없어 개별 조회 시도...")
+            return self._get_stock_shares_info_individual(stock_code, market_type)
+                
+        except Exception as e:
+            logging.error(f"❌ {stock_code} PyKrx 유통주식수 조회 중 오류: {e}")
+            return None
+    
+    def _get_stock_shares_info_individual(self, stock_code: str, market_type: str) -> Optional[Dict[str, Any]]:
+        """개별 종목 유통주식수 조회 (fallback용)"""
+        try:
+            logging.debug(f"🔍 {stock_code} ({market_type}) PyKrx로 개별 유통주식수 조회 중...")
             
             # 오늘 날짜
             today = datetime.now().strftime('%Y%m%d')
             
-            # 1차 시도: 지정된 시장에서 조회 (PyKrx 버전 호환성 고려)
+            # 1차 시도: 지정된 시장에서 조회
             try:
-                # PyKrx 버전 호환성을 위해 market 파라미터 없이 시도
                 cap_data = stock.get_market_cap(today)
                 
                 if not cap_data.empty and stock_code in cap_data.index:
                     row = cap_data.loc[stock_code]
                     
-                    # 필요한 정보 추출
                     total_shares = int(row.get('상장주식수', 0))
                     market_cap = float(row.get('시가총액', 0))
                     
@@ -785,74 +952,19 @@ class StockDataCollector:
                             'last_updated': datetime.now()
                         }
                         
-                        logging.info(f"✅ {stock_code}: PyKrx로 유통주식수 {total_shares:,}주, 시가총액 {market_cap:,}")
+                        logging.debug(f"✅ {stock_code}: 개별 조회로 유통주식수 {total_shares:,}주, 시가총액 {market_cap:,}")
                         return stock_data
                     else:
                         logging.warning(f"⚠️ {stock_code}: PyKrx에서 유통주식수가 0입니다")
                         
             except Exception as e:
-                logging.warning(f"⚠️ {stock_code}: 지정 시장({market_type}) 조회 실패: {e}")
+                logging.warning(f"⚠️ {stock_code}: 개별 조회 실패: {e}")
             
-            # 2차 시도: 다른 시장에서 조회 (시장 구분이 잘못된 경우)
-            try:
-                alternative_market = 'KOSDAQ' if market_type == 'KOSPI' else 'KOSPI'
-                logging.info(f"🔄 {stock_code}: 대안 시장({alternative_market})에서 조회 시도...")
-                
-                # PyKrx 버전 호환성을 위해 market 파라미터 없이 시도
-                cap_data = stock.get_market_cap(today)
-                
-                if not cap_data.empty and stock_code in cap_data.index:
-                    row = cap_data.loc[stock_code]
-                    
-                    total_shares = int(row.get('상장주식수', 0))
-                    market_cap = float(row.get('시가총액', 0))
-                    
-                    if total_shares > 0:
-                        stock_data = {
-                            'stock_code': stock_code,
-                            'total_shares': total_shares,
-                            'market_cap': market_cap,
-                            'last_updated': datetime.now()
-                        }
-                        
-                        logging.info(f"✅ {stock_code}: 대안 시장({alternative_market})에서 유통주식수 {total_shares:,}주, 시가총액 {market_cap:,}")
-                        return stock_data
-                        
-            except Exception as e2:
-                logging.warning(f"⚠️ {stock_code}: 대안 시장 조회 실패: {e2}")
-            
-            # 3차 시도: 전체 시장에서 조회
-            try:
-                logging.info(f"🔄 {stock_code}: 전체 시장에서 조회 시도...")
-                
-                # PyKrx 버전 호환성을 위해 market 파라미터 없이 시도
-                cap_data = stock.get_market_cap(today)
-                
-                if not cap_data.empty and stock_code in cap_data.index:
-                    row = cap_data.loc[stock_code]
-                    
-                    total_shares = int(row.get('상장주식수', 0))
-                    market_cap = float(row.get('시가총액', 0))
-                    
-                    if total_shares > 0:
-                        stock_data = {
-                            'stock_code': stock_code,
-                            'total_shares': total_shares,
-                            'market_cap': market_cap,
-                            'last_updated': datetime.now()
-                        }
-                        
-                        logging.info(f"✅ {stock_code}: 전체 시장 조회로 유통주식수 {total_shares:,}주, 시가총액 {market_cap:,}")
-                        return stock_data
-                        
-            except Exception as e4:
-                logging.error(f"❌ {stock_code}: 전체 시장 조회 실패: {e4}")
-            
-            logging.warning(f"⚠️ {stock_code}: 모든 PyKrx 방법으로 유통주식수 조회 실패")
+            logging.warning(f"⚠️ {stock_code}: 모든 개별 조회 방법 실패")
             return None
                 
         except Exception as e:
-            logging.error(f"❌ {stock_code} PyKrx 유통주식수 조회 중 오류: {e}")
+            logging.error(f"❌ {stock_code} 개별 유통주식수 조회 중 오류: {e}")
             return None
     
     def save_daily_data(self, stock_code, hist_data):
@@ -876,14 +988,14 @@ class StockDataCollector:
             total_shares = shares_info.get('total_shares', 0) if shares_info else 0
             market_cap = shares_info.get('market_cap', 0) if shares_info else 0
             
-            # 일봉 데이터 삽입
+            # 일봉 데이터 삽입 (거래대금 포함)
             daily_insert_sql = """
             INSERT INTO daily_data 
-            (stock_code, trade_date, open, high, low, close, volume, outstanding_shares, market_cap)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (stock_code, trade_date, open, high, low, close, volume, trading_value, outstanding_shares, market_cap)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
             open = VALUES(open), high = VALUES(high), low = VALUES(low), 
-            close = VALUES(close), volume = VALUES(volume), 
+            close = VALUES(close), volume = VALUES(volume), trading_value = VALUES(trading_value),
             outstanding_shares = VALUES(outstanding_shares), market_cap = VALUES(market_cap),
             updated_at = CURRENT_TIMESTAMP
             """
@@ -898,11 +1010,22 @@ class StockDataCollector:
                 low_price = row['Low'] if pd.notna(row['Low']) else None
                 close_price = row['Close'] if pd.notna(row['Close']) else None
                 volume = row['Volume'] if pd.notna(row['Volume']) else 0
+                trading_value = row['Trading_Value'] if pd.notna(row['Trading_Value']) else None
                 
                 # None 값이 있으면 해당 행 건너뛰기
                 if open_price is None or high_price is None or low_price is None or close_price is None:
                     logging.warning(f"⚠️ {stock_code} {date.strftime('%Y-%m-%d')}: NaN 값이 있어 건너뜀")
                     continue
+                
+                # 거래대금이 없으면 계산 (Typical Price 방식: (H+L+C)/3 × V)
+                if trading_value is None and close_price and volume and high_price and low_price:
+                    typical_price = (high_price + low_price + close_price) / 3
+                    trading_value = int(volume * typical_price)
+                    logging.info(f"📊 {stock_code} {date.strftime('%Y-%m-%d')}: 거래대금 계산 완료 (Typical Price 방식: {trading_value:,}원)")
+                elif trading_value is None and close_price and volume:
+                    # Typical Price 계산이 불가능한 경우에만 Close Price 사용
+                    trading_value = int(volume * close_price)
+                    logging.info(f"📊 {stock_code} {date.strftime('%Y-%m-%d')}: 거래대금 계산 완료 (Close Price 방식: {trading_value:,}원)")
                 
                 # 유통주식수와 시가총액 검증 및 보정
                 if total_shares and total_shares > 0:
@@ -930,6 +1053,7 @@ class StockDataCollector:
                     float(low_price),
                     float(close_price),
                     int(volume),
+                    int(trading_value) if trading_value else None,
                     total_shares,
                     market_cap
                 ))
@@ -1181,7 +1305,7 @@ class StockDataCollector:
                     failed_count += 1
                 
                 # API 호출 간격 조절 (랜덤 딜레이로 API 제한 방지)
-                delay = self.delay_between_requests + random.uniform(0.1, 0.5)
+                delay = self.delay_between_requests + random.uniform(0.02, 0.1)
                 time.sleep(delay)
                 
             except Exception as e:
@@ -1230,6 +1354,14 @@ class StockDataCollector:
             logging.error(f"❌ 배치 {batch_num} DB 연결 실패")
             return 0, len(stock_batch)
         
+        # 🚀 유통주식수 캐시 미리 로드 (배치 최적화)
+        if batch_num == 1:  # 첫 번째 배치에서만 캐시 로드
+            logging.info(f"🚀 배치 {batch_num}: 유통주식수 캐시 미리 로드 중...")
+            if self.load_shares_cache_from_pykrx():
+                logging.info(f"✅ 배치 {batch_num}: 유통주식수 캐시 로드 완료! (이제 모든 종목이 0.1초 내에 조회됩니다)")
+            else:
+                logging.warning(f"⚠️ 배치 {batch_num}: 유통주식수 캐시 로드 실패 - 개별 조회로 fallback")
+        
         try:
             logging.info(f"🔄 배치 {batch_num} 처리 시작 - 전체 try-catch 블록 진입")
             success_count = 0
@@ -1248,10 +1380,11 @@ class StockDataCollector:
             logging.info(f"🔄 배치 {batch_num} 종목 처리 루프 시작 - {len(stock_batch)}개 종목 처리 예정")
             
             for i, (stock_code, stock_name) in enumerate(stock_batch, 1):
-                # 매 10개 종목마다 상세 로그 출력
+                # 10개 종목마다만 상세 로그 출력
                 if i % 10 == 0 or i == 1:
                     logging.info(f"🔄 배치 {batch_num} [{i}/{len(stock_batch)}] 처리 중 - 현재 종목: {stock_code} ({stock_name})")
-                logging.info(f"📊 [{i}/{len(stock_batch)}] {stock_code} ({stock_name}) 데이터 수집 중...")
+                else:
+                    logging.debug(f"📊 [{i}/{len(stock_batch)}] {stock_code} ({stock_name}) 데이터 수집 중...")
                 
                 try:
                     # 상장폐지/비활성 종목 체크 (간단한 필터링)
@@ -1275,7 +1408,11 @@ class StockDataCollector:
                             batch_technical_data.extend(technical_data)
                             batch_status_data.append(status_data)
                             success_count += 1
-                            logging.info(f"✅ {stock_code} ({stock_name}) 데이터 준비 완료 ({len(daily_data)}일)")
+                            # 10개 종목마다만 성공 로그 출력
+                            if i % 10 == 0 or i == 1:
+                                logging.info(f"✅ {stock_code} ({stock_name}) 데이터 준비 완료 ({len(daily_data)}일)")
+                            else:
+                                logging.debug(f"✅ {stock_code} ({stock_name}) 데이터 준비 완료 ({len(daily_data)}일)")
                             
                             # 유통주식수는 save_daily_data에서 이미 통합 처리됨 (중복 로직 제거)
                         else:
@@ -1283,14 +1420,17 @@ class StockDataCollector:
                             logging.error(f"❌ {stock_code} ({stock_name}) 데이터 준비 실패 (빈 데이터)")
                     elif hist_data is None:
                         # 이미 최신 데이터이거나 데이터가 없는 경우
-                        logging.info(f"✅ {stock_code} ({stock_name}) 이미 최신 데이터이거나 수집할 데이터가 없습니다.")
+                        if i % 10 == 0 or i == 1:
+                            logging.info(f"✅ {stock_code} ({stock_name}) 이미 최신 데이터이거나 수집할 데이터가 없습니다.")
+                        else:
+                            logging.debug(f"✅ {stock_code} ({stock_name}) 이미 최신 데이터이거나 수집할 데이터가 없습니다.")
                         success_count += 1
                     else:
                         logging.warning(f"❌ {stock_code} ({stock_name}) 데이터 조회 실패")
                         failed_count += 1
                     
                     # API 호출 간격 조절 (랜덤 딜레이로 API 제한 방지)
-                    delay = self.delay_between_requests + random.uniform(0.05, 0.2)
+                    delay = self.delay_between_requests + random.uniform(0.02, 0.1)
                     time.sleep(delay)
                     
                     # DB 연결 상태 주기적 확인 (10개 종목마다)
@@ -1431,11 +1571,22 @@ class StockDataCollector:
                 low_price = row['Low'] if pd.notna(row['Low']) else None
                 close_price = row['Close'] if pd.notna(row['Close']) else None
                 volume = row['Volume'] if pd.notna(row['Volume']) else 0
+                trading_value = row['Trading_Value'] if pd.notna(row['Trading_Value']) else None
                 
                 # None 값이 있으면 해당 행 건너뛰기
                 if open_price is None or high_price is None or low_price is None or close_price is None:
                     logging.warning(f"⚠️ {stock_code} {date.strftime('%Y-%m-%d')}: NaN 값이 있어 건너뜀")
                     continue
+                
+                # 거래대금이 없으면 계산 (Typical Price 방식: (H+L+C)/3 × V)
+                if trading_value is None and close_price and volume and high_price and low_price:
+                    typical_price = (high_price + low_price + close_price) / 3
+                    trading_value = int(volume * typical_price)
+                    logging.info(f"📊 {stock_code} {date.strftime('%Y-%m-%d')}: 거래대금 계산 완료 (Typical Price 방식: {trading_value:,}원)")
+                elif trading_value is None and close_price and volume:
+                    # Typical Price 계산이 불가능한 경우에만 Close Price 사용
+                    trading_value = int(volume * close_price)
+                    logging.info(f"📊 {stock_code} {date.strftime('%Y-%m-%d')}: 거래대금 계산 완료 (Close Price 방식: {trading_value:,}원)")
                 
                 # 유통주식수와 시가총액 검증 및 보정
                 current_total_shares = total_shares
@@ -1466,6 +1617,7 @@ class StockDataCollector:
                     float(low_price),
                     float(close_price),
                     int(volume),
+                    int(trading_value) if trading_value else None,
                     current_total_shares,
                     current_market_cap
                 ))
@@ -1551,11 +1703,11 @@ class StockDataCollector:
             logging.info(f"💾 일봉 데이터 저장 시작: {len(batch_daily_data)}개")
             logging.info(f"💾 첫 번째 데이터 샘플: {batch_daily_data[0] if batch_daily_data else 'None'}")
             
-            # 데이터 유효성 검증
+            # 데이터 유효성 검증 (거래대금 포함)
             valid_data = []
             invalid_data = []
             for i, data in enumerate(batch_daily_data):
-                if len(data) == 9 and all(data[i] is not None for i in range(1, 6)):  # stock_code 제외하고 OHLCV 검증 (outstanding_shares, market_cap은 None 허용)
+                if len(data) == 10 and all(data[i] is not None for i in range(1, 6)):  # stock_code 제외하고 OHLCV 검증 (trading_value, outstanding_shares, market_cap은 None 허용)
                     valid_data.append(data)
                 else:
                     invalid_data.append((i, data))
@@ -1574,16 +1726,16 @@ class StockDataCollector:
             if valid_data:
                 first_data = valid_data[0]
                 last_data = valid_data[-1]
-                logging.info(f"📊 첫 번째 데이터: {first_data[0]} ({first_data[1]}) - O:{first_data[2]}, H:{first_data[3]}, L:{first_data[4]}, C:{first_data[5]}, V:{first_data[6]}, S:{first_data[7]}, M:{first_data[8]}")
-                logging.info(f"📊 마지막 데이터: {last_data[0]} ({last_data[1]}) - O:{last_data[2]}, H:{last_data[3]}, L:{last_data[4]}, C:{last_data[5]}, V:{last_data[6]}, S:{last_data[7]}, M:{last_data[8]}")
+                logging.info(f"📊 첫 번째 데이터: {first_data[0]} ({first_data[1]}) - O:{first_data[2]}, H:{first_data[3]}, L:{first_data[4]}, C:{first_data[5]}, V:{first_data[6]}, T:{first_data[7]}, S:{first_data[8]}, M:{first_data[9]}")
+                logging.info(f"📊 마지막 데이터: {last_data[0]} ({last_data[1]}) - O:{last_data[2]}, H:{last_data[3]}, L:{last_data[4]}, C:{last_data[5]}, V:{last_data[6]}, T:{last_data[7]}, S:{last_data[8]}, M:{last_data[9]}")
             
             daily_insert_sql = """
             INSERT INTO daily_data 
-            (stock_code, trade_date, open, high, low, close, volume, outstanding_shares, market_cap)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (stock_code, trade_date, open, high, low, close, volume, trading_value, outstanding_shares, market_cap)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
             open = VALUES(open), high = VALUES(high), low = VALUES(low), 
-            close = VALUES(close), volume = VALUES(volume), 
+            close = VALUES(close), volume = VALUES(volume), trading_value = VALUES(trading_value),
             outstanding_shares = VALUES(outstanding_shares), market_cap = VALUES(market_cap),
             updated_at = CURRENT_TIMESTAMP
             """

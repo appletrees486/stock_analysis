@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>다중 대량 차트 분석 - AI 주식 차트 분석</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .file-list {
+            margin-top: 20px;
+        }
+        
+        .file-item {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            margin-bottom: 10px;
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+        
+        .file-item:hover {
+            background: #e9ecef;
+            border-color: #dee2e6;
+        }
+        
+        .file-item.selected {
+            background: #e3f2fd;
+            border-color: #2196f3;
+        }
+        
+        .file-info {
+            flex: 1;
+            margin-left: 15px;
+        }
+        
+        .file-name {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 5px;
+        }
+        
+        .file-details {
+            font-size: 0.9em;
+            color: #666;
+        }
+        
+        .file-actions {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .remove-btn {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8em;
+        }
+        
+        .remove-btn:hover {
+            background: #c82333;
+        }
+        
+        .batch-queue {
+            margin-top: 30px;
+        }
+        
+        .queue-item {
+            background: #fff;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            overflow: hidden;
+        }
+        
+        .queue-header {
+            background: #f8f9fa;
+            padding: 15px;
+            border-bottom: 1px solid #dee2e6;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .queue-info {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+        
+        .queue-status {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8em;
+            font-weight: 600;
+        }
+        
+        .status-waiting {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .status-running {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+        
+        .status-completed {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-failed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .queue-progress {
+            padding: 15px;
+            display: none;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #007bff, #0056b3);
+            transition: width 0.3s ease;
+        }
+        
+        .progress-text {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.9em;
+            color: #666;
+        }
+        
+        .queue-actions {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .action-btn {
+            padding: 6px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8em;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-view {
+            background: #17a2b8;
+            color: white;
+        }
+        
+        .btn-view:hover {
+            background: #138496;
+        }
+        
+        .btn-download {
+            background: #28a745;
+            color: white;
+        }
+        
+        .btn-download:hover {
+            background: #218838;
+        }
+        
+        .btn-remove {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .btn-remove:hover {
+            background: #c82333;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .empty-state .icon {
+            font-size: 3em;
+            margin-bottom: 15px;
+        }
+        
+        .drag-drop-zone {
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            margin-bottom: 20px;
+            transition: all 0.3s ease;
+        }
+        
+        .drag-drop-zone.dragover {
+            border-color: #007bff;
+            background: #f8f9ff;
+        }
+        
+        .drag-drop-zone .icon {
+            font-size: 2em;
+            margin-bottom: 10px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <a href="/" class="back-btn">← 메인으로</a>
+            <h1>📊 다중 대량 차트 분석</h1>
+            <p class="subtitle">여러 종목 리스트 파일을 업로드하여 순차적으로 분석</p>
+        </header>
+        
+        <div class="file-format-info">
+            <h3>📋 종목 리스트 파일 형식</h3>
+            <p>텍스트 파일(.txt)에 종목코드를 한 줄에 하나씩 입력하세요:</p>
+            <div class="code-example">
+                <pre>079160
+035760
+311690
+000120</pre>
+            </div>
+            <div class="format-tips">
+                <h4>💡 작성 팁</h4>
+                <ul>
+                    <li>6자리 종목코드만 입력 (예: 005930)</li>
+                    <li>한 줄에 하나의 종목코드</li>
+                    <li>빈 줄이나 주석은 무시됩니다</li>
+                    <li>파일당 최대 100개 종목까지 처리 가능</li>
+                </ul>
+                <h4>🎯 자동 감지 기능</h4>
+                <p>파일명에 키워드를 포함하면 자동으로 설정됩니다:</p>
+                
+                <h5>📊 차트 유형</h5>
+                <ul>
+                    <li><strong>일봉:</strong> 파일명에 "일간", "daily", "day" 포함</li>
+                    <li><strong>주봉:</strong> 파일명에 "주간", "weekly", "week" 포함</li>
+                    <li><strong>월봉:</strong> 파일명에 "월간", "monthly", "month" 포함</li>
+                </ul>
+                
+                <h5>📈 거래타입</h5>
+                <ul>
+                    <li><strong>거래대금:</strong> 파일명에 "거래대금", "volume" 포함</li>
+                    <li><strong>거래율:</strong> 파일명에 "거래율", "turnover" 포함</li>
+                </ul>
+                
+                <p><small>예: "stock_list_일간_거래량.txt", "daily_volume_stocks.txt", "주간_거래률_분석.txt"</small></p>
+            </div>
+        </div>
+        
+        <div class="analysis-form">
+            <div class="drag-drop-zone" id="dragDropZone">
+                <div class="icon">📁</div>
+                <h3>파일을 드래그하여 업로드하거나 클릭하여 선택</h3>
+                <p>여러 개의 txt 파일을 동시에 선택할 수 있습니다</p>
+                <input type="file" id="fileInput" multiple accept=".txt" style="display: none;">
+            </div>
+            
+            <div class="file-list" id="fileList" style="display: none;">
+                <h3>📁 선택된 파일 목록</h3>
+                <div id="fileItems"></div>
+            </div>
+            
+            <div class="form-actions" id="formActions" style="display: none;">
+                <button type="button" class="btn btn-primary" id="startAnalysisBtn">
+                    <span class="btn-text">다중 분석 시작</span>
+                    <span class="btn-loading" style="display: none;">분석 시작 중...</span>
+                </button>
+                <button type="button" class="btn btn-secondary" id="clearFilesBtn">파일 초기화</button>
+            </div>
+        </div>
+        
+        <div class="batch-queue" id="batchQueue" style="display: none;">
+            <h3>📊 분석 큐</h3>
+            <div id="queueItems"></div>
+        </div>
+        
+        <div id="error" class="error-message" style="display: none;">
+            <div class="error-icon">⚠️</div>
+            <div class="error-content">
+                <h4>분석 오류</h4>
+                <p id="errorMessage"></p>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/multi_batch.js') }}"></script>
+</body>
+</html>

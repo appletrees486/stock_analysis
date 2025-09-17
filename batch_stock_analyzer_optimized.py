@@ -53,10 +53,10 @@ def get_stock_list_from_file():
         with open("stock_list.txt", 'r', encoding='utf-8') as f:
             lines = [line.strip() for line in f if line.strip()]
         
-        # 종목코드만 추출 (6자리 숫자인 경우만)
+        # 종목코드만 추출 (6자리 숫자 또는 영문+숫자 조합)
         stocks = []
         for line in lines:
-            if line.isdigit() and len(line) == 6:
+            if len(line) == 6 and (line.isdigit() or line.isalnum()):
                 stocks.append(line)
         
         return stocks
@@ -75,7 +75,7 @@ def get_chart_type_options():
 def extract_stock_code(stock_name: str) -> str:
     """종목코드 추출 (단순화)"""
     # 이미 6자리 숫자면 종목코드로 인식
-    if stock_name.isdigit() and len(stock_name) == 6:
+    if len(stock_name) == 6 and (stock_name.isdigit() or stock_name.isalnum()):
         return stock_name
     # 종목명이면 그대로 반환 (stock_list.txt에서 처리)
     return stock_name

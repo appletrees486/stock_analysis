@@ -34,33 +34,7 @@ class RankingCalculator:
         self._cache = {}  # 간단한 메모리 캐시
         self._cache_ttl = 3600  # 1시간 TTL
         
-    def calculate_transaction_amount(self, volume: float, close_price: float, 
-                                   high_price: float = None, low_price: float = None, 
-                                   method: str = "close_price") -> float:
-        """
-        거래대금 계산 (첨부 이미지 참고)
-        
-        Args:
-            volume (float): 거래량
-            close_price (float): 종가
-            high_price (float): 고가 (Typical Price 방식용)
-            low_price (float): 저가 (Typical Price 방식용)
-            method (str): "close_price" (기본) 또는 "typical_price"
-            
-        Returns:
-            float: 계산된 거래대금
-        """
-        try:
-            if method == "typical_price" and high_price and low_price:
-                # (H + L + C) / 3 × V - 조금 더 균형 잡힌 근사
-                typical_price = (high_price + low_price + close_price) / 3
-                return typical_price * volume
-            else:
-                # C × V - 가장 널리 쓰이는 대용치 (간단한 근사)
-                return close_price * volume
-        except Exception as e:
-            logger.error(f"거래대금 계산 오류: {e}")
-            return 0.0
+    # calculate_transaction_amount 함수 제거됨 - daily_data.trading_value 직접 사용
     
     def calculate_turnover_rate(self, volume: float, outstanding_shares: float) -> float:
         """
@@ -116,8 +90,8 @@ class RankingCalculator:
             volume = stock_data.get('volume', 0)
             close_price = stock_data.get('close_price', 0)
             outstanding_shares = stock_data.get('outstanding_shares', 0)
+            transaction_amount = stock_data.get('trading_value', 0)  # DB에서 직접 조회
             
-            transaction_amount = self.calculate_transaction_amount(volume, close_price)
             turnover_rate = self.calculate_turnover_rate(volume, outstanding_shares)
             
             # 순위 계산을 위한 기준값
@@ -144,7 +118,7 @@ class RankingCalculator:
             return self._get_default_ranking_info()
     
     def get_volume_ranking(self, target_date: str, chart_type: str, 
-                          limit: int = 50, trading_type: str = "거래대금") -> List[Dict[str, Any]]:
+                          limit: int = None, trading_type: str = "거래대금") -> List[Dict[str, Any]]:
         """
         전체 순위 리스트 조회 (거래대금 기준)
         
@@ -192,6 +166,18 @@ class RankingCalculator:
                     'outstanding_shares': row.get('outstanding_shares', 0),
                     'ranking': row.get('ranking', 0)
                 })
+            
+            # 랭킹 타입에 따른 추가 정렬 (안전장치)
+            if trading_type == "거래율":
+                formatted_results.sort(key=lambda x: x.get('turnover_rate', 0) or 0, reverse=True)
+                # 정렬 후 순위 재할당
+                for i, item in enumerate(formatted_results):
+                    item['ranking'] = i + 1
+            elif trading_type == "거래대금":
+                formatted_results.sort(key=lambda x: x.get('transaction_amount', 0) or 0, reverse=True)
+                # 정렬 후 순위 재할당
+                for i, item in enumerate(formatted_results):
+                    item['ranking'] = i + 1
             
             # 캐시 저장
             self._cache[cache_key] = {
@@ -313,7 +299,7 @@ class RankingCalculator:
         """개별 종목 데이터 조회 쿼리 및 매개변수 생성"""
         if chart_type == "일봉":
             query = """
-            SELECT volume, close as close_price, outstanding_shares
+            SELECT volume, close as close_price, outstanding_shares, trading_value
             FROM daily_data 
             WHERE stock_code = %s AND trade_date = %s
             """
@@ -326,7 +312,7 @@ class RankingCalculator:
                 week_end = WeekCalculator.get_week_end_date(year, week)
                 
                 query = """
-                SELECT SUM(volume) as volume, AVG(close) as close_price, AVG(outstanding_shares) as outstanding_shares
+                SELECT SUM(volume) as volume, AVG(close) as close_price, AVG(outstanding_shares) as outstanding_shares, SUM(trading_value) as trading_value
                 FROM daily_data 
                 WHERE stock_code = %s 
                 AND trade_date BETWEEN %s AND %s
@@ -335,18 +321,18 @@ class RankingCalculator:
                 return query, (stock_code, week_start, week_end)
             except Exception as e:
                 logger.error(f"주차 계산 실패: {e}")
-                return "SELECT 0 as volume, 0 as close_price, 0 as outstanding_shares", (stock_code,)
+                return "SELECT 0 as volume, 0 as close_price, 0 as outstanding_shares, 0 as trading_value", (stock_code,)
         elif chart_type == "월봉":
             year, month = target_date.split('-')
             query = """
-            SELECT SUM(volume) as volume, AVG(close) as close_price, AVG(outstanding_shares) as outstanding_shares
+            SELECT SUM(volume) as volume, AVG(close) as close_price, AVG(outstanding_shares) as outstanding_shares, SUM(trading_value) as trading_value
             FROM daily_data 
             WHERE stock_code = %s 
             AND YEAR(trade_date) = %s AND MONTH(trade_date) = %s
             AND WEEKDAY(trade_date) < 5
             """
             return query, (stock_code, year, month)
-        return "SELECT 0 as volume, 0 as close_price, 0 as outstanding_shares", (stock_code,)
+        return "SELECT 0 as volume, 0 as close_price, 0 as outstanding_shares, 0 as trading_value", (stock_code,)
     
     def _build_ranking_calculation_query_with_params(self, target_date: str, chart_type: str, 
                                                    trading_type: str, ranking_value: float) -> Tuple[str, tuple]:
@@ -368,7 +354,7 @@ class RankingCalculator:
                        (SELECT COUNT(*) FROM daily_data WHERE trade_date = %s) as total_stocks
                 FROM daily_data 
                 WHERE trade_date = %s 
-                AND volume > %s
+                AND trading_value > %s
                 """
                 return query, (target_date, target_date, ranking_value)
         elif chart_type == "주봉":
@@ -403,13 +389,13 @@ class RankingCalculator:
                             WHERE trade_date BETWEEN %s AND %s 
                             AND WEEKDAY(trade_date) < 5) as total_stocks
                     FROM (
-                        SELECT stock_code, SUM(volume) as total_volume
+                        SELECT stock_code, SUM(trading_value) as total_trading_value
                         FROM daily_data 
                         WHERE trade_date BETWEEN %s AND %s
                         AND WEEKDAY(trade_date) < 5
                         GROUP BY stock_code
-                        HAVING total_volume > %s
-                    ) as weekly_volumes
+                        HAVING total_trading_value > %s
+                    ) as weekly_trading_values
                     """
                     return query, (week_start, week_end, week_start, week_end, ranking_value)
             except Exception as e:
@@ -442,13 +428,13 @@ class RankingCalculator:
                         WHERE YEAR(trade_date) = %s AND MONTH(trade_date) = %s 
                         AND WEEKDAY(trade_date) < 5) as total_stocks
                 FROM (
-                    SELECT stock_code, SUM(volume) as total_volume
+                    SELECT stock_code, SUM(trading_value) as total_trading_value
                     FROM daily_data 
                     WHERE YEAR(trade_date) = %s AND MONTH(trade_date) = %s
                     AND WEEKDAY(trade_date) < 5
                     GROUP BY stock_code
-                    HAVING total_volume > %s
-                ) as monthly_volumes
+                    HAVING total_trading_value > %s
+                ) as monthly_trading_values
                 """
                 return query, (year, month, year, month, ranking_value)
         return "SELECT 1 as ranking, 1 as total_stocks", (1,)
@@ -543,7 +529,7 @@ class RankingCalculator:
         return "SELECT 1 as ranking, 1 as total_stocks"
     
     def _build_ranking_list_query(self, target_date: str, chart_type: str, 
-                                trading_type: str, limit: int) -> Tuple[str, tuple]:
+                                trading_type: str, limit: int = None) -> Tuple[str, tuple]:
         """순위 리스트 조회 쿼리 생성"""
         if chart_type == "일봉":
             if trading_type == "거래율":
@@ -562,8 +548,12 @@ class RankingCalculator:
                 WHERE d.trade_date = %s
                 AND d.outstanding_shares > 0
                 ORDER BY turnover_rate DESC
-                LIMIT %s
                 """
+                if limit:
+                    query += " LIMIT %s"
+                    return query, (target_date, limit)
+                else:
+                    return query, (target_date,)
             else:
                 query = """
                 SELECT 
@@ -571,17 +561,20 @@ class RankingCalculator:
                     s.stock_name,
                     s.market_type,
                     d.volume,
-                    d.close * d.volume as transaction_amount,
+                    d.trading_value as transaction_amount,
                     (d.volume / d.outstanding_shares) * 100 as turnover_rate,
                     d.outstanding_shares,
-                    ROW_NUMBER() OVER (ORDER BY d.volume DESC) as ranking
+                    ROW_NUMBER() OVER (ORDER BY d.trading_value DESC) as ranking
                 FROM daily_data d
                 JOIN stocks s ON d.stock_code = s.stock_code
                 WHERE d.trade_date = %s
-                ORDER BY d.volume DESC
-                LIMIT %s
+                ORDER BY d.trading_value DESC
                 """
-            return query, (target_date, limit)
+                if limit:
+                    query += " LIMIT %s"
+                    return query, (target_date, limit)
+                else:
+                    return query, (target_date,)
         
         elif chart_type == "주봉":
             # week_calculator.py 활용하여 주간 기간 계산
@@ -610,8 +603,12 @@ class RankingCalculator:
                     GROUP BY d.stock_code, s.stock_name, s.market_type
                     HAVING SUM(d.volume) > 0 AND AVG(d.outstanding_shares) > 0
                     ORDER BY turnover_rate DESC
-                    LIMIT %s
                     """
+                    if limit:
+                        query += " LIMIT %s"
+                        return query, (week_start, week_end, limit)
+                    else:
+                        return query, (week_start, week_end)
                 else:
                     query = """
                     SELECT 
@@ -619,20 +616,23 @@ class RankingCalculator:
                         s.stock_name,
                         s.market_type,
                         SUM(d.volume) as volume,
-                        SUM(d.close * d.volume) as transaction_amount,
+                        SUM(d.trading_value) as transaction_amount,
                         (SUM(d.volume) / AVG(d.outstanding_shares)) * 100 as turnover_rate,
                         AVG(d.outstanding_shares) as outstanding_shares,
-                        ROW_NUMBER() OVER (ORDER BY SUM(d.volume) DESC) as ranking
+                        ROW_NUMBER() OVER (ORDER BY SUM(d.trading_value) DESC) as ranking
                     FROM daily_data d
                     JOIN stocks s ON d.stock_code = s.stock_code
                     WHERE d.trade_date BETWEEN %s AND %s
                     AND WEEKDAY(d.trade_date) < 5
                     GROUP BY d.stock_code, s.stock_name, s.market_type
-                    HAVING SUM(d.volume) > 0
-                    ORDER BY volume DESC
-                    LIMIT %s
+                    HAVING SUM(d.trading_value) > 0
+                    ORDER BY transaction_amount DESC
                     """
-                return query, (week_start, week_end, limit)
+                    if limit:
+                        query += " LIMIT %s"
+                        return query, (week_start, week_end, limit)
+                    else:
+                        return query, (week_start, week_end)
             except Exception as e:
                 logger.error(f"주차 계산 실패: {e}")
                 return "SELECT 1 as ranking", (1,)
@@ -658,8 +658,12 @@ class RankingCalculator:
                 GROUP BY d.stock_code, s.stock_name, s.market_type
                 HAVING SUM(d.volume) > 0 AND AVG(d.outstanding_shares) > 0
                 ORDER BY turnover_rate DESC
-                LIMIT %s
                 """
+                if limit:
+                    query += " LIMIT %s"
+                    return query, (year, month, limit)
+                else:
+                    return query, (year, month)
             else:
                 query = """
                 SELECT 
@@ -667,22 +671,25 @@ class RankingCalculator:
                     s.stock_name,
                     s.market_type,
                     SUM(d.volume) as volume,
-                    SUM(d.close * d.volume) as transaction_amount,
+                    SUM(d.trading_value) as transaction_amount,
                     (SUM(d.volume) / AVG(d.outstanding_shares)) * 100 as turnover_rate,
                     AVG(d.outstanding_shares) as outstanding_shares,
-                    ROW_NUMBER() OVER (ORDER BY SUM(d.volume) DESC) as ranking
+                    ROW_NUMBER() OVER (ORDER BY SUM(d.trading_value) DESC) as ranking
                 FROM daily_data d
                 JOIN stocks s ON d.stock_code = s.stock_code
                 WHERE YEAR(d.trade_date) = %s AND MONTH(d.trade_date) = %s
                 AND WEEKDAY(d.trade_date) < 5
                 GROUP BY d.stock_code, s.stock_name, s.market_type
-                HAVING SUM(d.volume) > 0
-                ORDER BY volume DESC
-                LIMIT %s
+                HAVING SUM(d.trading_value) > 0
+                ORDER BY transaction_amount DESC
                 """
-            return query, (year, month, limit)
+                if limit:
+                    query += " LIMIT %s"
+                    return query, (year, month, limit)
+                else:
+                    return query, (year, month)
         
-        return "SELECT 1 as ranking", (1,)
+        return "SELECT 1 as ranking, 1 as total_stocks", (1,)
     
     def _get_default_ranking_info(self) -> Dict[str, Any]:
         """기본 순위 정보 반환"""
@@ -732,10 +739,8 @@ def test_ranking_calculator():
     
     calculator = RankingCalculator()
     
-    # 거래대금 계산 테스트
-    print("💰 거래대금 계산 테스트:")
-    print(f"  종가 × 거래량: {calculator.calculate_transaction_amount(1000, 50000):,.0f}원")
-    print(f"  Typical Price: {calculator.calculate_transaction_amount(1000, 50000, 52000, 48000, 'typical_price'):,.0f}원")
+    # 거래대금 계산 테스트 (제거됨 - DB에서 직접 조회)
+    print("💰 거래대금: daily_data.trading_value에서 직접 조회")
     
     # 거래율 계산 테스트
     print(f"\n📈 거래율 계산 테스트:")

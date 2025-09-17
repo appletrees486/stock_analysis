@@ -584,6 +584,15 @@
                 return;
             }
             
+            // 거래율 랭킹인 경우 정렬 검증
+            if (currentRankingType === 'turnover') {
+                console.log('거래율 랭킹 정렬 검증:');
+                for (let i = 0; i < Math.min(5, data.data.length); i++) {
+                    const item = data.data[i];
+                    console.log(`${i + 1}위: ${item.stock_code} - 거래율: ${item.turnover_rate}%`);
+                }
+            }
+            
             let tableHTML = `
                 <table class="ranking-table">
                     <thead>
@@ -619,9 +628,16 @@
                     turnoverDisplay = '계산 불가';
                 }
                 
+                // 거래율 랭킹인 경우 순위 검증
+                const actualRank = item.ranking || (index + 1);
+                const expectedRank = index + 1;
+                if (currentRankingType === 'turnover' && actualRank !== expectedRank) {
+                    console.warn(`순위 불일치: ${item.stock_code} - 예상 ${expectedRank}위, 실제 ${actualRank}위`);
+                }
+                
                 tableHTML += `
                     <tr>
-                        <td>${index + 1}</td>
+                        <td>${actualRank}</td>
                         <td>${item.stock_code}</td>
                         <td>${item.stock_name}</td>
                         <td>${item.market_type}</td>
@@ -730,9 +746,16 @@
             const stockCodes = [];
             const rows = table.querySelectorAll('tbody tr');
             
-            rows.forEach(row => {
+            rows.forEach((row, index) => {
                 const stockCode = row.cells[1].textContent.trim();
+                const rank = row.cells[0].textContent.trim();
+                
                 if (stockCode) {
+                    // 순위 검증: 실제 순위와 인덱스가 일치하는지 확인
+                    const expectedRank = index + 1;
+                    if (rank !== expectedRank.toString()) {
+                        console.warn(`순위 불일치: 예상 ${expectedRank}위, 실제 ${rank}위 - ${stockCode}`);
+                    }
                     stockCodes.push(stockCode);
                 }
             });
@@ -746,8 +769,6 @@
             const periodText = currentPeriod === 'daily' ? '일간' : currentPeriod === 'weekly' ? '주간' : '월간';
             const rankingText = currentRankingType === 'volume' ? '거래대금' : '거래율';
             const dateText = getCurrentDateText();
-            //const periodRange = getSelectedPeriodRange();
-            //const filename = `${periodRange}_${periodText}_${rankingText}_랭킹_${dateText}.txt`;
             const filename = `${periodText}_${rankingText}_랭킹_${dateText}.txt`;
             
             // txt 파일 생성 및 다운로드
@@ -763,7 +784,7 @@
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
             
-            showMessage(`${stockCodes.length}개 종목 코드가 포함된 파일이 다운로드되었습니다.`, 'success');
+            showMessage(`${stockCodes.length}개 종목 코드가 1위부터 ${stockCodes.length}위 순으로 다운로드되었습니다.`, 'success');
         }
         
         // 선택된 기간 범위 텍스트 생성

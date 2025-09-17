@@ -184,8 +184,8 @@ class StockNameMapper:
                 
                 # 마지막에서 두 번째 부분이 종목번호일 가능성이 높음
                 for i, part in enumerate(parts):
-                    # 6자리 숫자인 경우 종목번호로 간주
-                    if len(part) == 6 and part.isdigit():
+                    # 6자리 숫자 또는 영문+숫자 조합인 경우 종목번호로 간주
+                    if len(part) == 6 and (part.isdigit() or part.isalnum()):
                         stock_code = part
                         # 종목번호 앞의 부분들을 종목명으로 조합
                         stock_name_parts = parts[1:i] if i > 1 else parts[1:]
@@ -195,15 +195,15 @@ class StockNameMapper:
                 # 종목번호를 찾지 못한 경우, 파일명에서 직접 추출 시도
                 if not stock_code:
                     for part in parts:
-                        if len(part) == 6 and part.isdigit():
+                        if len(part) == 6 and (part.isdigit() or part.isalnum()):
                             stock_code = part
                             break
             
             # 종목명이 비어있거나 종목번호가 없는 경우
             if not stock_name or not stock_code:
-                # 파일명에서 6자리 숫자 찾기
+                # 파일명에서 6자리 종목코드 찾기 (숫자 또는 영문+숫자)
                 import re
-                code_match = re.search(r'(\d{6})', filename)
+                code_match = re.search(r'([A-Za-z0-9]{6})', filename)
                 if code_match:
                     stock_code = code_match.group(1)
                     # 종목번호로 DB에서 종목명 조회
@@ -1869,8 +1869,8 @@ class AIChartAnalyzer:
                         target_stock_data = self._get_individual_stock_trading_data(stock_code, target_date, "daily")
                         print(f"📊 {stock_code} 개별 거래 데이터 조회 완료")
                         
-                        # 전체 순위 데이터 조회 (거래타입 전달)
-                        ranking_data = self.ranking_calculator.get_volume_ranking(target_date, "일봉", limit=50, trading_type=trading_type)
+                        # 전체 순위 데이터 조회 (거래타입 전달) - LIMIT 제거로 모든 종목 순위 조회
+                        ranking_data = self.ranking_calculator.get_volume_ranking(target_date, "일봉", limit=None, trading_type=trading_type)
                         print(f"📊 일봉 전체 순위 데이터 조회 완료: {len(ranking_data)}개 종목 ({trading_type} 기준)")
                 
                 elif chart_type == "주봉":
@@ -1946,8 +1946,8 @@ class AIChartAnalyzer:
                         target_stock_data = self._get_individual_stock_trading_data(stock_code, week_start, "weekly")
                         print(f"📊 {stock_code} 주봉 개별 거래 데이터 조회 완료")
                         
-                        # 전체 순위 데이터 조회 (거래타입 전달)
-                        ranking_data = self.ranking_calculator.get_volume_ranking(week_start, "주봉", limit=50, trading_type=trading_type)
+                        # 전체 순위 데이터 조회 (거래타입 전달) - LIMIT 제거로 모든 종목 순위 조회
+                        ranking_data = self.ranking_calculator.get_volume_ranking(week_start, "주봉", limit=None, trading_type=trading_type)
                         print(f"📊 주봉 전체 순위 데이터 조회 완료: {len(ranking_data)}개 종목 ({trading_type} 기준)")
                     else:
                         ranking_data = []
@@ -1994,8 +1994,8 @@ class AIChartAnalyzer:
                         target_stock_data = self._get_individual_stock_trading_data(stock_code, year_month, "monthly")
                         print(f"📊 {stock_code} 월봉 개별 거래 데이터 조회 완료")
                         
-                        # 전체 순위 데이터 조회 (거래타입 전달)
-                        ranking_data = self.ranking_calculator.get_volume_ranking(year_month, "월봉", limit=50, trading_type=trading_type)
+                        # 전체 순위 데이터 조회 (거래타입 전달) - LIMIT 제거로 모든 종목 순위 조회
+                        ranking_data = self.ranking_calculator.get_volume_ranking(year_month, "월봉", limit=None, trading_type=trading_type)
                         print(f"📊 월봉 전체 순위 데이터 조회 완료: {len(ranking_data)}개 종목 ({trading_type} 기준)")
                     else:
                         print(f"⚠️ year_month가 None이어서 데이터 조회 불가")
@@ -3770,30 +3770,21 @@ class SummaryFileGenerator:
                 print("⚠️ stock_details 데이터가 없습니다.")
                 return
             
-            # 거래대금 또는 거래율 기준으로 정렬
-            sort_key = "거래대금" if trading_type == "거래대금" else "거래율"
-            
-            # 정렬 가능한 데이터만 필터링하고 정렬
+            # 순위 기준으로 정렬 (오름차순 - 낮은 순위부터)
             sortable_stocks = []
             for stock in stock_details:
-                if sort_key in stock and stock[sort_key] != "N/A":
+                if "순위" in stock and stock["순위"] != "N/A":
                     try:
-                        # 거래대금: "149억원" -> 149
-                        # 거래율: "72.47%" -> 72.47
-                        value_str = stock[sort_key]
-                        if sort_key == "거래대금":
-                            # "149억원" -> 149
-                            value = float(value_str.replace("억원", "").replace(",", ""))
-                        else:  # 거래율
-                            # "72.47%" -> 72.47
-                            value = float(value_str.replace("%", "").replace(",", ""))
-                        
-                        sortable_stocks.append((value, stock))
+                        # 순위: "2192위" -> 2192
+                        rank_str = stock["순위"]
+                        if "위" in str(rank_str):
+                            rank_value = float(str(rank_str).replace("위", "").replace(",", ""))
+                            sortable_stocks.append((rank_value, stock))
                     except (ValueError, AttributeError):
                         continue
             
-            # 내림차순 정렬 (높은 값부터)
-            sortable_stocks.sort(key=lambda x: x[0], reverse=True)
+            # 오름차순 정렬 (낮은 순위부터)
+            sortable_stocks.sort(key=lambda x: x[0], reverse=False)
             
             # 상위 50개만 선택
             top_50_stocks = [stock for _, stock in sortable_stocks[:50]]
@@ -3801,6 +3792,9 @@ class SummaryFileGenerator:
             if not top_50_stocks:
                 print("⚠️ 정렬 가능한 종목 데이터가 없습니다.")
                 return
+            
+            # 거래대금/거래율 표시용 키 설정
+            sort_key = "거래대금" if trading_type == "거래대금" else "거래율"
             
             # 표 제목 추가
             table_title = doc.add_heading(f'📈 {trading_type} 기준 상위 50개 종목 순위', level=1)
@@ -3847,7 +3841,13 @@ class SummaryFileGenerator:
                 left_stock_idx = row_idx - 1
                 if left_stock_idx < len(top_50_stocks):
                     left_stock = top_50_stocks[left_stock_idx]
-                    data_cells[0].text = str(left_stock_idx + 1)  # 순위
+                    # 실제 순위 표시
+                    left_rank = left_stock.get("순위", "N/A")
+                    if left_rank != "N/A" and "위" in str(left_rank):
+                        left_rank_num = str(left_rank).replace("위", "")
+                    else:
+                        left_rank_num = str(left_stock_idx + 1)  # fallback
+                    data_cells[0].text = left_rank_num  # 실제 순위
                     data_cells[1].text = left_stock.get(sort_key, "N/A")  # 거래율/거래대금
                     data_cells[2].text = left_stock.get("종목명", "N/A")  # 종목명
                 
@@ -3855,7 +3855,13 @@ class SummaryFileGenerator:
                 right_stock_idx = left_stock_idx + 25
                 if right_stock_idx < len(top_50_stocks):
                     right_stock = top_50_stocks[right_stock_idx]
-                    data_cells[3].text = str(right_stock_idx + 1)  # 순위
+                    # 실제 순위 표시
+                    right_rank = right_stock.get("순위", "N/A")
+                    if right_rank != "N/A" and "위" in str(right_rank):
+                        right_rank_num = str(right_rank).replace("위", "")
+                    else:
+                        right_rank_num = str(right_stock_idx + 1)  # fallback
+                    data_cells[3].text = right_rank_num  # 실제 순위
                     data_cells[4].text = right_stock.get(sort_key, "N/A")  # 거래율/거래대금
                     data_cells[5].text = right_stock.get("종목명", "N/A")  # 종목명
             

@@ -1738,10 +1738,10 @@ def main():
     # 종목코드 입력
     while True:
         stock_code = input("📈 종목코드를 입력하세요 (예: 005930): ").strip()
-        if stock_code.isdigit() and len(stock_code) == 6:
+        if len(stock_code) == 6 and (stock_code.isdigit() or stock_code.isalnum()):
             break
         else:
-            print("❌ 올바른 종목코드를 입력해주세요 (6자리 숫자)")
+            print("❌ 올바른 종목코드를 입력해주세요 (6자리 숫자 또는 영문+숫자)")
     
     # 월봉 데이터 조회
     hist = get_monthly_stock_data(stock_code)

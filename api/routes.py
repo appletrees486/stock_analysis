@@ -305,6 +305,10 @@ def get_daily_turnover_ranking():
         date_str = request.args.get('date', '')
         limit = int(request.args.get('limit', 50))
         
+        # 빈 문자열인 경우 None으로 변환 (현재 날짜 사용)
+        if not date_str:
+            date_str = None
+        
         # VolumeRankingDataManager 사용
         manager = VolumeRankingDataManager()
         result = manager.get_daily_turnover_ranking(date_str, limit)

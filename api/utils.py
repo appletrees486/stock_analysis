@@ -22,17 +22,28 @@ logger = logging.getLogger(__name__)
 def get_stock_list_from_file(file_path: str = "stock_list.txt") -> List[str]:
     """파일에서 종목 목록 가져오기"""
     try:
+        # 절대 경로로 변환
+        if not os.path.isabs(file_path):
+            file_path = os.path.abspath(file_path)
+        
+        logger.info(f"파일 읽기 시도: {file_path}")
+        logger.info(f"파일 존재 여부: {os.path.exists(file_path)}")
+        
         if os.path.exists(file_path):
             with open(file_path, 'r', encoding='utf-8') as f:
                 lines = [line.strip() for line in f if line.strip()]
             
-            # 종목코드만 추출 (6자리 숫자인 경우만)
+            logger.info(f"파일에서 읽은 라인 수: {len(lines)}")
+            logger.info(f"원본 라인들: {lines}")
+            
+            # 종목코드만 추출 (6자리 숫자 또는 영문+숫자 조합)
             stocks = []
             for line in lines:
-                if line.isdigit() and len(line) == 6:
+                if len(line) == 6 and (line.isdigit() or line.isalnum()):
                     stocks.append(line)
             
             logger.info(f"종목 목록 로드 완료: {len(stocks)}개")
+            logger.info(f"추출된 종목들: {stocks}")
             return stocks
         else:
             logger.warning(f"종목 리스트 파일을 찾을 수 없습니다: {file_path}")

@@ -73,6 +73,21 @@ class BatchAnalyzer:
         try:
             # 종목 리스트 읽기
             from .utils import get_stock_list_from_file
+            # 절대 경로로 변환
+            import os
+            if not os.path.isabs(stock_list_path):
+                stock_list_path = os.path.abspath(stock_list_path)
+            
+            logger.info(f"현재 작업 디렉토리: {os.getcwd()}")
+            logger.info(f"파일 경로 확인: {stock_list_path}")
+            logger.info(f"파일 존재 여부: {os.path.exists(stock_list_path)}")
+            
+            # 파일 내용 직접 확인
+            if os.path.exists(stock_list_path):
+                with open(stock_list_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    logger.info(f"파일 내용: {repr(content)}")
+            
             stock_codes = get_stock_list_from_file(stock_list_path)
             
             if not stock_codes:
@@ -823,7 +838,7 @@ class BatchAnalyzer:
             total_analysis = {
                 "metadata": {
                     "chart_type": chart_type,
-                    "total_stocks": len(results),
+                    "total_stocks": len([r for r in results if r.get('stock_code')]),
                     "created_at": datetime.now().isoformat(),
                     "analysis_version": "1.0",
                     "file_type": "total_analysis"
@@ -1013,6 +1028,11 @@ class BatchAnalyzer:
             table = doc.add_table(rows=2, cols=3)
             table.style = 'Table Grid'
             
+            # 테이블 열 너비 설정 (총 6인치 기준)
+            table.columns[0].width = Inches(1.5)  # 차트 유형
+            table.columns[1].width = Inches(2.0)  # 분석 종목 수
+            table.columns[2].width = Inches(2.5)  # 생성일시
+            
             # 헤더 행 설정
             header_cells = table.rows[0].cells
             header_cells[0].text = '차트 유형'
@@ -1024,7 +1044,7 @@ class BatchAnalyzer:
             metadata = total_analysis_result.get("metadata", {})
             data_cells[0].text = metadata.get("chart_type", "N/A")
             data_cells[1].text = f'{metadata.get("total_stocks", 0)}개'
-            # 날짜 형식을 YY-MM-DD (ddd) HH 형태로 변경
+            # 날짜 형식을 YY.MM.DD(요일) HH시 형태로 변경
             from datetime import datetime
             now = datetime.now()
             weekday_korean = ['월', '화', '수', '목', '금', '토', '일']
@@ -1064,6 +1084,12 @@ class BatchAnalyzer:
                 table = doc.add_table(rows=2, cols=4)
                 table.style = 'Table Grid'
                 
+                # 테이블 열 너비 설정 (총 6인치 기준)
+                table.columns[0].width = Inches(3.0)  # 종목명
+                table.columns[1].width = Inches(0.5)  # 종목번호
+                table.columns[2].width = Inches(2.0)  # 분석일시
+                table.columns[3].width = Inches(0.5)  # 차트유형
+                
                 # 헤더 행 설정
                 header_cells = table.rows[0].cells
                 header_cells[0].text = '종목명'
@@ -1075,9 +1101,27 @@ class BatchAnalyzer:
                 data_cells = table.rows[1].cells
                 data_cells[0].text = stock_name
                 data_cells[1].text = stock_code
-                # 분석일시 사용 (없으면 현재 시간)
+                # 분석일시 형식을 YY.MM.DD(요일) HH시로 변경
                 if analysis_time and analysis_time != "N/A":
-                    data_cells[2].text = analysis_time
+                    # 기존 분석일시가 있는 경우 형식 변환
+                    try:
+                        from datetime import datetime
+                        # ISO 형식인 경우 변환
+                        if 'T' in analysis_time:
+                            dt = datetime.fromisoformat(analysis_time.replace('Z', '+00:00'))
+                        else:
+                            # 다른 형식인 경우 현재 시간 사용
+                            dt = datetime.now()
+                        weekday_korean = ['월', '화', '수', '목', '금', '토', '일']
+                        formatted_date = f"{dt.strftime('%y.%m.%d')}({weekday_korean[dt.weekday()]}) {dt.strftime('%H')}시"
+                        data_cells[2].text = formatted_date
+                    except:
+                        # 변환 실패 시 현재 시간 사용
+                        from datetime import datetime
+                        now = datetime.now()
+                        weekday_korean = ['월', '화', '수', '목', '금', '토', '일']
+                        formatted_date = f"{now.strftime('%y.%m.%d')}({weekday_korean[now.weekday()]}) {now.strftime('%H')}시"
+                        data_cells[2].text = formatted_date
                 else:
                     from datetime import datetime
                     now = datetime.now()
@@ -1094,49 +1138,7 @@ class BatchAnalyzer:
                                 run.font.name = '맑은 고딕'
                                 run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
                 
-                # 거래정보 섹션 추가
-                if "거래일" in stock_info or "거래대금" in stock_info or "거래율" in stock_info:
-                    doc.add_heading('💰 거래정보', level=2)
-                    
-                    # 거래정보 테이블 생성
-                    trading_table = doc.add_table(rows=2, cols=3)
-                    trading_table.style = 'Table Grid'
-                    
-                    # 거래정보 헤더
-                    trading_header = trading_table.rows[0].cells
-                    trading_header[0].text = '거래일'
-                    trading_header[1].text = '거래대금'
-                    trading_header[2].text = '거래율'
-                    
-                    # 거래정보 데이터
-                    trading_data = trading_table.rows[1].cells
-                    trading_data[0].text = stock_info.get("거래일", "N/A")
-                    trading_data[1].text = stock_info.get("거래대금", "N/A")
-                    trading_data[2].text = stock_info.get("거래율", "N/A")
-                    
-                    # 순위 및 기타 정보 테이블
-                    if "순위" in stock_info or "유통주식수" in stock_info or "거래대금" in stock_info:
-                        trading_table2 = doc.add_table(rows=2, cols=3)
-                        trading_table2.style = 'Table Grid'
-                        
-                        trading_header2 = trading_table2.rows[0].cells
-                        trading_header2[0].text = '순위'
-                        trading_header2[1].text = '유통주식수'
-                        trading_header2[2].text = '거래대금'
-                        
-                        trading_data2 = trading_table2.rows[1].cells
-                        trading_data2[0].text = stock_info.get("순위", "N/A")
-                        trading_data2[1].text = stock_info.get("유통주식수", "N/A")
-                        trading_data2[2].text = stock_info.get("거래대금", "N/A")
-                        
-                        # 거래정보 테이블들에 한글 폰트 적용
-                        for table in [trading_table, trading_table2]:
-                            for row in table.rows:
-                                for cell in row.cells:
-                                    for paragraph in cell.paragraphs:
-                                        for run in paragraph.runs:
-                                            run.font.name = '맑은 고딕'
-                                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+                # 거래정보 섹션 제거 (사용자 요청)
                 
                 # 차트 이미지 추가
                 chart_image_path = None
@@ -1578,69 +1580,7 @@ class BatchAnalyzer:
                             run.font.name = '맑은 고딕'
                             run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
             
-            # 거래정보 통계 섹션 추가
-            metadata = total_analysis_result.get("metadata", {})
-            trading_stats = metadata.get("trading_statistics", {})
-            
-            if trading_stats and any(trading_stats.values()):
-                doc.add_heading('📊 거래정보 통계', level=1)
-                
-                # 거래대금 통계
-                if trading_stats.get("거래대금_통계", {}).get("총합", 0) > 0:
-                    doc.add_heading('💰 거래대금 통계', level=2)
-                    
-                    amount_stats = trading_stats["거래대금_통계"]
-                    p_amount1 = doc.add_paragraph(f"총 거래대금: {amount_stats.get('총합', 0):,.0f}원")
-                    p_amount2 = doc.add_paragraph(f"평균 거래대금: {amount_stats.get('평균', 0):,.0f}원")
-                    p_amount3 = doc.add_paragraph(f"최대 거래대금: {amount_stats.get('최대', 0):,.0f}원")
-                    p_amount4 = doc.add_paragraph(f"최소 거래대금: {amount_stats.get('최소', 0):,.0f}원")
-                    
-                    for p in [p_amount1, p_amount2, p_amount3, p_amount4]:
-                        for run in p.runs:
-                            run.font.name = '맑은 고딕'
-                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
-                
-                # 거래율 통계
-                if trading_stats.get("거래률_통계", {}).get("총합", 0) > 0:
-                    doc.add_heading('📈 거래율 통계', level=2)
-                    
-                    rate_stats = trading_stats["거래률_통계"]
-                    p_rate1 = doc.add_paragraph(f"평균 거래율: {rate_stats.get('평균', 0):.2f}%")
-                    p_rate2 = doc.add_paragraph(f"최대 거래율: {rate_stats.get('최대', 0):.2f}%")
-                    p_rate3 = doc.add_paragraph(f"최소 거래율: {rate_stats.get('최소', 0):.2f}%")
-                    
-                    for p in [p_rate1, p_rate2, p_rate3]:
-                        for run in p.runs:
-                            run.font.name = '맑은 고딕'
-                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
-                
-                # 순위 통계
-                if trading_stats.get("순위_통계", {}):
-                    doc.add_heading('🏆 순위 통계', level=2)
-                    
-                    ranking_stats = trading_stats["순위_통계"]
-                    p_rank1 = doc.add_paragraph(f"1위: {ranking_stats.get('1위', 0)}개 종목")
-                    p_rank2 = doc.add_paragraph(f"10위 이내: {ranking_stats.get('10위이내', 0)}개 종목")
-                    p_rank3 = doc.add_paragraph(f"50위 이내: {ranking_stats.get('50위이내', 0)}개 종목")
-                    p_rank4 = doc.add_paragraph(f"100위 이내: {ranking_stats.get('100위이내', 0)}개 종목")
-                    
-                    for p in [p_rank1, p_rank2, p_rank3, p_rank4]:
-                        for run in p.runs:
-                            run.font.name = '맑은 고딕'
-                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
-                
-                # 거래타입 분포
-                if trading_stats.get("거래타입_분포", {}):
-                    doc.add_heading('📋 거래타입 분포', level=2)
-                    
-                    type_stats = trading_stats["거래타입_분포"]
-                    p_type1 = doc.add_paragraph(f"거래대금 기준: {type_stats.get('거래대금', 0)}개 종목")
-                    p_type2 = doc.add_paragraph(f"거래율 기준: {type_stats.get('거래율', 0)}개 종목")
-                    
-                    for p in [p_type1, p_type2]:
-                        for run in p.runs:
-                            run.font.name = '맑은 고딕'
-                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+            # 거래정보 통계 섹션 제거 (사용자 요청)
             
             # 문서 저장
             doc.save(output_path)

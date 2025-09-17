@@ -82,6 +82,12 @@ def batch_analysis():
     logger.info("대량 분석 페이지 접속")
     return render_template('batch_analysis.html')
 
+@app.route('/multi-batch')
+def multi_batch_analysis():
+    """다중 대량 분석 페이지"""
+    logger.info("다중 대량 분석 페이지 접속")
+    return render_template('multi_batch_analysis.html')
+
 @app.route('/prompts')
 def prompt_management():
     """프롬프트 관리 페이지"""

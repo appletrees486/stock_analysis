@@ -400,7 +400,7 @@ def get_stock_input():
         user_input = input("📈 종목명 또는 종목코드를 입력하세요 (예: 삼성전자, 005930): ").strip()
         if user_input:
             # 종목코드인지 확인 (6자리 숫자)
-            if user_input.isdigit() and len(user_input) == 6:
+            if len(user_input) == 6 and (user_input.isdigit() or user_input.isalnum()):
                 return user_input  # 종목코드 그대로 반환
             else:
                 return user_input  # 종목명으로 처리
@@ -453,9 +453,9 @@ def run_chart_generation(stock_name: str, chart_type: str, chart_type_en: str):
         
         # 종목코드 확인 (종목명이 종목코드인 경우)
         stock_code = stock_name
-        if not stock_name.isdigit() or len(stock_name) != 6:
+        if not (len(stock_name) == 6 and (stock_name.isdigit() or stock_name.isalnum())):
             print(f"❌ 종목코드가 올바르지 않습니다: {stock_name}")
-            print("   💡 6자리 숫자 종목코드를 입력해주세요.")
+            print("   💡 6자리 숫자 또는 영문+숫자 종목코드를 입력해주세요.")
             return False, None
         
         # 차트 데이터 조회 (함수명 차트 유형별로 다름)
