@@ -41,13 +41,10 @@ class StockNameMapper:
             try:
                 self._load_stock_mapping_from_db()
                 self.use_db = True
-                print(f"✅ DB 기반 종목 매핑 초기화 완료: {len(self.stock_mapping)}개 종목")
+                pass  # DB 기반 종목 매핑 초기화 완료
             except Exception as e:
-                print(f"⚠️ DB 기반 종목 매핑 초기화 실패: {e}")
-                print("   fallback 매핑을 사용합니다.")
                 self._create_fallback_mapping()
         else:
-            print("⚠️ DB 설정이 없어 fallback 매핑을 사용합니다.")
             self._create_fallback_mapping()
     
     def _load_stock_mapping_from_db(self):
@@ -69,20 +66,15 @@ class StockNameMapper:
                     stock_name = str(row['stock_name'])
                     self.stock_mapping[stock_code] = stock_name
                 
-                print(f"✅ DB에서 종목 매핑 로드 완료: {len(self.stock_mapping)}개 종목")
+                pass  # DB에서 종목 매핑 로드 완료
             else:
-                print("⚠️ DB에서 종목 정보를 찾을 수 없습니다.")
-                print("   stocks 테이블에 종목 데이터가 없거나 조회 조건에 맞는 데이터가 없습니다.")
                 self._create_fallback_mapping()
             
             db_manager.disconnect()
                 
         except ImportError as e:
-            print(f"❌ database_config 모듈을 찾을 수 없습니다: {e}")
             self._create_fallback_mapping()
         except Exception as e:
-            print(f"❌ DB에서 종목 매핑 로드 중 오류: {e}")
-            print("   DB 연결 상태와 stocks 테이블 존재 여부를 확인해주세요.")
             self._create_fallback_mapping()
     
     def _create_fallback_mapping(self):
@@ -94,7 +86,7 @@ class StockNameMapper:
             "005930": "삼성전자",
             "014280": "금강철강"
         }
-        print(f"⚠️ fallback 종목 매핑 생성: {len(self.stock_mapping)}개 종목")
+        pass  # fallback 종목 매핑 생성
     
     def get_stock_name(self, stock_code: str) -> str:
         """
@@ -137,19 +129,16 @@ class StockNameMapper:
                     # 캐시에 추가 (원본 코드와 패딩된 코드 모두)
                     self.stock_mapping[padded_code] = stock_name
                     self.stock_mapping[stock_code] = stock_name
-                    print(f"✅ DB에서 실시간 조회 성공: {stock_code} -> {stock_name}")
                     db_manager.disconnect()
                     return stock_name
                 
                 db_manager.disconnect()
                     
             except Exception as e:
-                print(f"⚠️ DB 실시간 조회 실패: {e}")
                 # DB 연결 상태 재확인
                 self.use_db = False
         
         # 찾지 못한 경우 종목번호 반환
-        print(f"⚠️ 종목명 매핑 실패: {stock_code} (DB 조회 실패 또는 데이터 없음)")
         return stock_code
     
     def extract_stock_info_from_filename(self, filename: str) -> tuple:
@@ -169,31 +158,41 @@ class StockNameMapper:
             # 언더스코어로 분리
             parts = name_without_ext.split('_')
             
+            print(f"🔍 파일명 분석: {filename}")
+            print(f"🔍 분리된 부분들: {parts}")
+            
             stock_name = ""
             stock_code = ""
             
             # 파일명 패턴 분석
             if len(parts) >= 3:
                 # 특별한 패턴 처리: analysis_weekly_ 또는 analysis_daily_ 또는 analysis_monthly_
-                if len(parts) >= 3 and parts[0] == "analysis" and parts[1] in ["daily", "weekly", "monthly"]:
+                if parts[0] == "analysis" and parts[1] in ["daily", "weekly", "monthly"]:
                     # analysis_weekly_005930_... 형태에서 종목번호는 3번째 부분
+                    if len(parts[2]) == 6 and (parts[2].isdigit() or parts[2].isalnum()):
+                        stock_code = parts[2]
+                        # 종목명은 DB에서 조회 (종목번호로)
+                        stock_name = self.get_stock_name(stock_code)
+                        return stock_name, stock_code
+                
+                # 차트 파일 패턴 처리: daily_종목명_종목번호_날짜.png
+                if len(parts) >= 3 and parts[0] in ["daily", "weekly", "monthly"]:
+                    # daily_지투지바이오_456160_20250916 형태에서 종목번호 찾기
+                    # 차트타입_종목명_종목코드_날짜 패턴에서 종목코드는 3번째 부분 (parts[2])
                     if len(parts) >= 3 and len(parts[2]) == 6 and (parts[2].isdigit() or parts[2].isalnum()):
                         stock_code = parts[2]
                         # 종목명은 DB에서 조회 (종목번호로)
                         stock_name = self.get_stock_name(stock_code)
-                        print(f"✅ analysis 패턴에서 종목정보 추출: {stock_code} -> {stock_name}")
+                        print(f"📋 차트 파일 패턴에서 종목정보 추출: {stock_name}({stock_code})")
                         return stock_name, stock_code
-                
-                # 차트 파일 패턴 처리: weekly_종목명_종목번호_날짜.png
-                if len(parts) >= 3 and parts[0] in ["daily", "weekly", "monthly"]:
-                    # weekly_삼성전자_005930_20250917_v1 형태에서 종목번호 찾기
-                    # 첫 번째 부분은 차트 타입이므로 제외하고 찾기
+                    
+                    # 기존 로직 (fallback): parts[1:]에서 6자리 찾기
                     for i, part in enumerate(parts[1:], 1):  # parts[1:]부터 시작
                         if len(part) == 6 and (part.isdigit() or part.isalnum()):
                             stock_code = part
                             # 종목명은 DB에서 조회 (종목번호로)
                             stock_name = self.get_stock_name(stock_code)
-                            print(f"✅ 차트 파일 패턴에서 종목정보 추출: {stock_code} -> {stock_name}")
+                            print(f"📋 차트 파일 fallback 패턴에서 종목정보 추출: {stock_name}({stock_code})")
                             return stock_name, stock_code
                 
                 # 기존 패턴 처리: weekly_Samsung_Electronics_Co.,_Ltd._005930_20250804 형태
@@ -236,17 +235,29 @@ class StockNameMapper:
                 mapped_name = self.get_stock_name(stock_code)
                 if mapped_name != stock_code:  # DB에서 한글 종목명을 찾은 경우
                     stock_name = mapped_name
-                    print(f"✅ DB에서 한글 종목명으로 교체: {stock_code} -> {stock_name}")
+                    print(f"✅ DB에서 한글 종목명으로 교체: {stock_name}({stock_code})")
                 else:
                     # DB에서도 찾지 못한 경우 파일명에서 추출한 종목명 사용
-                    print(f"⚠️ DB에서 종목명을 찾지 못해 파일명 종목명 사용: {stock_code} -> {stock_name}")
+                    print(f"⚠️ DB에서 종목명을 찾지 못해 파일명 종목명 사용: {stock_name}({stock_code})")
             else:
                 print(f"⚠️ 종목번호가 없어 파일명 종목명 사용: {stock_name}")
             
+            print(f"📋 최종 추출 결과: {stock_name}({stock_code})")
             return stock_name, stock_code
             
         except Exception as e:
-            print(f"❌ 파일명에서 종목정보 추출 중 오류: {e}")
+            print(f"⚠️ 파일명에서 종목정보 추출 중 오류: {e}")
+            print(f"📁 파일명: {filename}")
+            # 파일명에서 최소한의 정보라도 추출 시도
+            try:
+                import re
+                code_match = re.search(r'([A-Za-z0-9]{6})', filename)
+                if code_match:
+                    stock_code = code_match.group(1)
+                    stock_name = self.get_stock_name(stock_code)
+                    return stock_name, stock_code
+            except:
+                pass
             return filename, "000000"
 
 class ChartAnalysisPrompts:
@@ -263,9 +274,9 @@ class ChartAnalysisPrompts:
             from prompt_manager import PromptManager
             self.prompt_manager = PromptManager(db_config)
             self.use_db = True
-            print("✅ DB 기반 프롬프트 관리자 초기화 완료")
+            pass  # DB 기반 프롬프트 관리자 초기화 완료
         except ImportError:
-            print("⚠️ prompt_manager를 찾을 수 없어 하드코딩된 프롬프트를 사용합니다.")
+            pass  # prompt_manager를 찾을 수 없어 하드코딩된 프롬프트를 사용
             self.use_db = False
     
     def get_prompt(self, chart_type: str) -> str:
@@ -275,10 +286,10 @@ class ChartAnalysisPrompts:
             if prompt:
                 return prompt
             else:
-                print(f"⚠️ DB에서 {chart_type} 프롬프트를 찾을 수 없습니다.")
-                return self._get_fallback_prompt(chart_type)
+                pass  # DB에서 프롬프트를 찾을 수 없음
+            return self._get_fallback_prompt(chart_type)
         else:
-            print("⚠️ DB 연결이 불가능하여 하드코딩된 프롬프트를 사용합니다.")
+            pass  # DB 연결이 불가능하여 하드코딩된 프롬프트를 사용
             return self._get_fallback_prompt(chart_type)
     
     def _get_fallback_prompt(self, chart_type: str) -> str:
@@ -302,10 +313,9 @@ class ChartAnalysisPrompts:
             if prompt:
                 return prompt
             else:
-                print(f"⚠️ DB에서 {summary_prompt_type} 프롬프트를 찾을 수 없습니다.")
                 return self._get_fallback_summary_prompt(chart_type)
         else:
-            print("⚠️ DB 연결이 불가능하여 하드코딩된 요약 프롬프트를 사용합니다.")
+            pass  # DB 연결이 불가능하여 하드코딩된 요약 프롬프트를 사용
             return self._get_fallback_summary_prompt(chart_type)
 
     def _get_fallback_summary_prompt(self, chart_type: str) -> str:
@@ -376,12 +386,11 @@ class AIChartAnalyzer:
                 secure_manager = SecureConfigManager(db_config)
                 api_key = secure_manager.get_api_key()
                 if api_key:
-                    print("✅ DB에서 API 키를 로드했습니다.")
+                    pass  # DB에서 API 키를 로드
                 else:
-                    print("⚠️ DB에서 API 키를 찾을 수 없습니다.")
                     api_key = self._get_api_key_from_user()
             except ImportError:
-                print("⚠️ prompt_manager를 찾을 수 없어 DB에서 API 키를 로드할 수 없습니다.")
+                pass  # prompt_manager를 찾을 수 없어 DB에서 API 키를 로드할 수 없음
                 api_key = self._get_api_key_from_user()
         elif api_key is None:
             api_key = self._get_api_key_from_user()
@@ -450,9 +459,9 @@ class AIChartAnalyzer:
             from prompt_manager import SecureConfigManager
             secure_manager = SecureConfigManager(db_config)
             if secure_manager.save_api_key(api_key):
-                print("✅ API 키가 DB에 암호화되어 저장되었습니다.")
+                pass  # API 키가 DB에 암호화되어 저장
         except Exception as e:
-            print(f"⚠️ API 키 DB 저장 실패: {e}")
+            pass  # API 키 DB 저장 실패
         
         return api_key
     
@@ -463,10 +472,9 @@ class AIChartAnalyzer:
             genai.configure(api_key=api_key)
             test_model = genai.GenerativeModel('gemini-1.5-flash')
             response = test_model.generate_content("테스트")
-            print("✅ API 키 유효성 검증 완료")
             return True
         except Exception as e:
-            print(f"❌ API 키 유효성 검증 실패: {e}")
+            pass  # API 키 유효성 검증 실패
             return False
     
     def _set_default_config(self):
@@ -474,7 +482,7 @@ class AIChartAnalyzer:
         self.max_retries = 3
         self.timeout = 300
         self.max_image_size = 1500
-        print("⚠️ 기본 설정값을 사용합니다.")
+        pass  # 기본 설정값을 사용
     
     # def get_weekly_indicators_from_db(self, stock_code: str, weeks: int = 260) -> Optional[Dict[str, Any]]:
     #     """
@@ -504,7 +512,7 @@ class AIChartAnalyzer:
             with open(image_path, "rb") as image_file:
                 return base64.b64encode(image_file.read()).decode('utf-8')
         except Exception as e:
-            print(f"❌ 이미지 인코딩 오류: {e}")
+            pass  # 이미지 인코딩 오류
             return ""
 
     def analyze_chart_image(self, image_path: str, stock_name: str = "", chart_type: str = "일봉", chart_data: Optional[pd.DataFrame] = None, 
@@ -528,19 +536,29 @@ class AIChartAnalyzer:
         Returns:
             Dict[str, Any]: 분석 결과 JSON (요약 분석 포함 시 summary_analysis 키 추가)
         """
+        
+        # 1. 파일명에서 종목코드와 종목명 추출 (우선순위 1)
+        filename = os.path.basename(image_path)
+        extracted_stock_name, extracted_stock_code = self.stock_mapper.extract_stock_info_from_filename(filename)
+        
+        # 추출된 종목코드가 있으면 사용, 없으면 매개변수로 받은 stock_name 사용
+        if extracted_stock_code and extracted_stock_code != "000000":
+            stock_code = extracted_stock_code
+            if not stock_name:  # stock_name이 비어있으면 파일명에서 추출한 것 사용
+                stock_name = extracted_stock_name
+            print(f"📋 파일명에서 추출된 종목정보: {stock_name}({stock_code})")
+        else:
+            # 파일명에서 추출 실패 시 매개변수 사용
+            stock_code = "000000"
+            print(f"⚠️ 파일명에서 종목코드 추출 실패, 매개변수 사용: {stock_name}")
+        
         try:
-            print(f"🔍 AI 차트 분석 시작: {image_path}")
-            print(f"📊 차트 유형: {chart_type}")
-            
             # 분석 시작 시간 기록
             start_time = time.time()
             
             # additional_info에서 거래타입 우선 사용
             if additional_info and "trading_type" in additional_info:
                 trading_type = additional_info["trading_type"]
-                print(f"✅ additional_info에서 거래타입 읽기: {trading_type}")
-            else:
-                print(f"⚠️ additional_info에 거래타입 없음, 기본값 사용: {trading_type}")
             
             # JSON 파일에서 거래 타입 읽기 (additional_info가 없을 때만)
             if json_data_path and os.path.exists(json_data_path) and not (additional_info and "trading_type" in additional_info):
@@ -549,16 +567,12 @@ class AIChartAnalyzer:
                         json_data = json.load(f)
                         if '거래 타입' in json_data:
                             trading_type = json_data['거래 타입']
-                            print(f"✅ JSON에서 거래 타입 읽기: {trading_type}")
-                        else:
-                            print(f"⚠️ JSON에 '거래 타입' 키가 없음, 기본값 사용: {trading_type}")
                 except Exception as e:
-                    print(f"⚠️ JSON 파일 읽기 실패: {e}, 기본값 사용: {trading_type}")
+                    pass  # JSON 파일 읽기 실패
             
             # additional_info에서 종목명 우선 사용
             if additional_info and "stock_name" in additional_info:
                 stock_name = additional_info["stock_name"]
-                print(f"✅ additional_info에서 종목명 사용: {stock_name}")
             
             # 파일명에서 종목정보 추출
             filename = os.path.basename(image_path)
@@ -570,47 +584,33 @@ class AIChartAnalyzer:
                 if mapped_name != extracted_stock_code:  # DB에서 한글 종목명을 찾은 경우
                     if not stock_name:  # additional_info에 종목명이 없는 경우에만 DB에서 조회한 이름 사용
                         stock_name = mapped_name
-                    print(f"✅ DB에서 한글 종목명 조회 성공: {extracted_stock_code} -> {mapped_name}")
                 else:
                     # DB에서 찾지 못한 경우 처리
                     if not stock_name:  # 기존 종목명이 없는 경우에만 파일명 사용
                         stock_name = extracted_stock_name
-                    print(f"⚠️ DB에서 종목명을 찾지 못함: {extracted_stock_code}, 사용할 종목명: {stock_name}")
             elif not stock_name:  # 종목번호도 없고 종목명도 없는 경우
                 stock_name = extracted_stock_name
-                print(f"⚠️ 종목번호가 없어 파일명 종목명 사용: {stock_name}")
-            
-            print(f"📈 종목명: {stock_name}")
-            print(f"📈 종목번호: {extracted_stock_code}")
             
             # 1. 이미지 파일 존재 및 무결성 검증
             if not os.path.exists(image_path):
-                print(f"❌ 이미지 파일을 찾을 수 없습니다: {image_path}")
                 return None
             
             # 이미지 파일 크기 확인
             file_size = os.path.getsize(image_path)
-            print(f"📊 이미지 파일 크기: {file_size:,} bytes")
             
             if file_size == 0:
-                print(f"❌ 이미지 파일이 비어있습니다: {image_path}")
                 return None
             
             # 2. 이미지 형식 및 크기 검증
             try:
                 with Image.open(image_path) as img:
-                    print(f"📊 이미지 크기: {img.size}")
-                    print(f"📊 이미지 형식: {img.format}")
-                    print(f"📊 이미지 모드: {img.mode}")
-                    
                     # 이미지 크기가 너무 작으면 경고
                     if img.size[0] < 100 or img.size[1] < 100:
-                        print(f"⚠️ 이미지 크기가 너무 작습니다: {img.size}")
+                        pass  # 이미지 크기가 너무 작음
                     
                     # 이미지가 너무 크면 리사이즈 고려
                     if img.size[0] > 4000 or img.size[1] > 4000:
-                        print(f"⚠️ 이미지 크기가 너무 큽니다: {img.size}")
-                        print(f"🔄 이미지를 2000x2000으로 리사이즈합니다...")
+                        pass  # 이미지를 리사이즈
                         
                         # 이미지 리사이즈
                         max_size = 2000
@@ -622,24 +622,40 @@ class AIChartAnalyzer:
                             new_width = int(img.size[0] * max_size / img.size[1])
                         
                         img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                        print(f"✅ 이미지 리사이즈 완료: {img.size}")
                         
             except Exception as e:
-                print(f"❌ 이미지 파일 검증 실패: {e}")
                 return None
             
             # 3. 차트 유형에 따른 프롬프트 선택
             prompt = self.prompts.get_prompt(chart_type)
             
-            # 4. JSON 데이터 파일 로드 및 프롬프트에 추가 (모든 차트 타입에서 통일된 방식)
-            additional_data_info = self._load_additional_data_files(json_data_path, None, None)
-            if additional_data_info:
-                prompt += f"\n\n{additional_data_info}"
-                print(f"✅ JSON 데이터 정보가 프롬프트에 추가되었습니다.")
+            # 4. JSON 데이터 파일이 있는 경우 프롬프트에 안내 메시지 추가
+            if json_data_path and os.path.exists(json_data_path):
+                prompt += f"""
+
+**중요: 첨부된 JSON 파일에서 다음 정보를 확인하여 정확한 분석을 수행해주세요:**
+
+1. **차트데이터 > technical_indicators > latest_values** 섹션에서 최신 기술적 지표 값 확인
+2. **차트데이터 > chart_data** 섹션에서 최근 거래일 데이터 확인  
+3. **summary** 섹션에서 가격 변동 및 거래량 정보 확인
+
+특히 다음 지표들을 정확히 분석해주세요:
+- MACD: macd, macd_signal, macd_histogram 값 모두 확인
+- RSI: rsi 값 확인
+- 볼린저밴드: bb_upper, bb_middle, bb_lower 값 모두 확인
+- 이동평균선: ma5, ma20, ma60 값 확인
+
+JSON 파일의 모든 수치를 정확히 반영하여 분석해주세요."""
+                print(f"✅ JSON 파일이 첨부되어 직접 전달됩니다: {json_data_path}")
+            else:
+                # JSON 파일이 없는 경우 기존 방식으로 데이터 추가
+                additional_data_info = self._load_additional_data_files(json_data_path, None, None)
+                if additional_data_info:
+                    prompt += f"\n\n{additional_data_info}"
             
             # 5. 차트 데이터 정보를 프롬프트에 추가 (기존 방식)
             if chart_data is not None and hasattr(chart_data, 'empty') and not chart_data.empty:
-                print(f"📊 차트 데이터 정보 추가: {len(chart_data)}개 데이터 포인트")
+                pass  # 차트 데이터 정보 추가
                 
                 # 최근 데이터 요약 정보 생성
                 recent_data = chart_data.tail(10)  # 최근 10개 데이터
@@ -761,74 +777,28 @@ class AIChartAnalyzer:
             prompt += f"\n\n**중요: 분석할 종목은 '{stock_name}' (종목번호: {extracted_stock_code})입니다.**"
             prompt = prompt.replace("[종목명]", stock_name)
             
-            # 6. AI 분석 재시도 메커니즘
+            # 6. AI 분석 재시도 메커니즘 (이미지 제거, JSON 데이터만 전달)
             max_retries = self.max_retries
             for attempt in range(max_retries):
                 try:
-                    print(f"🔄 AI 분석 시도 {attempt + 1}/{max_retries}")
+                    print(f"🔄 AI 분석 시도 {attempt + 1}/{max_retries} (JSON 데이터만 사용)")
                     
-                    # 이미지 로드 및 리사이즈
-                    image = Image.open(image_path)
-                    
-                    # 이미지가 너무 크면 리사이즈
-                    if image.size[0] > self.max_image_size or image.size[1] > self.max_image_size:
-                        max_size = self.max_image_size
-                        if image.size[0] > image.size[1]:
-                            new_width = max_size
-                            new_height = int(image.size[1] * max_size / image.size[0])
-                        else:
-                            new_height = max_size
-                            new_width = int(image.size[0] * max_size / image.size[1])
+                    # AI 분석 요청 (JSON 파일 직접 첨부)
+                    if json_data_path and os.path.exists(json_data_path):
+                        # JSON 파일을 직접 첨부하여 전달
+                        with open(json_data_path, 'r', encoding='utf-8') as f:
+                            json_content = f.read()
                         
-                        image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                        print(f"🔄 AI 분석용 이미지 리사이즈: {image.size}")
-                    
-                    # AI 분석 요청 (이미지를 base64로 인코딩하여 전송)
-                    try:
-                        # 이미지를 base64로 인코딩
-                        import base64
-                        import io
-                        
-                        # 이미지를 메모리에 저장
-                        img_buffer = io.BytesIO()
-                        image.save(img_buffer, format='PNG')
-                        img_buffer.seek(0)
-                        
-                        # base64로 인코딩
-                        img_base64 = base64.b64encode(img_buffer.getvalue()).decode('utf-8')
-                        print(f"📊 이미지 base64 인코딩 완료: {len(img_base64)} 문자")
-                        
-                        # AI 분석 요청 (base64 이미지 포함)
+                        # JSON 파일을 Gemini에 직접 전달
                         response = self.model.generate_content([
                             prompt,
-                            {
-                                "mime_type": "image/png",
-                                "data": img_base64
-                            }
+                            f"JSON 데이터 파일:\n{json_content}"
                         ])
-                        
-                        # 응답이 이미지를 인식하지 못하는 경우, 다른 방식 시도
-                        if "이미지가 제공되지 않았으므로" in response.text or "이미지가 없으므로" in response.text:
-                            print("⚠️ AI가 이미지를 인식하지 못함. 다른 방식으로 시도...")
-                            
-                            # 파일 경로를 직접 전달하는 방식 시도
-                            response = self.model.generate_content([
-                                prompt + "\n\n이미지 파일 경로: " + image_path,
-                                image
-                            ])
-                        
-                    except Exception as e:
-                        print(f"⚠️ base64 인코딩 실패, 기본 방식으로 시도: {e}")
-                        # 기본 방식으로 시도
-                        response = self.model.generate_content([
-                            prompt,
-                            image
-                        ])
+                    else:
+                        # JSON 파일이 없는 경우 텍스트만 전달
+                        response = self.model.generate_content(prompt)
                     
                     if response.text:
-                        print(f"✅ AI 분석 완료 (시도 {attempt + 1})")
-                        print(f"📝 AI 응답 길이: {len(response.text)}")
-                        print(f"📝 AI 응답 시작: {response.text[:100]}...")
                         
                         # 7. 응답 검증 및 JSON 파싱
                         if self._is_valid_json_response(response.text):
@@ -862,76 +832,67 @@ class AIChartAnalyzer:
                                 # AI 응답이 JSON 형식으로 정상 파싱된 경우에만 실행됨
                                 # 현재는 AI 응답이 JSON 형식이 아니어서 이 경로는 거의 실행되지 않음
                                 # 향후 AI 응답 개선 시 자동으로 작동하도록 유지
-                                analysis_result = self._add_trading_info_to_result(analysis_result, extracted_stock_code, "json파싱성공", chart_type, response.text, trading_type)
+                                analysis_result = self._add_trading_info_to_result(analysis_result, stock_code, "json파싱성공", chart_type, response.text, trading_type, analysis_result)
                                 
                                 # 하이브리드 방식: 원본 AI 응답 저장
                                 analysis_result["original_ai_response"] = response.text
                                 
-                                print(f"✅ JSON 파싱 성공 (시도 {attempt + 1})")
-                                
                                 # 투 트랙 분석: 요약 분석 실행 (요청된 경우)
                                 if enable_summary_analysis:
-                                    print(f"🔄 요약 분석 시작...")
                                     summary_result = self._run_summary_analysis(
-                                        image_path, stock_name, chart_type, chart_data, 
+                                        image_path, stock_name, stock_code, chart_type, chart_data, 
                                         json_data_path, csv_data_path, text_summary_path,
                                         analysis_result
                                     )
                                     if summary_result:
                                         analysis_result["summary_analysis"] = summary_result
-                                        print(f"✅ 요약 분석 완료")
-                                    else:
-                                        print(f"⚠️ 요약 분석 실패")
                                 
                                 return analysis_result
                                 
                             except json.JSONDecodeError as e:
-                                print(f"⚠️ JSON 파싱 오류 (시도 {attempt + 1}): {e}")
                                 if attempt < max_retries - 1:
-                                    print(f"🔄 재시도 중... ({attempt + 2}/{max_retries})")
                                     time.sleep(2)
                                     continue
                                 else:
-                                    print(f"❌ 모든 시도 실패. 마지막 응답: {response.text}")
-                                    fallback_result = self._create_fallback_result(stock_name, chart_type, response.text, "JSON 파싱 실패", extracted_stock_code, chart_data, additional_info, trading_type)
+                                    fallback_result = self._create_fallback_result(stock_name, chart_type, response.text, "JSON 파싱 실패", stock_code, chart_data, additional_info, trading_type)
                                     fallback_result["original_ai_response"] = response.text
                                     return fallback_result
                         else:
-                            print(f"⚠️ AI 응답이 JSON 형식이 아닙니다 (시도 {attempt + 1})")
                             if attempt < max_retries - 1:
-                                print(f"🔄 재시도 중... ({attempt + 2}/{max_retries})")
                                 time.sleep(2)
                                 continue
                             else:
-                                print(f"❌ 모든 시도 실패. 마지막 응답: {response.text}")
-                                fallback_result = self._create_fallback_result(stock_name, chart_type, response.text, "JSON 형식 아님", extracted_stock_code, chart_data, additional_info, trading_type)
+                                fallback_result = self._create_fallback_result(stock_name, chart_type, response.text, "JSON 형식 아님", stock_code, chart_data, additional_info, trading_type)
                                 fallback_result["original_ai_response"] = response.text
                                 return fallback_result
                     else:
-                        print(f"❌ AI 분석 응답이 없습니다 (시도 {attempt + 1})")
                         if attempt < max_retries - 1:
-                            print(f"🔄 재시도 중... ({attempt + 2}/{max_retries})")
                             time.sleep(2)
                             continue
                         else:
-                            return None
+                            # AI 분석 응답이 없는 경우 fallback 결과 생성
+                            fallback_result = self._create_fallback_result(stock_name, chart_type, "AI 분석 응답 없음", "응답 없음", stock_code, chart_data, additional_info, trading_type)
+                            return fallback_result
                             
                 except Exception as e:
-                    print(f"❌ AI 분석 중 오류 발생 (시도 {attempt + 1}): {e}")
                     if attempt < max_retries - 1:
-                        print(f"🔄 재시도 중... ({attempt + 2}/{max_retries})")
                         time.sleep(2)
                         continue
                     else:
-                        return None
+                        # AI 분석 중 오류 발생 시 fallback 결과 생성
+                        fallback_result = self._create_fallback_result(stock_name, chart_type, f"AI 분석 오류: {str(e)}", "AI 분석 오류", stock_code, chart_data, additional_info, trading_type)
+                        return fallback_result
             
-            return None
+            # 모든 시도가 실패한 경우 fallback 결과 생성
+            fallback_result = self._create_fallback_result(stock_name, chart_type, "모든 시도 실패", "시도 실패", stock_code, chart_data, additional_info, trading_type)
+            return fallback_result
                 
         except Exception as e:
-            print(f"❌ AI 분석 중 예상치 못한 오류 발생: {e}")
-            return None
+            # 예상치 못한 오류 발생 시 fallback 결과 생성
+            fallback_result = self._create_fallback_result(stock_name, chart_type, f"예상치 못한 오류: {str(e)}", "예상치 못한 오류", stock_code, chart_data, additional_info, trading_type)
+            return fallback_result
     
-    def _run_summary_analysis(self, image_path: str, stock_name: str, chart_type: str, 
+    def _run_summary_analysis(self, image_path: str, stock_name: str, stock_code: str, chart_type: str, 
                              chart_data: Optional[pd.DataFrame], json_data_path: str, 
                              csv_data_path: str, text_summary_path: str, 
                              individual_result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -955,7 +916,6 @@ class AIChartAnalyzer:
             # 요약 프롬프트 가져오기
             summary_prompt = self.prompts.get_summary_prompt(chart_type)
             if not summary_prompt:
-                print(f"⚠️ {chart_type} 요약 프롬프트를 찾을 수 없습니다.")
                 return None
             
             print(f"📝 요약 프롬프트 준비 완료")
@@ -1458,9 +1418,9 @@ class AIChartAnalyzer:
                 stock_name = mapped_name
             else:
                 # DB에서도 찾지 못한 경우 종목코드를 종목명으로 사용
-                stock_name = f"알 수 없음 ({stock_code})"
+                stock_name = stock_code
         else:
-            stock_name = "알 수 없음"
+            stock_name = stock_code
         
         
         result = {
@@ -1486,7 +1446,7 @@ class AIChartAnalyzer:
         # AI 응답이 JSON 형식이 아니거나 파싱에 실패한 경우 실행됨
         # 현재 가장 많이 사용되는 경로 (AI 응답이 JSON 형식이 아니기 때문)
         # 거래일, 거래대금, 순위 정보를 DB에서 조회하여 추가
-        result = self._add_trading_info_to_result(result, stock_code, "파싱실패", chart_type, ai_response, trading_type)
+        result = self._add_trading_info_to_result(result, stock_code, "파싱실패", chart_type, ai_response, trading_type, result)
         
         return result
 
@@ -1865,9 +1825,55 @@ class AIChartAnalyzer:
             print(f"⚠️ 주차 계산 중 오류: {e}")
             return f"{date.year}년 1주차"
 
+    def _extract_trading_date_from_json_data(self, json_data: dict, chart_type: str) -> str:
+        """
+        JSON 데이터의 data_period.end 값을 활용한 거래일 추출 (우선순위 1)
+        
+        Args:
+            json_data (dict): JSON 분석 결과 데이터
+            chart_type (str): 차트 타입 (일봉, 주봉, 월봉)
+            
+        Returns:
+            str: 추출된 거래일/거래기간 (추출 실패 시 "N/A")
+        """
+        try:
+            # JSON 데이터에서 data_period.end 추출
+            if '차트데이터' in json_data and 'metadata' in json_data['차트데이터']:
+                metadata = json_data['차트데이터']['metadata']
+                if 'data_period' in metadata and 'end' in metadata['data_period']:
+                    end_date_str = metadata['data_period']['end']
+                    
+                    # 날짜 파싱
+                    from datetime import datetime
+                    end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+                    
+                    if chart_type == "일봉":
+                        # 일봉: YYYY-MM-DD 형식 그대로 반환
+                        print(f"📅 일봉 거래일 추출 (JSON): {end_date_str}")
+                        return end_date_str
+                        
+                    elif chart_type == "주봉":
+                        # 주봉: 주차 형식으로 변환
+                        week_info = self._calculate_week_number(end_date)
+                        print(f"📅 주봉 주차 추출 (JSON): {week_info}")
+                        return week_info
+                        
+                    elif chart_type == "월봉":
+                        # 월봉: YYYY년 MM월 형식으로 변환
+                        month_str = end_date.strftime('%Y년 %m월')
+                        print(f"📅 월봉 거래월 추출 (JSON): {month_str}")
+                        return month_str
+            
+            print(f"⚠️ {chart_type} JSON에서 거래일 추출 실패")
+            return "N/A"
+            
+        except Exception as e:
+            print(f"❌ JSON 거래일 추출 중 오류: {e}")
+            return "N/A"
+
     def _extract_trading_date_from_ai_result(self, ai_result_text: str, chart_type: str) -> str:
         """
-        AI 분석 결과에서 거래일/거래기간 추출 (다양한 패턴 지원)
+        AI 분석 결과에서 거래일/거래기간 추출 (fallback 방식)
         
         Args:
             ai_result_text (str): AI 분석 결과 텍스트
@@ -1885,14 +1891,14 @@ class AIChartAnalyzer:
                 date_match = re.search(date_pattern, ai_result_text)
                 if date_match:
                     extracted_date = date_match.group(1)
-                    print(f"📅 일봉 거래일 추출: {extracted_date}")
+                    print(f"📅 일봉 거래일 추출 (AI 텍스트): {extracted_date}")
                     return extracted_date
                     
             elif chart_type == "주봉":
                 # 주봉: 다양한 패턴으로 주차 추출 시도
                 extracted_week = self._extract_weekly_date_flexible(ai_result_text)
                 if extracted_week != "N/A":
-                    print(f"📅 주봉 주차 추출: {extracted_week}")
+                    print(f"📅 주봉 주차 추출 (AI 텍스트): {extracted_week}")
                     # 성공한 경우 캐시에 저장
                     self._weekly_trading_date_cache = extracted_week
                     return extracted_week
@@ -1911,7 +1917,7 @@ class AIChartAnalyzer:
                 month_match = re.search(month_pattern, ai_result_text)
                 if month_match:
                     extracted_month = month_match.group(1)
-                    print(f"📅 월봉 거래월 추출: {extracted_month}")
+                    print(f"📅 월봉 거래월 추출 (AI 텍스트): {extracted_month}")
                     return extracted_month
             
             print(f"⚠️ {chart_type} 거래일/기간 추출 실패")
@@ -1934,58 +1940,41 @@ class AIChartAnalyzer:
         import re
         from datetime import datetime
         
-        # 패턴 1: "2025년 35주차" 형식 (숫자 주차)
-        pattern1 = r'(\d{4}년 \d{1,2}주차)'
-        match1 = re.search(pattern1, ai_result_text)
-        if match1:
-            return match1.group(1)
+        # 정규식 패턴들을 미리 컴파일하여 성능 최적화
+        patterns = [
+            (r'(\d{4}년 \d{1,2}주차)', 1),  # 패턴 1: "2025년 35주차" 형식
+            (r'(\d{4}년 \d{1,2}월 \d{1,2}주차)', 1),  # 패턴 2: "2025년 9월 1주차" 형식
+            (r'(\d{4}년 \d{1,2}월 \d{1,2}일 ~ \d{4}년 \d{1,2}월 \d{1,2}일)', 1),  # 패턴 3: "2025년 8월 25일 ~ 2025년 9월 1일" 형식
+            (r'\*\*1\)\s*거래 요약:\*\*\s*(\d{4}년 \d{1,2}주차)', 1),  # 패턴 4: "**1) 거래 요약:** 2025년 35주차(...)" 형식
+            (r'1\.\s*\*\*거래 요약:\*\*\s*(\d{4}년 \d{1,2}주차)', 1),  # 패턴 5: "1. **거래 요약:** 2025년 35주차(...)" 형식
+            (r'(\d{4}년 \d{1,2}월 \d{1,2}일)', 1)  # 패턴 6: "2025년 9월 1일 기준" 형식
+        ]
         
-        # 패턴 2: "2025년 9월 1주차" 형식 (월+주차)
-        pattern2 = r'(\d{4}년 \d{1,2}월 \d{1,2}주차)'
-        match2 = re.search(pattern2, ai_result_text)
-        if match2:
-            return match2.group(1)
-        
-        # 패턴 3: "2025년 8월 25일 ~ 2025년 9월 1일" 형식
-        pattern3 = r'(\d{4}년 \d{1,2}월 \d{1,2}일 ~ \d{4}년 \d{1,2}월 \d{1,2}일)'
-        match3 = re.search(pattern3, ai_result_text)
-        if match3:
-            return match3.group(1)
-        
-        # 패턴 4: "**1) 거래 요약:** 2025년 35주차(...)" 형식
-        pattern4 = r'\*\*1\)\s*거래 요약:\*\*\s*(\d{4}년 \d{1,2}주차)'
-        match4 = re.search(pattern4, ai_result_text)
-        if match4:
-            return match4.group(1)
-        
-        # 패턴 5: "1. **거래 요약:** 2025년 35주차(...)" 형식
-        pattern5 = r'1\.\s*\*\*거래 요약:\*\*\s*(\d{4}년 \d{1,2}주차)'
-        match5 = re.search(pattern5, ai_result_text)
-        if match5:
-            return match5.group(1)
-        
-        # 패턴 6: "2025년 9월 1일 기준" 형식에서 주차 계산 (마지막에 시도)
-        pattern6 = r'(\d{4}년 \d{1,2}월 \d{1,2}일)'
-        match6 = re.search(pattern6, ai_result_text)
-        if match6:
-            try:
-                date_str = match6.group(1)
-                # "2025년 9월 1일" -> "2025-09-01" 변환
-                date_obj = datetime.strptime(date_str, "%Y년 %m월 %d일")
-                # 해당 날짜의 주차 계산 (ISO 8601 표준)
-                week_info = self._calculate_week_number(date_obj)
-                return week_info
-            except Exception as e:
-                print(f"⚠️ 날짜 파싱 실패: {e}")
+        # 컴파일된 패턴으로 검색
+        for pattern, group_num in patterns:
+            match = re.search(pattern, ai_result_text)
+            if match:
+                if pattern == patterns[-1][0]:  # 마지막 패턴 (날짜 형식)인 경우
+                    try:
+                        date_str = match.group(group_num)
+                        # "2025년 9월 1일" -> "2025-09-01" 변환
+                        date_obj = datetime.strptime(date_str, "%Y년 %m월 %d일")
+                        # 해당 날짜의 주차 계산 (ISO 8601 표준)
+                        week_info = self._calculate_week_number(date_obj)
+                        return week_info
+                    except Exception as e:
+                        pass  # 날짜 파싱 실패
+                else:
+                    return match.group(group_num)
         
         return "N/A"
     
     def clear_weekly_trading_date_cache(self):
         """주봉 거래일 캐시 초기화 (분석 완료 시 호출)"""
         self._weekly_trading_date_cache = None
-        print("🧹 주봉 거래일 캐시 초기화 완료")
+        pass  # 주봉 거래일 캐시 초기화 완료
 
-    def _get_trading_info_from_db(self, stock_code: str, chart_type: str = "일봉", ai_result_text: str = "", trading_type: str = "거래대금") -> Dict[str, Any]:
+    def _get_trading_info_from_db(self, stock_code: str, chart_type: str = "일봉", ai_result_text: str = "", trading_type: str = "거래대금", json_data: dict = None) -> Dict[str, Any]:
         """
         DB에서 거래일, 거래대금, 거래율, 순위, 유통주식수, 거래량 정보 조회
         
@@ -1994,6 +1983,7 @@ class AIChartAnalyzer:
             chart_type (str): 차트 타입 (일봉, 주봉, 월봉)
             ai_result_text (str): AI 분석 결과 텍스트 (거래일 추출용)
             trading_type (str): 거래 타입 (거래대금, 거래율)
+            json_data (dict): JSON 분석 결과 데이터 (거래일 추출용)
             
         Returns:
             Dict[str, Any]: 거래정보 딕셔너리
@@ -2029,11 +2019,24 @@ class AIChartAnalyzer:
                     "순위": "N/A"
                 }
             
-            # 1. AI 분석 결과에서 거래일/거래기간 추출
+            # 1. 거래일/거래기간 추출 (JSON 데이터 우선, AI 텍스트 fallback)
             extracted_date = "N/A"
-            if ai_result_text and chart_type in ["일봉", "주봉", "월봉"]:
+            
+            # 1-1. JSON 데이터에서 거래일 추출 (우선순위 1)
+            if json_data and chart_type in ["일봉", "주봉", "월봉"]:
+                extracted_date = self._extract_trading_date_from_json_data(json_data, chart_type)
+                if extracted_date != "N/A":
+                    print(f"📅 JSON 데이터에서 추출된 거래일/기간: {extracted_date}")
+                else:
+                    print(f"⚠️ JSON 데이터에서 거래일 추출 실패")
+            
+            # 1-2. JSON 추출 실패 시 AI 텍스트에서 추출 (fallback)
+            if extracted_date == "N/A" and ai_result_text and chart_type in ["일봉", "주봉", "월봉"]:
                 extracted_date = self._extract_trading_date_from_ai_result(ai_result_text, chart_type)
-                print(f"📅 AI 결과에서 추출된 거래일/기간: {extracted_date}")
+                if extracted_date != "N/A":
+                    print(f"📅 AI 텍스트에서 추출된 거래일/기간: {extracted_date}")
+                else:
+                    print(f"⚠️ AI 텍스트에서도 거래일 추출 실패")
             
             # 2. 자체적으로 거래대금/거래율 순위 조회 (VolumeRankingDataManager 의존성 제거)
             try:
@@ -2357,7 +2360,7 @@ class AIChartAnalyzer:
                 "거래대금": "N/A"
             }
     
-    def _add_trading_info_to_result(self, result: Dict[str, Any], stock_code: str, result_type: str, chart_type: str = "일봉", ai_result_text: str = "", trading_type: str = "거래대금") -> Dict[str, Any]:
+    def _add_trading_info_to_result(self, result: Dict[str, Any], stock_code: str, result_type: str, chart_type: str = "일봉", ai_result_text: str = "", trading_type: str = "거래대금", json_data: dict = None) -> Dict[str, Any]:
         """
         결과에 거래일, 거래대금, 거래율, 순위, 유통주식수, 거래량 정보 추가
         
@@ -2383,7 +2386,7 @@ class AIChartAnalyzer:
         try:
             # 거래정보 조회
             print(f"🔍 거래정보 조회 시작: {stock_code} ({chart_type}, {trading_type})")
-            trading_info = self._get_trading_info_from_db(stock_code, chart_type, ai_result_text, trading_type)
+            trading_info = self._get_trading_info_from_db(stock_code, chart_type, ai_result_text, trading_type, json_data)
             print(f"📊 조회된 거래정보: {trading_info}")
             
             # 종목정보 섹션이 있는지 확인
@@ -2434,7 +2437,7 @@ class AIChartAnalyzer:
         # 기본 fallback 결과 생성 시 실행됨
         # 현재는 거의 사용되지 않지만 향후 확장성을 위해 유지
         # 거래일, 거래대금, 순위 정보를 DB에서 조회하여 추가
-        result = self._add_trading_info_to_result(result, stock_code, "fallback", chart_type, ai_response, trading_type)
+        result = self._add_trading_info_to_result(result, stock_code, "fallback", chart_type, ai_response, trading_type, result)
         
         return result
 
@@ -2676,7 +2679,7 @@ class AIChartAnalyzer:
                     continue
                 
                 stock_info = result.get("종목정보", {})
-                stock_name = stock_info.get("종목명", "알 수 없음")
+                stock_name = stock_info.get("종목명", stock_code)
                 stock_code = stock_info.get("종목번호", "000000")
                 summary_item = {
                     "종목명": stock_name,

@@ -41,7 +41,7 @@ class BatchAnalyzer:
     def start_batch_analysis(self, stock_list_path: str, chart_type: str, batch_id: str, trading_type: str = ''):
         """대량 분석 시작"""
         try:
-            logger.info(f"대량 분석 시작: batch_id={batch_id}, trading_type={trading_type}")
+            pass  # 대량 분석 시작
             
             # 초기 상태 설정
             self.batch_status[batch_id] = {
@@ -58,7 +58,7 @@ class BatchAnalyzer:
             # 동기적으로 분석 실행 (스레드 문제 해결)
             self._run_batch_analysis(stock_list_path, chart_type, batch_id, trading_type)
             
-            logger.info(f"대량 분석 완료: batch_id={batch_id}")
+            pass  # 대량 분석 완료
             
         except Exception as e:
             logger.error(f"대량 분석 시작 오류: {e}")
@@ -78,15 +78,13 @@ class BatchAnalyzer:
             if not os.path.isabs(stock_list_path):
                 stock_list_path = os.path.abspath(stock_list_path)
             
-            logger.info(f"현재 작업 디렉토리: {os.getcwd()}")
-            logger.info(f"파일 경로 확인: {stock_list_path}")
-            logger.info(f"파일 존재 여부: {os.path.exists(stock_list_path)}")
+            pass  # 파일 경로 확인
             
             # 파일 내용 직접 확인
             if os.path.exists(stock_list_path):
                 with open(stock_list_path, 'r', encoding='utf-8') as f:
                     content = f.read()
-                    logger.info(f"파일 내용: {repr(content)}")
+                    pass  # 파일 내용 확인
             
             stock_codes = get_stock_list_from_file(stock_list_path)
             
@@ -96,12 +94,12 @@ class BatchAnalyzer:
             self.batch_status[batch_id]['total'] = len(stock_codes)
             self.batch_results[batch_id] = []
             
-            logger.info(f"대량 분석 시작: {len(stock_codes)}개 종목, 차트타입={chart_type}, 거래타입={trading_type}")
+            pass  # 대량 분석 시작
             
             # 각 종목별 분석
             for i, stock_code in enumerate(stock_codes):
                 try:
-                    logger.info(f"종목 분석 중: {stock_code} ({i+1}/{len(stock_codes)})")
+                    pass  # 종목 분석 중
                     
                     # 기존 배치 분석 모듈 활용
                     from batch_stock_analyzer_optimized import analyze_single_stock_fast
@@ -114,7 +112,7 @@ class BatchAnalyzer:
                     }
                     chart_type_en = chart_type_mapping.get(chart_type, "daily")
                     
-                    logger.info(f"배치 분석 시작: {stock_code}, 차트타입={chart_type}, 차트타입_en={chart_type_en}")
+                    pass  # 배치 분석 시작
                     
                     # FastProgressTracker 인스턴스 생성
                     from batch_stock_analyzer_optimized import FastProgressTracker
@@ -124,14 +122,11 @@ class BatchAnalyzer:
                         stock_code, chart_type, chart_type_en, tracker, batch_id, trading_type
                     )
                     
-                    logger.info(f"배치 분석 결과: {batch_result}")
-                    logger.info(f"배치 분석 결과 타입: {type(batch_result)}")
-                    logger.info(f"배치 분석 success 값: {batch_result.get('success', 'NOT_FOUND')}")
-                    logger.info(f"배치 분석 error 값: {batch_result.get('error', 'NOT_FOUND')}")
+                    pass  # 배치 분석 결과 확인
                     
                     # 배치 결과를 AI 분석 결과 형식으로 변환
                     if batch_result.get('success', False):
-                        logger.info(f"종목 {stock_code} 분석 성공")
+                        pass  # 종목 분석 성공
                         # 성공한 경우 실제 AI 분석 결과 파일 찾기
                         ai_results_dir = "ai_analysis_results"
                         if os.path.exists(ai_results_dir):
@@ -142,7 +137,7 @@ class BatchAnalyzer:
                                 if file.startswith(f"analysis_{chart_type_en}_{stock_code}_") and file.endswith('.json'):
                                     json_files.append(file)
                             
-                            logger.info(f"찾은 JSON 파일들: {json_files}")
+                            pass  # JSON 파일들 찾음
                             
                             if json_files:
                                 # 가장 최근 JSON 파일 로드
@@ -157,8 +152,15 @@ class BatchAnalyzer:
                                     stock_info = ai_analysis_result.get("종목정보", {})
                                     analysis_score = ai_analysis_result.get("종합분석점수", {})
                                     
+                                    # 종목명 처리: "알 수 없음"으로 시작하는 경우 종목코드 사용
+                                    ai_stock_name = stock_info.get('종목명', stock_code)
+                                    if ai_stock_name and ai_stock_name.startswith('알 수 없음'):
+                                        final_stock_name = stock_code
+                                    else:
+                                        final_stock_name = ai_stock_name
+                                    
                                     result = {
-                                        'stock_name': stock_info.get('종목명', stock_code),
+                                        'stock_name': final_stock_name,
                                         'stock_code': stock_code,
                                         'chart_type': chart_type,
                                         'analysis_score': analysis_score.get('점수', 75),
@@ -170,9 +172,9 @@ class BatchAnalyzer:
                                         'success': True,
                                         'ai_analysis_done': True
                                     }
-                                    logger.info(f"AI 분석 결과 로드 성공: {latest_json}")
+                                    pass  # AI 분석 결과 로드 성공
                                 except Exception as e:
-                                    logger.warning(f"AI 분석 결과 파일 로드 실패: {e}")
+                                    pass  # AI 분석 결과 파일 로드 실패
                                     # 기본 결과 생성
                                     result = {
                                         'stock_name': stock_code,
@@ -185,7 +187,7 @@ class BatchAnalyzer:
                                         'ai_analysis_done': False
                                     }
                             else:
-                                logger.warning(f"종목 {stock_code}의 AI 분석 결과 파일을 찾을 수 없습니다")
+                                pass  # AI 분석 결과 파일을 찾을 수 없음
                                 # AI 분석 결과 파일이 없는 경우 기본 결과 생성
                                 result = {
                                     'stock_name': stock_code,
@@ -198,7 +200,7 @@ class BatchAnalyzer:
                                     'ai_analysis_done': False
                                 }
                         else:
-                            logger.warning(f"AI 분석 결과 폴더가 존재하지 않습니다: {ai_results_dir}")
+                            pass  # AI 분석 결과 폴더가 존재하지 않음
                             # AI 분석 결과 폴더가 없는 경우 기본 결과 생성
                             result = {
                                 'stock_name': stock_code,
@@ -373,7 +375,7 @@ class BatchAnalyzer:
                 self.batch_status[batch_id]['status'] = 'failed'
                 self.batch_status[batch_id]['error'] = f"결과 저장 실패: {str(e)}"
             
-            logger.info(f"대량 분석 완료: batch_id={batch_id}")
+            pass  # 대량 분석 완료
             
         except Exception as e:
             logger.error(f"대량 분석 실행 오류: {e}")

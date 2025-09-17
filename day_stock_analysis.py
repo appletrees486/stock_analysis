@@ -946,7 +946,7 @@ def create_stock_chart(hist, stock_code):
         pass
     
     #fig.suptitle(f'{stock_code} 일봉 차트 (6개월/120거래일) - 이미지 참고 스타일', fontsize=16, fontweight='bold')
-    fig.suptitle(f'{chart_stock_name} 일봉 차트 분석(6Months)', fontsize=16, fontweight='bold')
+    fig.suptitle(f'{chart_stock_name} ({stock_code}) 일봉 차트 분석(6Months)', fontsize=16, fontweight='bold')
     
     # 1. 메인 차트 (캔들차트 + 보조지표 오버레이)
     ax1 = axes[0]
@@ -1125,7 +1125,8 @@ def create_stock_chart(hist, stock_code):
         # 실패시 현재 날짜 사용
         db_latest_date = datetime.now().strftime("%Y%m%d")
     
-    base_filename = f"daily_{stock_name}_{stock_code}_{db_latest_date}.png"
+    # 종목명에서 띄어쓰기 제거하여 파일명 생성
+    base_filename = f"daily_{stock_name.replace(' ', '')}_{stock_code}_{db_latest_date}.png"
     
     # 파일명에서 특수문자 제거 및 공백을 언더스코어로 변경
     base_filename = base_filename.replace(" ", "_").replace("/", "_").replace("\\", "_").replace(":", "_")
@@ -2442,9 +2443,9 @@ def main():
                 # JSON 데이터 저장 (보조지표 포함 데이터 사용)
                 json_data_path = save_chart_data_to_json(chart_data_with_indicators, stock_code, stock_name)
                 
-                # AI 분석 실행
+                # AI 분석 실행 (이미지는 DOCX 생성용으로만 사용, AI 분석에는 JSON 데이터만 전달)
                 analysis_result = ai_analyzer.analyze_chart_image(
-                    image_path=chart_path,
+                    image_path=chart_path,  # DOCX 생성용으로만 사용
                     stock_name=stock_name,
                     chart_type="일봉",
                     chart_data=chart_data_with_indicators,

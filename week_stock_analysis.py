@@ -948,8 +948,8 @@ def create_weekly_stock_chart(hist, stock_code):
     last_week_year, last_week_num = WeekCalculator.get_week_number(df.index[-1])
     last_week_info = f"{last_week_year}년 {last_week_num}주차"
     
-    # 차트 제목에 실제 데이터 기간과 주차 정보 표시
-    fig.suptitle(f'{chart_stock_name} 주봉 차트 분석\n{start_date} ~ {end_date} ({last_week_info})', 
+    # 차트 제목에 실제 데이터 기간과 주차 정보 표시 (종목코드 포함)
+    fig.suptitle(f'{chart_stock_name} ({stock_code}) 주봉 차트 분석\n{start_date} ~ {end_date} ({last_week_info})', 
                  fontsize=16, fontweight='bold')
     
     # 1. 메인 차트 (캔들차트 + 보조지표 오버레이)
@@ -1120,7 +1120,8 @@ def create_weekly_stock_chart(hist, stock_code):
     
     # 파일명 생성: weekly_종목명_종목번호_생성일.png
     current_date = datetime.now().strftime("%Y%m%d")
-    base_filename = f"weekly_{stock_name}_{stock_code}_{current_date}.png"
+    # 종목명에서 띄어쓰기 제거하여 파일명 생성
+    base_filename = f"weekly_{stock_name.replace(' ', '')}_{stock_code}_{current_date}.png"
     
     # 파일명에서 특수문자 제거 및 공백을 언더스코어로 변경
     base_filename = base_filename.replace(" ", "_").replace("/", "_").replace("\\", "_").replace(":", "_")

@@ -980,14 +980,18 @@ def create_monthly_stock_chart(hist, stock_code):
         if db.connect():
             stock_name_query = "SELECT stock_name FROM stocks WHERE stock_code = %s"
             stock_info = db.fetch_one(stock_name_query, (stock_code,))
-            if stock_info:
+            if stock_info and stock_info.get('stock_name'):
                 chart_stock_name = stock_info['stock_name']
+                print(f"✅ DB에서 종목명 조회 성공: {stock_code} -> {chart_stock_name}")
+            else:
+                print(f"⚠️ DB에서 종목명을 찾을 수 없음: {stock_code}")
             db.disconnect()
-    except:
+    except Exception as e:
+        print(f"⚠️ DB 조회 중 오류: {e}, 종목코드를 종목명으로 사용: {stock_code}")
         # 실패시 기본값 사용
         pass
     
-    fig.suptitle(f'{chart_stock_name} 월봉 차트 분석(10Years)', fontsize=16, fontweight='bold')
+    fig.suptitle(f'{chart_stock_name} ({stock_code}) 월봉 차트 분석(10Years)', fontsize=16, fontweight='bold')
     
     # 1. 메인 차트 (캔들차트 + 보조지표 오버레이)
     ax1 = axes[0]
@@ -1126,31 +1130,10 @@ def create_monthly_stock_chart(hist, stock_code):
         os.makedirs(charts_dir)
         print(f"📁 {charts_dir} 폴더를 생성했습니다.")
     
-    # 종목명 가져오기 (DB stocks 테이블에서)
-    stock_name = stock_code  # 기본값
-    try:
-        from database_config import DatabaseManager
-        db_manager = DatabaseManager()
-        if db_manager.connect():
-            # stocks 테이블에서 종목명 조회
-            query = "SELECT stock_name FROM stocks WHERE stock_code = %s"
-            result = db_manager.execute_query(query, (stock_code,))
-            
-            if result and len(result) > 0:
-                stock_name = str(result[0][0])
-                print(f"✅ DB에서 종목명 조회 성공: {stock_code} -> {stock_name}")
-            else:
-                print(f"⚠️ DB에서 종목명을 찾을 수 없음: {stock_code}")
-            
-            db_manager.disconnect()
-        else:
-            print(f"⚠️ DB 연결 실패로 종목코드를 종목명으로 사용: {stock_code}")
-    except Exception as e:
-        print(f"⚠️ DB 조회 중 오류: {e}, 종목코드를 종목명으로 사용: {stock_code}")
-    
-    # 파일명 생성: monthly_종목명_종목번호_생성일.png
+    # 파일명 생성: monthly_종목명_종목코드_생성일.png (차트 제목에서 가져온 종목명 사용)
     current_date = datetime.now().strftime("%Y%m%d")
-    base_filename = f"monthly_{stock_name}_{stock_code}_{current_date}.png"
+    # 종목명에서 띄어쓰기 제거하여 파일명 생성
+    base_filename = f"monthly_{chart_stock_name.replace(' ', '')}_{stock_code}_{current_date}.png"
     
     # 파일명에서 특수문자 제거 및 공백을 언더스코어로 변경
     base_filename = base_filename.replace(" ", "_").replace("/", "_").replace("\\", "_").replace(":", "_")
