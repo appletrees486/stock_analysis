@@ -1229,10 +1229,17 @@ class BatchAnalyzer:
                                     volume_clean = volume.replace(",", "").replace("주", "").strip()
                                     shares_clean = outstanding_shares.replace(",", "").replace("주", "").strip()
                                     
+                                    # 거래율에 천단위 쉼표 적용
+                                    try:
+                                        rate_numeric = float(rate_value)
+                                        formatted_turnover_rate = f"{rate_numeric:,.2f}%"
+                                    except:
+                                        formatted_turnover_rate = turnover_rate
+                                    
                                     if volume_clean.isdigit() and shares_clean.isdigit():
-                                        trading_info_text = f"위 주식의 {period_text} 거래량은 {volume}로 유통주식수 {outstanding_shares} 대비 {turnover_rate}로 전체 종목 중 상위 {ranking}를 차지하여 분석 대상에 포함되었습니다."
+                                        trading_info_text = f"위 주식의 {period_text} 거래량은 {volume}로 유통주식수 {outstanding_shares} 대비 {formatted_turnover_rate}로 전체 종목 중 상위 {ranking}를 차지하여 분석 대상에 포함되었습니다."
                                     else:
-                                        trading_info_text = f"위 주식의 {period_text} 거래률은 {turnover_rate}로 전체 종목 중 상위 {ranking}를 차지하여 분석 대상에 포함되었습니다."
+                                        trading_info_text = f"위 주식의 {period_text} 거래율은 {formatted_turnover_rate}로 전체 종목 중 상위 {ranking}를 차지하여 분석 대상에 포함되었습니다."
                                 else:
                                     trading_info_text = f"위 주식의 {period_text} 거래율 정보를 확인할 수 없어 분석 대상에 포함되었습니다."
                                 
@@ -1253,7 +1260,7 @@ class BatchAnalyzer:
                                 
                                 if amount_numeric > 0:
                                     amount_billion = amount_numeric / 100_000_000  # 억원 단위로 변환
-                                    amount_text = f"{amount_billion:.1f}억원"
+                                    amount_text = f"{amount_billion:,.0f}억원"
                                 else:
                                     amount_text = total_trading_amount  # 원본 문자열 사용
                                 

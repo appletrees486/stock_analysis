@@ -65,7 +65,7 @@ class StockNameMapper:
             
             if result:
                 for row in result:
-                    stock_code = str(row['stock_code']).zfill(6)  # 6자리로 패딩
+                    stock_code = str(row['stock_code'])  # 원본 종목코드 그대로 사용
                     stock_name = str(row['stock_name'])
                     self.stock_mapping[stock_code] = stock_name
                 
@@ -109,20 +109,15 @@ class StockNameMapper:
         if not stock_code:
             return "알 수 없음"
         
-        # 종목번호 정리 (앞의 0 제거 후 6자리로 패딩)
-        clean_code = stock_code.lstrip('0')
-        if not clean_code:
-            clean_code = '0'
-        
-        padded_code = clean_code.zfill(6)
-        
-        # DB 매핑에서 찾기
-        if padded_code in self.stock_mapping:
-            return self.stock_mapping[padded_code]
-        
-        # 원본 코드로도 시도
+        # 원본 종목코드로 먼저 시도
         if stock_code in self.stock_mapping:
             return self.stock_mapping[stock_code]
+        
+        # 숫자만 있는 경우 6자리 패딩으로도 시도
+        if stock_code.isdigit():
+            padded_code = stock_code.zfill(6)
+            if padded_code in self.stock_mapping:
+                return self.stock_mapping[padded_code]
         
         # DB에서 실시간 조회 시도 (DB 연결이 있는 경우)
         if self.use_db and self.db_config:
@@ -179,17 +174,40 @@ class StockNameMapper:
             
             # 파일명 패턴 분석
             if len(parts) >= 3:
-                # weekly_Samsung_Electronics_Co.,_Ltd._005930_20250804 형태
-                # 또는 daily_380550_380550_20250804 형태
+                # 특별한 패턴 처리: analysis_weekly_ 또는 analysis_daily_ 또는 analysis_monthly_
+                if len(parts) >= 3 and parts[0] == "analysis" and parts[1] in ["daily", "weekly", "monthly"]:
+                    # analysis_weekly_005930_... 형태에서 종목번호는 3번째 부분
+                    if len(parts) >= 3 and len(parts[2]) == 6 and (parts[2].isdigit() or parts[2].isalnum()):
+                        stock_code = parts[2]
+                        # 종목명은 DB에서 조회 (종목번호로)
+                        stock_name = self.get_stock_name(stock_code)
+                        print(f"✅ analysis 패턴에서 종목정보 추출: {stock_code} -> {stock_name}")
+                        return stock_name, stock_code
                 
+                # 차트 파일 패턴 처리: weekly_종목명_종목번호_날짜.png
+                if len(parts) >= 3 and parts[0] in ["daily", "weekly", "monthly"]:
+                    # weekly_삼성전자_005930_20250917_v1 형태에서 종목번호 찾기
+                    # 첫 번째 부분은 차트 타입이므로 제외하고 찾기
+                    for i, part in enumerate(parts[1:], 1):  # parts[1:]부터 시작
+                        if len(part) == 6 and (part.isdigit() or part.isalnum()):
+                            stock_code = part
+                            # 종목명은 DB에서 조회 (종목번호로)
+                            stock_name = self.get_stock_name(stock_code)
+                            print(f"✅ 차트 파일 패턴에서 종목정보 추출: {stock_code} -> {stock_name}")
+                            return stock_name, stock_code
+                
+                # 기존 패턴 처리: weekly_Samsung_Electronics_Co.,_Ltd._005930_20250804 형태
                 # 마지막에서 두 번째 부분이 종목번호일 가능성이 높음
                 for i, part in enumerate(parts):
                     # 6자리 숫자 또는 영문+숫자 조합인 경우 종목번호로 간주
                     if len(part) == 6 and (part.isdigit() or part.isalnum()):
                         stock_code = part
-                        # 종목번호 앞의 부분들을 종목명으로 조합
-                        stock_name_parts = parts[1:i] if i > 1 else parts[1:]
-                        stock_name = "_".join(stock_name_parts)
+                        # 종목번호 앞의 부분들을 종목명으로 조합 (단, analysis, daily, weekly, monthly 제외)
+                        stock_name_parts = []
+                        for j in range(1, i):
+                            if parts[j] not in ["analysis", "daily", "weekly", "monthly"]:
+                                stock_name_parts.append(parts[j])
+                        stock_name = "_".join(stock_name_parts) if stock_name_parts else ""
                         break
                 
                 # 종목번호를 찾지 못한 경우, 파일명에서 직접 추출 시도
@@ -681,18 +699,20 @@ class AIChartAnalyzer:
                     
                     # 안전한 포맷팅 함수
                     def safe_format_number(value, format_str=":,.0f", default="N/A"):
+                        """숫자를 안전하게 포맷팅 (천단위 쉼표, 소수점 제거)"""
                         try:
                             if value is None or value == 'N/A':
                                 return default
-                            return f"{value:{format_str}}"
+                            return f"{value:,.0f}"
                         except (ValueError, TypeError):
                             return default
                     
                     def safe_format_percent(value, format_str=":+.2f", default="N/A"):
+                        """퍼센트를 안전하게 포맷팅 (천단위 쉼표)"""
                         try:
                             if value is None or value == 'N/A':
                                 return default
-                            return f"{value:{format_str}}%"
+                            return f"{value:,.2f}%"
                         except (ValueError, TypeError):
                             return default
                     
@@ -1336,9 +1356,9 @@ class AIChartAnalyzer:
                             shares_clean = outstanding_shares.replace(",", "").replace("주", "").strip()
                             
                             if volume_clean.isdigit() and shares_clean.isdigit():
-                                trading_info_text = f"위 주식의 {period_text} 거래량은 {volume}로 유통주식수 {outstanding_shares} 대비 {turnover_rate}로 전체 종목 중 상위 {ranking}를 차지하여 분석 대상에 포함되었습니다."
+                                trading_info_text = f"위 주식의 {period_text} 거래대금금은 {volume}로 유통주식수 {outstanding_shares} 대비 {turnover_rate}로 전체 종목 중 상위 {ranking}를 차지하여 분석 대상에 포함되었습니다."
                             else:
-                                trading_info_text = f"위 주식의 {period_text} 거래률은 {turnover_rate}로 전체 종목 중 상위 {ranking}를 차지하여 분석 대상에 포함되었습니다."
+                                trading_info_text = f"위 주식의 {period_text} 거래율은 {turnover_rate}로 전체 종목 중 상위 {ranking}를 차지하여 분석 대상에 포함되었습니다."
                         else:
                             trading_info_text = f"위 주식의 {period_text} 거래율 정보를 확인할 수 없어 분석 대상에 포함되었습니다."
                     else:
@@ -2129,7 +2149,7 @@ class AIChartAnalyzer:
                 return {
                     "거래일": display_date,
                     "거래대금": f"{amount_in_hundred_millions:,.0f}억원",
-                    "거래율": f"{turnover_rate:.2f}%",
+                    "거래율": f"{turnover_rate:,.2f}%",
                     "순위": ranking_display,
                     "유통주식수": f"{outstanding_shares:,.0f}주",
                     "거래량": f"{volume:,.0f}주"

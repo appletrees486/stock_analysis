@@ -250,7 +250,7 @@ def convert_daily_to_weekly(daily_data, stock_code):
             
             if next_date is None or _is_new_trading_week(current_week_start, next_date, holiday_manager):
                 # ✅ 완성된 주인지 확인 - 미완성 주는 제외
-                if current_week_data and not is_complete_week(current_week_start, current_time):
+                if current_week_data and not is_complete_week(current_week_start, daily_data_copy.index[-1]):
                     print(f"   ⚠️ 미완성 주 제외: {current_week_start.strftime('%Y-%m-%d')} 주")
                     break  # 미완성 주는 생성하지 않고 루프 종료
                 
@@ -263,7 +263,7 @@ def convert_daily_to_weekly(daily_data, stock_code):
                     week_volume = sum([d['volume'] for d in current_week_data]) # 주 총 거래량
                     
                     weekly_data.append({
-                        'Date': current_week_start,
+                        'Date': current_week_data[-1]['date'],  # 주의 마지막 거래일(금요일)
                         'Open': week_open,
                         'High': week_high,
                         'Low': week_low,
@@ -939,7 +939,18 @@ def create_weekly_stock_chart(hist, stock_code):
         # 실패시 기본값 사용
         pass
     
-    fig.suptitle(f'{chart_stock_name} 주봉 차트 분석(2Years)', fontsize=16, fontweight='bold')
+    # 실제 데이터 기간과 주차 정보 계산
+    start_date = df.index[0].strftime('%Y-%m-%d')
+    end_date = df.index[-1].strftime('%Y-%m-%d')
+    
+    # 마지막 주차 정보 계산
+    from week_calculator import WeekCalculator
+    last_week_year, last_week_num = WeekCalculator.get_week_number(df.index[-1])
+    last_week_info = f"{last_week_year}년 {last_week_num}주차"
+    
+    # 차트 제목에 실제 데이터 기간과 주차 정보 표시
+    fig.suptitle(f'{chart_stock_name} 주봉 차트 분석\n{start_date} ~ {end_date} ({last_week_info})', 
+                 fontsize=16, fontweight='bold')
     
     # 1. 메인 차트 (캔들차트 + 보조지표 오버레이)
     ax1 = axes[0]
@@ -985,6 +996,7 @@ def create_weekly_stock_chart(hist, stock_code):
     # Y축을 오른쪽으로 이동
     ax1.yaxis.set_label_position('right')
     ax1.yaxis.tick_right()
+    
     
     # 2. 거래량 차트 (두 번째 패널) - 웹 트레이딩 스타일 유지
     ax2 = axes[1]
@@ -1083,8 +1095,13 @@ def create_weekly_stock_chart(hist, stock_code):
                            df.index[3*len(df)//4], df.index[-1]]
             ax.set_xticks(date_indices)
             # 글자 크기 50% 증가 (기본 10에서 15로), 대각선에서 가로로 변경 (rotation=0)
-            ax.set_xticklabels([date.strftime('%Y-%m') for date in date_indices], 
-                              rotation=0, ha='center', fontweight='bold', fontsize=15)
+            # 주차 정보를 포함한 X축 라벨 생성
+            x_labels = []
+            for date in date_indices:
+                year, week = WeekCalculator.get_week_number(date)
+                x_labels.append(f"{date.strftime('%Y-%m')}\n({year}년 {week}주차)")
+            
+            ax.set_xticklabels(x_labels, rotation=0, ha='center', fontweight='bold', fontsize=15)
         else:
             ax.set_xticks([])  # 다른 패널은 X축 눈금 숨김
     
@@ -1133,11 +1150,11 @@ def create_weekly_stock_chart(hist, stock_code):
     import gc
     gc.collect()
     
-    # 차트 데이터 반환 (보조지표 포함)
-    return filepath, df
+    # 차트 데이터 반환 (보조지표 포함) - 일봉 분석과 동일한 패턴
+    return filepath, chart_stock_name, df
 
 def get_stock_name(stock_code):
-    """종목코드로 종목명을 가져오는 함수 - DB에서 조회"""
+    """종목코드로 종목명을 가져오는 함수 - DB에서 조회 (일봉과 동일한 방식)"""
     try:
         # 데이터베이스 연결
         db = DatabaseManager()
@@ -1146,7 +1163,7 @@ def get_stock_name(stock_code):
             print(f"   ⚠️ DB 연결 실패로 종목코드를 종목명으로 사용: {stock_code}")
             return stock_code
         
-        # stocks 테이블에서 종목명 조회
+        # stocks 테이블에서 종목명 조회 (일봉과 동일한 간단한 방식)
         stock_name_query = "SELECT stock_name FROM stocks WHERE stock_code = %s"
         stock_info = db.fetch_one(stock_name_query, (stock_code,))
         
@@ -1155,10 +1172,22 @@ def get_stock_name(stock_code):
             print(f"   ✅ DB에서 종목명 조회 성공: {stock_code} -> {stock_name}")
             db.disconnect()
             return stock_name
-        else:
-            print(f"   ⚠️ 종목명을 찾을 수 없어 종목코드를 사용: {stock_code}")
+        
+        # 정확한 매칭이 실패한 경우, 대소문자 무시하고 조회
+        stock_name_query_case_insensitive = "SELECT stock_name FROM stocks WHERE UPPER(stock_code) = UPPER(%s)"
+        stock_info = db.fetch_one(stock_name_query_case_insensitive, (stock_code,))
+        
+        if stock_info and stock_info['stock_name']:
+            stock_name = stock_info['stock_name']
+            print(f"   ✅ DB에서 종목명 조회 성공 (대소문자 무시): {stock_code} -> {stock_name}")
             db.disconnect()
-            return stock_code
+            return stock_name
+        
+        # 모든 시도가 실패한 경우
+        print(f"   ⚠️ 종목코드 {stock_code}를 DB에서 찾을 수 없습니다.")
+        print(f"   💡 stocks 테이블에 해당 종목이 등록되어 있는지 확인해주세요.")
+        db.disconnect()
+        return stock_code
             
     except Exception as e:
         print(f"   ⚠️ 종목명 조회 실패: {str(e)}")
@@ -1438,6 +1467,17 @@ def save_chart_summary_to_text(chart_data, stock_code, stock_name):
             except:
                 return f"{date.year}년 1주차"
         
+        def get_week_period(date):
+            """주차의 구체적인 기간 계산 (통일된 모듈 사용)"""
+            try:
+                # ISO 8601 표준으로 주 기간 계산
+                year, week = get_week_number(date)
+                week_start = get_week_start_date(year, week)
+                week_end = get_week_end_date(year, week)
+                return f"{week_start.strftime('%Y-%m-%d')} ~ {week_end.strftime('%Y-%m-%d')}"
+            except:
+                return f"{date.strftime('%Y-%m-%d')} ~ {date.strftime('%Y-%m-%d')}"
+        
         latest_date = chart_data.index[-1]
         latest_week_info = get_week_number_local(latest_date)
         latest_week_period = get_week_period(latest_date)
@@ -1654,12 +1694,12 @@ def main():
         # 주봉 데이터 분석
         analyze_weekly_stock_data(hist, stock_code)
         
-        # 주봉 차트 생성 (차트 데이터 반환)
-        chart_path, chart_data = create_weekly_stock_chart(hist, stock_code)
+        # 주봉 차트 생성 (차트 데이터 반환) - 일봉 분석과 동일한 패턴
+        chart_result = create_weekly_stock_chart(hist, stock_code)
         
-        if chart_path and chart_data is not None:
-            # 종목명 가져오기
-            stock_name = get_stock_name(stock_code)
+        if chart_result and len(chart_result) == 3:
+            chart_path, stock_name, chart_data = chart_result
+            print(f"🏢 종목명: {stock_name}")
             
             # JSON 저장 (추천)
             json_path = save_chart_data_to_json(chart_data, stock_code, stock_name)

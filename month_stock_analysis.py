@@ -1180,11 +1180,11 @@ def create_monthly_stock_chart(hist, stock_code):
     import gc
     gc.collect()
     
-    # 차트 데이터 반환 (보조지표 포함)
-    return filepath, df
+    # 차트 데이터 반환 (보조지표 포함) - 일봉 분석과 동일한 패턴
+    return filepath, chart_stock_name, df
 
 def get_stock_name(stock_code):
-    """종목코드로 종목명을 가져오는 함수 - DB에서 조회"""
+    """종목코드로 종목명을 가져오는 함수 - DB에서 조회 (일봉과 동일한 방식)"""
     try:
         # 데이터베이스 연결
         db = DatabaseManager()
@@ -1193,7 +1193,7 @@ def get_stock_name(stock_code):
             print(f"   ⚠️ DB 연결 실패로 종목코드를 종목명으로 사용: {stock_code}")
             return stock_code
         
-        # stocks 테이블에서 종목명 조회
+        # stocks 테이블에서 종목명 조회 (일봉과 동일한 간단한 방식)
         stock_name_query = "SELECT stock_name FROM stocks WHERE stock_code = %s"
         stock_info = db.fetch_one(stock_name_query, (stock_code,))
         
@@ -1202,10 +1202,22 @@ def get_stock_name(stock_code):
             print(f"   ✅ DB에서 종목명 조회 성공: {stock_code} -> {stock_name}")
             db.disconnect()
             return stock_name
-        else:
-            print(f"   ⚠️ 종목명을 찾을 수 없어 종목코드를 사용: {stock_code}")
+        
+        # 정확한 매칭이 실패한 경우, 대소문자 무시하고 조회
+        stock_name_query_case_insensitive = "SELECT stock_name FROM stocks WHERE UPPER(stock_code) = UPPER(%s)"
+        stock_info = db.fetch_one(stock_name_query_case_insensitive, (stock_code,))
+        
+        if stock_info and stock_info['stock_name']:
+            stock_name = stock_info['stock_name']
+            print(f"   ✅ DB에서 종목명 조회 성공 (대소문자 무시): {stock_code} -> {stock_name}")
             db.disconnect()
-            return stock_code
+            return stock_name
+        
+        # 모든 시도가 실패한 경우
+        print(f"   ⚠️ 종목코드 {stock_code}를 DB에서 찾을 수 없습니다.")
+        print(f"   💡 stocks 테이블에 해당 종목이 등록되어 있는지 확인해주세요.")
+        db.disconnect()
+        return stock_code
             
     except Exception as e:
         print(f"   ⚠️ 종목명 조회 실패: {str(e)}")
@@ -1634,14 +1646,15 @@ def get_monthly_stock_data(stock_code):
     # 네이버 금융 데이터 조회 (우선)
     print("   🔄 네이버 금융에서 실시간 데이터 확인 중...")
     try:
-        from naver_data_module import get_naver_stock_data, get_naver_historical_data
+        # from naver_data_module import get_naver_stock_data, get_naver_historical_data
         
-        naver_result = get_naver_stock_data(stock_code)
-        if naver_result['success']:
-            print(f"   ✅ 네이버 금융 실시간 데이터: {naver_result['stock_name']}")
-            print(f"   📈 현재가: {naver_result['current_price']:,.0f}원")
-            print(f"   📊 변동: {naver_result['change_direction']} {naver_result['change_amount']:+,}원")
-            print(f"   ⏰ 조회시간: {naver_result['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}")
+        # naver_result = get_naver_stock_data(stock_code)
+        # if naver_result['success']:
+        #     print(f"   ✅ 네이버 금융 실시간 데이터: {naver_result['stock_name']}")
+        #     print(f"   📈 현재가: {naver_result['current_price']:,.0f}원")
+        #     print(f"   📊 변동: {naver_result['change_direction']} {naver_result['change_amount']:+,}원")
+        #     print(f"   ⏰ 조회시간: {naver_result['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}")
+        print("   ⚠️ 네이버 금융 모듈이 비활성화되었습니다.")
     except ImportError:
         print("   ⚠️ 네이버 금융 모듈을 불러올 수 없습니다.")
     
@@ -1750,12 +1763,12 @@ def main():
         # 월봉 데이터 분석
         analyze_monthly_stock_data(hist, stock_code)
         
-        # 월봉 차트 생성 (차트 데이터 반환)
-        chart_path, chart_data = create_monthly_stock_chart(hist, stock_code)
+        # 월봉 차트 생성 (차트 데이터 반환) - 일봉 분석과 동일한 패턴
+        chart_result = create_monthly_stock_chart(hist, stock_code)
         
-        if chart_path and chart_data is not None:
-            # 종목명 가져오기 (DB stocks 테이블에서)
-            stock_name = get_stock_name(stock_code)
+        if chart_result and len(chart_result) == 3:
+            chart_path, stock_name, chart_data = chart_result
+            print(f"🏢 종목명: {stock_name}")
             
             # JSON 저장 (추천)
             json_path = save_chart_data_to_json(chart_data, stock_code, stock_name)
