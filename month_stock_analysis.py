@@ -1210,7 +1210,7 @@ def get_stock_name(stock_code):
             pass
         return stock_code
 
-def save_chart_data_to_json(chart_data, stock_code, stock_name):
+def save_chart_data_to_json(chart_data, stock_code, stock_name, trading_type="거래량"):
     """차트 데이터를 JSON으로 저장 - Gemini AI 최적화"""
     if chart_data is None or chart_data.empty:
         print("❌ 저장할 차트 데이터가 없습니다.")
@@ -1231,13 +1231,14 @@ def save_chart_data_to_json(chart_data, stock_code, stock_name):
             os.makedirs(json_dir)
             print(f"📁 {json_dir} 폴더를 생성했습니다.")
         
-        # 파일명 생성
+        # 파일명 생성 (거래타입 포함)
         current_date = datetime.now().strftime("%Y%m%d")
-        filename = f"monthly_{stock_name}_{stock_code}_{current_date}.json"
+        trading_type_short = "거래량" if trading_type == "거래량" else "거래대금"
+        filename = f"monthly_{stock_name}_{stock_code}_{trading_type_short}_{current_date}.json"
         filename = filename.replace(" ", "_").replace("/", "_").replace("\\", "_").replace(":", "_")
         filepath = os.path.join(json_dir, filename)
         
-        # 중복 확인
+        # 중복 확인 (거래타입 포함된 파일명으로)
         version = 1
         while os.path.exists(filepath):
             name_without_ext = filename.rsplit('.', 1)[0]
@@ -1770,7 +1771,9 @@ def main():
                     print(f"📋 CSV 데이터: {csv_path}")
                 if text_path:
                     print(f"📝 텍스트 요약: {text_path}")
-                print(f"\n💡 이제 AI 분석에 차트 이미지와 JSON 데이터를 함께 전달할 수 있습니다!")
+                print(f"\n💡 AI 분석을 원하시면 다음 명령어를 사용하세요:")
+                print(f"   from ai_chart_analysis import analyze_stock_chart")
+                print(f"   result = analyze_stock_chart('{stock_code}', '월봉')")
             else:
                 print(f"\n✅ 월봉 분석이 완료되었습니다!")
                 print(f"📈 차트 이미지: {chart_path}")

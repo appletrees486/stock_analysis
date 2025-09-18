@@ -209,7 +209,7 @@ class FastProgressTracker:
                       f"성공: {self.completed - self.failed} | 실패: {self.failed} | "
                       f"남은시간: {remaining/60:.1f}분", end="", flush=True)
 
-def create_chart_fast(stock_code: str, chart_type_en: str) -> tuple[bool, object]:
+def create_chart_fast(stock_code: str, chart_type_en: str, trading_type: str = "거래량") -> tuple[bool, object]:
     """고속 차트 생성"""
     try:
         module = get_analysis_module(chart_type_en)
@@ -222,18 +222,28 @@ def create_chart_fast(stock_code: str, chart_type_en: str) -> tuple[bool, object
                 if chart_result is not None and len(chart_result) == 3:
                     # chart_result는 (chart_path, stock_name, chart_data_with_indicators) 튜플
                     chart_path, stock_name, chart_data_with_indicators = chart_result
-                    # additional_info를 빈 딕셔너리로 설정 (AI 분석에 필요한 정보)
+                    
+                    # JSON 파일 생성 (거래타입 포함)
+                    json_data_path = module.save_chart_data_to_json(chart_data_with_indicators, stock_code, stock_name, trading_type)
+                    
+                    # additional_info에 JSON 경로 포함
                     additional_info = {
                         "chart_path": chart_path,
-                        "stock_name": stock_name
+                        "stock_name": stock_name,
+                        "json_data_path": json_data_path
                     }
                     return True, (chart_data_with_indicators, additional_info)
                 elif chart_result is not None and len(chart_result) == 2:
                     # 기존 방식 호환성 유지 (보조지표 없음)
                     chart_path, stock_name = chart_result
+                    
+                    # JSON 파일 생성 (거래타입 포함)
+                    json_data_path = module.save_chart_data_to_json(hist, stock_code, stock_name, trading_type)
+                    
                     additional_info = {
                         "chart_path": chart_path,
-                        "stock_name": stock_name
+                        "stock_name": stock_name,
+                        "json_data_path": json_data_path
                     }
                     return True, (hist, additional_info)
                 else:
@@ -247,8 +257,33 @@ def create_chart_fast(stock_code: str, chart_type_en: str) -> tuple[bool, object
             if hist is not None and not hist.empty:
                 module.analyze_weekly_stock_data(hist, stock_code)
                 chart_result = module.create_weekly_stock_chart(hist, stock_code)
-                if chart_result is not None:
-                    return True, hist
+                if chart_result is not None and len(chart_result) == 3:
+                    # chart_result는 (chart_path, stock_name, chart_data_with_indicators) 튜플
+                    chart_path, stock_name, chart_data_with_indicators = chart_result
+                    
+                    # JSON 파일 생성 (거래타입 포함)
+                    json_data_path = module.save_chart_data_to_json(chart_data_with_indicators, stock_code, stock_name, trading_type)
+                    
+                    # additional_info에 JSON 경로 포함
+                    additional_info = {
+                        "chart_path": chart_path,
+                        "stock_name": stock_name,
+                        "json_data_path": json_data_path
+                    }
+                    return True, (chart_data_with_indicators, additional_info)
+                elif chart_result is not None and len(chart_result) == 2:
+                    # 기존 방식 호환성 유지 (보조지표 없음)
+                    chart_path, stock_name = chart_result
+                    
+                    # JSON 파일 생성 (거래타입 포함)
+                    json_data_path = module.save_chart_data_to_json(hist, stock_code, stock_name, trading_type)
+                    
+                    additional_info = {
+                        "chart_path": chart_path,
+                        "stock_name": stock_name,
+                        "json_data_path": json_data_path
+                    }
+                    return True, (hist, additional_info)
                 else:
                     print(f"   ❌ {stock_code}: 주봉 차트 생성 실패")
                     return False, None
@@ -263,8 +298,18 @@ def create_chart_fast(stock_code: str, chart_type_en: str) -> tuple[bool, object
                 if chart_result is not None and len(chart_result) == 3:
                     # chart_result = (filepath, chart_stock_name, df)
                     filepath, chart_stock_name, chart_data = chart_result
+                    
+                    # JSON 파일 생성
+                    json_data_path = module.save_chart_data_to_json(chart_data, stock_code, chart_stock_name)
+                    
+                    # additional_info에 JSON 경로 포함
+                    additional_info = {
+                        "chart_path": filepath,
+                        "stock_name": chart_stock_name,
+                        "json_data_path": json_data_path
+                    }
                     print(f"   ✅ {stock_code}: 월봉 차트 생성 완료 (차트데이터 포함)")
-                    return True, chart_data  # 기술적 지표가 포함된 차트 데이터 반환
+                    return True, (chart_data, additional_info)  # 기술적 지표가 포함된 차트 데이터와 추가 정보 반환
                 else:
                     print(f"   ❌ {stock_code}: 월봉 차트 생성 실패")
                     return False, None
@@ -363,53 +408,17 @@ def run_ai_analysis_fast(stock_name: str, stock_code: str, chart_type: str, char
             additional_info["trading_type"] = trading_type
             print(f"✅ 거래타입 추가: {trading_type}")
         
-        # 차트 타입별 JSON 파일 경로 찾기
+        # additional_info에서 JSON 파일 경로 가져오기
         json_data_path = ""
-        json_dir = "chart_data_json"
-        
-        if os.path.exists(json_dir):
-            import glob
-            
-            if chart_type in ['주봉', 'weekly', 'week']:
-                # 주봉 JSON 파일 패턴: weekly_종목명_종목번호_날짜.json
-                json_pattern = f"weekly_*_{stock_code}_*.json"
-                json_files = glob.glob(os.path.join(json_dir, json_pattern))
-                
-                if json_files:
-                    # 최신 파일 선택 (파일명 기준)
-                    json_files.sort(reverse=True)
-                    json_data_path = json_files[0]
-                    print(f"✅ 주봉 JSON 파일 발견: {json_data_path}")
-                else:
-                    print(f"⚠️ 주봉 JSON 파일을 찾을 수 없음: {json_pattern}")
-                    
-            elif chart_type in ['일봉', 'daily', 'day']:
-                # 일봉 JSON 파일 패턴: daily_종목명_종목번호_날짜.json
-                json_pattern = f"daily_*_{stock_code}_*.json"
-                json_files = glob.glob(os.path.join(json_dir, json_pattern))
-                
-                if json_files:
-                    # 최신 파일 선택 (파일명 기준)
-                    json_files.sort(reverse=True)
-                    json_data_path = json_files[0]
-                    print(f"✅ 일봉 JSON 파일 발견: {json_data_path}")
-                else:
-                    print(f"⚠️ 일봉 JSON 파일을 찾을 수 없음: {json_pattern}")
-                    
-            elif chart_type in ['월봉', 'monthly', 'month']:
-                # 월봉 JSON 파일 패턴: monthly_종목명_종목번호_날짜.json
-                json_pattern = f"monthly_*_{stock_code}_*.json"
-                json_files = glob.glob(os.path.join(json_dir, json_pattern))
-                
-                if json_files:
-                    # 최신 파일 선택 (파일명 기준)
-                    json_files.sort(reverse=True)
-                    json_data_path = json_files[0]
-                    print(f"✅ 월봉 JSON 파일 발견: {json_data_path}")
-                else:
-                    print(f"⚠️ 월봉 JSON 파일을 찾을 수 없음: {json_pattern}")
+        if additional_info and "json_data_path" in additional_info:
+            json_data_path = additional_info["json_data_path"]
+            if json_data_path and os.path.exists(json_data_path):
+                print(f"✅ JSON 파일 경로 확인: {json_data_path}")
+            else:
+                print(f"⚠️ JSON 파일이 존재하지 않음: {json_data_path}")
+                json_data_path = ""
         else:
-            print(f"⚠️ JSON 폴더가 존재하지 않음: {json_dir}")
+            print(f"⚠️ additional_info에서 JSON 파일 경로를 찾을 수 없음")
         
         # 차트 데이터가 있는 경우 AI 분석에 전달
         if chart_data is not None:
@@ -504,7 +513,7 @@ def analyze_single_stock_fast(stock_input: str, chart_type: str, chart_type_en: 
         result["stock_code"] = stock_code
         
         # 차트 생성
-        chart_success, chart_data = create_chart_fast(stock_code, chart_type_en)
+        chart_success, chart_data = create_chart_fast(stock_code, chart_type_en, trading_type)
         if chart_success:
             result["chart_created"] = True
             
@@ -548,7 +557,7 @@ def run_batch_analysis_fast(stock_list: List[str], chart_type: str, chart_type_e
     # 순차 처리 (안정성 우선)
     for stock in stock_list:
         try:
-            result = analyze_single_stock_fast(stock, chart_type, chart_type_en, tracker)
+            result = analyze_single_stock_fast(stock, chart_type, chart_type_en, tracker, batch_id, trading_type)
             results.append(result)
         except Exception as e:
             results.append({

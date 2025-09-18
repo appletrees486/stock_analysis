@@ -1162,7 +1162,7 @@ def create_stock_chart(hist, stock_code):
     # 차트 이미지 파일 경로, 종목명, 보조지표 데이터를 반환
     return filepath, stock_name, df
 
-def save_chart_data_to_json(chart_data, stock_code, stock_name, additional_info=None):
+def save_chart_data_to_json(chart_data, stock_code, stock_name, additional_info=None, trading_type="거래량"):
     """차트 데이터를 JSON으로 저장 - Gemini AI 최적화"""
     if chart_data is None or chart_data.empty:
         print("❌ 저장할 차트 데이터가 없습니다.")
@@ -1183,13 +1183,14 @@ def save_chart_data_to_json(chart_data, stock_code, stock_name, additional_info=
             os.makedirs(json_dir)
             print(f"📁 {json_dir} 폴더를 생성했습니다.")
         
-        # 파일명 생성
+        # 파일명 생성 (거래타입 포함)
         current_date = datetime.now().strftime("%Y%m%d")
-        filename = f"daily_{stock_name}_{stock_code}_{current_date}.json"
+        trading_type_short = "거래량" if trading_type == "거래량" else "거래대금"
+        filename = f"daily_{stock_name}_{stock_code}_{trading_type_short}_{current_date}.json"
         filename = filename.replace(" ", "_").replace("/", "_").replace("\\", "_").replace(":", "_")
         filepath = os.path.join(json_dir, filename)
         
-        # 중복 확인
+        # 중복 확인 (거래타입 포함된 파일명으로)
         version = 1
         while os.path.exists(filepath):
             name_without_ext = filename.rsplit('.', 1)[0]
@@ -2434,32 +2435,17 @@ def main():
             print(f"📈 차트 이미지: {chart_path}")
             print(f"🏢 종목명: {stock_name}")
             
-            # AI 분석 실행
-            print(f"\n🤖 AI 차트 분석을 시작합니다...")
-            try:
-                from ai_chart_analysis import AIChartAnalyzer
-                ai_analyzer = AIChartAnalyzer()
-                
-                # JSON 데이터 저장 (보조지표 포함 데이터 사용)
-                json_data_path = save_chart_data_to_json(chart_data_with_indicators, stock_code, stock_name)
-                
-                # AI 분석 실행 (이미지는 DOCX 생성용으로만 사용, AI 분석에는 JSON 데이터만 전달)
-                analysis_result = ai_analyzer.analyze_chart_image(
-                    image_path=chart_path,  # DOCX 생성용으로만 사용
-                    stock_name=stock_name,
-                    chart_type="일봉",
-                    chart_data=chart_data_with_indicators,
-                    json_data_path=json_data_path
-                )
-                
-                if analysis_result:
-                    print(f"✅ AI 분석이 완료되었습니다!")
-                    print(f"📄 분석 결과가 저장되었습니다.")
-                else:
-                    print(f"❌ AI 분석에 실패했습니다.")
-                    
-            except Exception as e:
-                print(f"❌ AI 분석 중 오류 발생: {e}")
+            # JSON 데이터 저장 (AI 분석용)
+            print(f"\n💾 JSON 데이터 저장 중...")
+            json_data_path = save_chart_data_to_json(chart_data_with_indicators, stock_code, stock_name)
+            
+            if json_data_path:
+                print(f"✅ JSON 데이터 저장 완료: {json_data_path}")
+                print(f"\n💡 AI 분석을 원하시면 다음 명령어를 사용하세요:")
+                print(f"   from ai_chart_analysis import analyze_stock_chart")
+                print(f"   result = analyze_stock_chart('{stock_code}', '일봉')")
+            else:
+                print(f"❌ JSON 데이터 저장에 실패했습니다.")
         else:
             print(f"\n❌ 차트 생성에 실패했습니다.")
     else:

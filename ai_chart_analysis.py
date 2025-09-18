@@ -648,10 +648,8 @@ class AIChartAnalyzer:
 JSON 파일의 모든 수치를 정확히 반영하여 분석해주세요."""
                 print(f"✅ JSON 파일이 첨부되어 직접 전달됩니다: {json_data_path}")
             else:
-                # JSON 파일이 없는 경우 기존 방식으로 데이터 추가
-                additional_data_info = self._load_additional_data_files(json_data_path, None, None)
-                if additional_data_info:
-                    prompt += f"\n\n{additional_data_info}"
+                # JSON 파일이 없는 경우 기본 프롬프트만 사용
+                print("⚠️ JSON 파일이 없어 기본 프롬프트만 사용합니다.")
             
             # 5. 차트 데이터 정보를 프롬프트에 추가 (기존 방식)
             if chart_data is not None and hasattr(chart_data, 'empty') and not chart_data.empty:
@@ -783,19 +781,45 @@ JSON 파일의 모든 수치를 정확히 반영하여 분석해주세요."""
                 try:
                     print(f"🔄 AI 분석 시도 {attempt + 1}/{max_retries} (JSON 데이터만 사용)")
                     
-                    # AI 분석 요청 (JSON 파일 직접 첨부)
+                    # AI 분석 요청 (JSON 데이터 + 차트 이미지 함께 분석)
                     if json_data_path and os.path.exists(json_data_path):
-                        # JSON 파일을 직접 첨부하여 전달
-                        with open(json_data_path, 'r', encoding='utf-8') as f:
-                            json_content = f.read()
-                        
-                        # JSON 파일을 Gemini에 직접 전달
+                        # JSON 데이터와 차트 이미지 함께 분석
+                        print(f"📊 JSON 데이터 + 차트 이미지로 분석: {json_data_path}")
+                        try:
+                            with open(json_data_path, 'r', encoding='utf-8') as f:
+                                json_data = json.load(f)
+                            
+                            # 이미지 인코딩
+                            image_data = self.encode_image_to_base64(image_path)
+                            
+                            if image_data:
+                                response = self.model.generate_content([
+                                    prompt,
+                                    f"다음 차트 데이터를 분석해주세요: {json.dumps(json_data, ensure_ascii=False, indent=2)}",
+                                    {"mime_type": "image/png", "data": image_data}
+                                ])
+                            else:
+                                # 이미지 인코딩 실패 시 JSON만 분석
+                                print("⚠️ 이미지 인코딩 실패, JSON 데이터만 분석")
+                                response = self.model.generate_content([
+                                    prompt,
+                                    f"다음 차트 데이터를 분석해주세요: {json.dumps(json_data, ensure_ascii=False, indent=2)}"
+                                ])
+                        except Exception as e:
+                            print(f"⚠️ JSON 파일 읽기 실패: {e}")
+                            response = self.model.generate_content(prompt)
+                    elif chart_data is not None and not chart_data.empty:
+                        # JSON 파일이 없는 경우 차트 데이터로 분석 (이미지 제외)
+                        print(f"📊 차트 데이터로 분석 (이미지 제외)")
+                        # 차트 데이터를 JSON으로 변환하여 전달
+                        chart_data_json = self._convert_chart_data_to_json(chart_data, stock_name, chart_type)
                         response = self.model.generate_content([
                             prompt,
-                            f"JSON 데이터 파일:\n{json_content}"
+                            f"다음 차트 데이터를 분석해주세요: {chart_data_json}"
                         ])
                     else:
-                        # JSON 파일이 없는 경우 텍스트만 전달
+                        # JSON 파일과 차트 데이터가 모두 없는 경우 기본 프롬프트만 사용
+                        print("⚠️ JSON 파일과 차트 데이터가 모두 없어 기본 프롬프트만 사용합니다.")
                         response = self.model.generate_content(prompt)
                     
                     if response.text:
@@ -928,10 +952,9 @@ JSON 파일의 모든 수치를 정확히 반영하여 분석해주세요."""
             if "individual_analysis_file" in individual_result:
                 summary_prompt += f"\n\n**개별 분석 JSON 파일:** {individual_result['individual_analysis_file']}\n"
             
-            # 추가 데이터 파일들 로드 및 프롬프트에 추가 (기존 로직 재사용)
-            additional_data_info = self._load_additional_data_files(json_data_path, csv_data_path, text_summary_path)
-            if additional_data_info:
-                summary_prompt += f"\n\n{additional_data_info}"
+            # JSON 파일이 있는 경우 직접 전달
+            if json_data_path and os.path.exists(json_data_path):
+                summary_prompt += f"\n\n**JSON 데이터 파일:** {json_data_path}"
             
             # 차트 데이터 정보를 프롬프트에 추가 (기존 로직 재사용)
             if chart_data is not None and hasattr(chart_data, 'empty') and not chart_data.empty:
@@ -1048,6 +1071,54 @@ JSON 파일의 모든 수치를 정확히 반영하여 분석해주세요."""
         json_text = json_text.strip()
         
         return json.loads(json_text)
+    
+    def _convert_chart_data_to_json(self, chart_data: pd.DataFrame, stock_name: str, chart_type: str) -> str:
+        """
+        차트 데이터를 JSON 문자열로 변환
+        
+        Args:
+            chart_data (pd.DataFrame): 차트 데이터
+            stock_name (str): 종목명
+            chart_type (str): 차트 유형
+            
+        Returns:
+            str: JSON 문자열
+        """
+        try:
+            # 차트 데이터를 딕셔너리로 변환
+            chart_dict = {
+                "metadata": {
+                    "stock_name": stock_name,
+                    "chart_type": chart_type,
+                    "data_points": len(chart_data)
+                },
+                "chart_data": []
+            }
+            
+            # 각 행을 딕셔너리로 변환
+            for index, row in chart_data.iterrows():
+                data_point = {
+                    "date": str(index) if hasattr(index, 'strftime') else str(index),
+                    "open": float(row.get('Open', 0)) if pd.notna(row.get('Open')) else 0,
+                    "high": float(row.get('High', 0)) if pd.notna(row.get('High')) else 0,
+                    "low": float(row.get('Low', 0)) if pd.notna(row.get('Low')) else 0,
+                    "close": float(row.get('Close', 0)) if pd.notna(row.get('Close')) else 0,
+                    "volume": float(row.get('Volume', 0)) if pd.notna(row.get('Volume')) else 0
+                }
+                
+                # 기술적 지표 추가
+                for col in chart_data.columns:
+                    if col not in ['Open', 'High', 'Low', 'Close', 'Volume']:
+                        if pd.notna(row[col]):
+                            data_point[col.lower()] = float(row[col])
+                
+                chart_dict["chart_data"].append(data_point)
+            
+            return json.dumps(chart_dict, ensure_ascii=False, indent=2)
+            
+        except Exception as e:
+            print(f"⚠️ 차트 데이터 JSON 변환 중 오류: {e}")
+            return "{}"
     
     def _convert_structured_data_to_text(self, structured_data: Dict[str, Any]) -> str:
         """
@@ -2734,80 +2805,7 @@ JSON 파일의 모든 수치를 정확히 반영하여 분석해주세요."""
             return f"{len(analysis_results)}개 종목의 {chart_type} 차트 분석이 완료되었습니다."
 
 
-    def _load_additional_data_files(self, json_data_path: str, csv_data_path: str = None, text_summary_path: str = None) -> str:
-        """
-        JSON 데이터 파일을 로드하고 프롬프트용 텍스트로 변환 (CSV/텍스트 파일은 제거됨)
-        
-        Args:
-            json_data_path (str): JSON 데이터 파일 경로
-            csv_data_path (str, optional): CSV 데이터 파일 경로 (사용하지 않음)
-            text_summary_path (str, optional): 텍스트 요약 파일 경로 (사용하지 않음)
-            
-        Returns:
-            str: 프롬프트에 추가할 데이터 정보 텍스트
-        """
-        additional_info = ""
-        
-        # 1. JSON 데이터 파일 로드
-        if json_data_path and os.path.exists(json_data_path):
-            try:
-                print(f"📊 JSON 데이터 파일 로드 중: {json_data_path}")
-                with open(json_data_path, 'r', encoding='utf-8') as f:
-                    json_data = json.load(f)
-                
-                # JSON 데이터를 구조화된 텍스트로 변환
-                json_info = f"""
-**JSON 구조화 데이터 정보:**
-- 종목명: {json_data.get('metadata', {}).get('stock_name', 'N/A')}
-- 종목코드: {json_data.get('metadata', {}).get('stock_code', 'N/A')}
-- 데이터 기간: {json_data.get('metadata', {}).get('data_period', {}).get('start', 'N/A')} ~ {json_data.get('metadata', {}).get('data_period', {}).get('end', 'N/A')}
-- 총 데이터 수: {json_data.get('metadata', {}).get('total_records', 'N/A')}개
 
-**요약 정보:**
-- 최근 종가: {json_data.get('summary', {}).get('latest_close', 'N/A'):,.0f}원
-- 최근 거래량: {json_data.get('summary', {}).get('latest_volume', 'N/A'):,}주
-- 가격 변동: {json_data.get('summary', {}).get('price_change', 'N/A'):+,.0f}원
-- 변동률: {json_data.get('summary', {}).get('price_change_pct', 'N/A'):+.2f}%
-- 최고가: {json_data.get('summary', {}).get('highest_price', 'N/A'):,.0f}원
-- 최저가: {json_data.get('summary', {}).get('lowest_price', 'N/A'):,.0f}원
-- 평균 거래량: {json_data.get('summary', {}).get('avg_volume', 'N/A'):,.0f}주
-
-**기술적 지표 (최근값):**
-"""
-                
-                # 기술적 지표 정보 추가
-                tech_indicators = json_data.get('technical_indicators', {}).get('latest_values', {})
-                for indicator, value in tech_indicators.items():
-                    if value is not None:
-                        if 'ma' in indicator.lower():
-                            json_info += f"- {indicator.upper()}: {value:,.0f}원\n"
-                        elif indicator.lower() in ['adx', 'plus_di', 'minus_di']:
-                            json_info += f"- {indicator.upper()}: {value:.2f}\n"
-                        elif indicator.lower() == 'rsi':
-                            json_info += f"- {indicator.upper()}: {value:.1f}\n"
-                        elif 'macd' in indicator.lower():
-                            json_info += f"- {indicator.upper()}: {value:.2f}\n"
-                        elif 'bb_' in indicator.lower():
-                            json_info += f"- {indicator.upper()}: {value:,.0f}원\n"
-                        else:
-                            json_info += f"- {indicator.upper()}: {value:.2f}\n"
-                
-                # 최근 차트 데이터 (최대 5개)
-                chart_data = json_data.get('chart_data', [])
-                if chart_data:
-                    json_info += f"\n**최근 5개 거래일 데이터:**\n"
-                    for i, data_point in enumerate(chart_data[-5:]):
-                        json_info += f"- {data_point['date']}: 시가 {data_point['open']:,.0f}, 고가 {data_point['high']:,.0f}, 저가 {data_point['low']:,.0f}, 종가 {data_point['close']:,.0f}, 거래대금 {data_point['volume']:,}\n"
-                
-                additional_info += json_info
-                print(f"✅ JSON 데이터 로드 완료")
-                
-            except Exception as e:
-                print(f"❌ JSON 데이터 파일 로드 실패: {e}")
-        
-        # CSV와 텍스트 파일은 JSON 데이터와 중복되므로 제거 (성능 최적화)
-        
-        return additional_info
 
     def analyze_text_with_prompt(self, prompt: str) -> dict:
         """
@@ -3578,6 +3576,49 @@ class SummaryFileGenerator:
         except Exception as e:
             print(f"❌ 분석 결과 로딩 중 오류: {e}")
             return []
+    
+    def _convert_structured_data_to_text(self, structured_data: Dict[str, Any]) -> str:
+        """
+        구조화된 JSON 데이터를 텍스트로 변환 (SummaryFileGenerator용)
+        
+        Args:
+            structured_data (Dict[str, Any]): 구조화된 분석 결과
+            
+        Returns:
+            str: 텍스트 형태의 분석 결과
+        """
+        try:
+            text_parts = []
+            
+            # 종목 정보
+            if "종목정보" in structured_data:
+                info = structured_data["종목정보"]
+                text_parts.append(f"📊 종목 정보")
+                text_parts.append(f"• 종목명: {info.get('종목명', 'N/A')}")
+                text_parts.append(f"• 종목번호: {info.get('종목번호', 'N/A')}")
+                text_parts.append(f"• 분석일시: {info.get('분석일시', 'N/A')}")
+                text_parts.append(f"• 차트유형: {info.get('차트유형', 'N/A')}")
+                text_parts.append("")
+            
+            # 종합 분석 점수
+            if "종합분석점수" in structured_data:
+                score = structured_data["종합분석점수"]
+                text_parts.append(f"📈 종합 분석 점수")
+                text_parts.append(f"• 점수: {score.get('점수', 'N/A')}/100")
+                text_parts.append(f"• 요약: {score.get('요약', 'N/A')}")
+                text_parts.append("")
+            
+            # AI 응답이 있는 경우 우선 사용
+            if "ai_response" in structured_data:
+                text_parts.append("🤖 AI 분석 결과:")
+                text_parts.append(structured_data["ai_response"])
+                text_parts.append("")
+            
+            return "\n".join(text_parts) if text_parts else str(structured_data)
+            
+        except Exception as e:
+            print(f"⚠️ 구조화된 데이터 변환 중 오류: {e}")
+            return str(structured_data)
     
     def generate_consolidated_summary(self, analysis_results: list, chart_type: str) -> dict:
         """
@@ -4782,6 +4823,208 @@ def create_summary_document(consolidated_result: dict, chart_type: str, output_p
     except Exception as e:
         print(f"❌ 요약 문서 생성 실패: {e}")
         return False
+
+def analyze_stock_chart(stock_code: str, chart_type: str = "일봉"):
+    """차트 타입에 따라 데이터 조회 → 차트 생성 → AI 분석까지 통합 처리"""
+    
+    print(f"🚀 {chart_type} 차트 분석을 시작합니다...")
+    
+    try:
+        if chart_type == "일봉":
+            from day_stock_analysis import get_stock_data, create_stock_chart, save_chart_data_to_json
+            
+            # 1. 데이터 조회
+            print(f"📊 일봉 데이터 조회 중...")
+            hist = get_stock_data(stock_code)
+            if hist is None:
+                print(f"❌ 일봉 데이터 조회 실패")
+                return None
+            
+            # 2. 차트 생성
+            print(f"📈 일봉 차트 생성 중...")
+            chart_result = create_stock_chart(hist, stock_code)
+            if not chart_result or len(chart_result) != 3:
+                print(f"❌ 일봉 차트 생성 실패")
+                return None
+                
+            chart_path, stock_name, chart_data = chart_result
+            print(f"✅ 일봉 차트 생성 완료: {chart_path}")
+            
+            # 3. JSON 데이터 저장
+            print(f"💾 JSON 데이터 저장 중...")
+            json_path = save_chart_data_to_json(chart_data, stock_code, stock_name)
+            if not json_path:
+                print(f"❌ JSON 데이터 저장 실패")
+                return None
+            
+            # 4. AI 분석 (JSON 데이터만 사용)
+            print(f"🤖 AI 분석 시작...")
+            analyzer = AIChartAnalyzer()
+            analysis_result = analyzer.analyze_chart_data_only(
+                stock_name=stock_name,
+                chart_type="일봉",
+                chart_data=chart_data,
+                json_data_path=json_path,
+                image_path=chart_path  # DOCX 생성용으로만 사용
+            )
+            
+            return analysis_result
+            
+        elif chart_type == "주봉":
+            from week_stock_analysis import get_weekly_stock_data, create_weekly_stock_chart, save_chart_data_to_json
+            
+            # 1. 데이터 조회
+            print(f"📊 주봉 데이터 조회 중...")
+            hist = get_weekly_stock_data(stock_code)
+            if hist is None:
+                print(f"❌ 주봉 데이터 조회 실패")
+                return None
+            
+            # 2. 차트 생성
+            print(f"📈 주봉 차트 생성 중...")
+            chart_result = create_weekly_stock_chart(hist, stock_code)
+            if not chart_result or len(chart_result) != 3:
+                print(f"❌ 주봉 차트 생성 실패")
+                return None
+                
+            chart_path, stock_name, chart_data = chart_result
+            print(f"✅ 주봉 차트 생성 완료: {chart_path}")
+            
+            # 3. JSON 데이터 저장
+            print(f"💾 JSON 데이터 저장 중...")
+            json_path = save_chart_data_to_json(chart_data, stock_code, stock_name)
+            if not json_path:
+                print(f"❌ JSON 데이터 저장 실패")
+                return None
+            
+            # 4. AI 분석 (JSON 데이터만 사용)
+            print(f"🤖 AI 분석 시작...")
+            analyzer = AIChartAnalyzer()
+            analysis_result = analyzer.analyze_chart_data_only(
+                stock_name=stock_name,
+                chart_type="주봉",
+                chart_data=chart_data,
+                json_data_path=json_path,
+                image_path=chart_path  # DOCX 생성용으로만 사용
+            )
+            
+            return analysis_result
+            
+        elif chart_type == "월봉":
+            from month_stock_analysis import get_monthly_stock_data, create_monthly_stock_chart, save_chart_data_to_json
+            
+            # 1. 데이터 조회
+            print(f"📊 월봉 데이터 조회 중...")
+            hist = get_monthly_stock_data(stock_code)
+            if hist is None:
+                print(f"❌ 월봉 데이터 조회 실패")
+                return None
+            
+            # 2. 차트 생성
+            print(f"📈 월봉 차트 생성 중...")
+            chart_result = create_monthly_stock_chart(hist, stock_code)
+            if not chart_result or len(chart_result) != 3:
+                print(f"❌ 월봉 차트 생성 실패")
+                return None
+                
+            chart_path, stock_name, chart_data = chart_result
+            print(f"✅ 월봉 차트 생성 완료: {chart_path}")
+            
+            # 3. JSON 데이터 저장
+            print(f"💾 JSON 데이터 저장 중...")
+            json_path = save_chart_data_to_json(chart_data, stock_code, stock_name)
+            if not json_path:
+                print(f"❌ JSON 데이터 저장 실패")
+                return None
+            
+            # 4. AI 분석 (JSON 데이터만 사용)
+            print(f"🤖 AI 분석 시작...")
+            analyzer = AIChartAnalyzer()
+            analysis_result = analyzer.analyze_chart_data_only(
+                stock_name=stock_name,
+                chart_type="월봉",
+                chart_data=chart_data,
+                json_data_path=json_path,
+                image_path=chart_path  # DOCX 생성용으로만 사용
+            )
+            
+            return analysis_result
+            
+        else:
+            print(f"❌ 지원하지 않는 차트 타입: {chart_type}")
+            return None
+            
+    except Exception as e:
+        print(f"❌ {chart_type} 차트 분석 중 오류 발생: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+    def analyze_chart_data_only(self, stock_name: str, chart_type: str, 
+                               chart_data: pd.DataFrame, json_data_path: str, 
+                               image_path: str = ""):
+        """차트 데이터(JSON)만으로 AI 분석 수행"""
+        
+        try:
+            print(f"🔍 {chart_type} 차트 데이터 분석 중...")
+            
+            # JSON 데이터 로드
+            with open(json_data_path, 'r', encoding='utf-8') as f:
+                json_data = json.load(f)
+            
+            # 프롬프트 가져오기
+            prompts = ChartAnalysisPrompts(self.db_config)
+            prompt = prompts.get_prompt(chart_type)
+            
+            # JSON 데이터를 텍스트로 변환
+            data_text = self._convert_structured_data_to_text(json_data)
+            
+            # AI 분석 요청 (이미지 없이 데이터만)
+            analysis_prompt = f"""
+{prompt}
+
+차트 데이터:
+{data_text}
+
+위 차트 데이터를 분석하여 JSON 형식으로 결과를 제공해주세요.
+"""
+            
+            # Gemini API 호출 (이미지 없이 텍스트만)
+            response = self.gemini_model.generate_content(analysis_prompt)
+            
+            if response and response.text:
+                # JSON 응답 파싱
+                if self._is_valid_json_response(response.text):
+                    result = self._parse_json_response(response.text)
+                    
+                    # 기본 정보 추가
+                    result['stock_name'] = stock_name
+                    result['chart_type'] = chart_type
+                    result['analysis_date'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    
+                    # DOCX 문서 생성 (이미지 사용)
+                    if image_path and os.path.exists(image_path):
+                        docx_path = f"ai_analysis_results/{stock_name}_{chart_type}_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
+                        os.makedirs(os.path.dirname(docx_path), exist_ok=True)
+                        
+                        if self.create_word_document_hybrid(result, image_path, docx_path, chart_type):
+                            result['docx_path'] = docx_path
+                            print(f"✅ DOCX 문서 생성 완료: {docx_path}")
+                    
+                    print(f"✅ {chart_type} AI 분석 완료")
+                    return result
+                else:
+                    print(f"❌ 유효하지 않은 JSON 응답")
+                    return self._create_fallback_result(stock_name, chart_type, response.text, "invalid_json")
+            else:
+                print(f"❌ AI 응답이 없습니다")
+                return self._create_fallback_result(stock_name, chart_type, "No response", "no_response")
+                
+        except Exception as e:
+            print(f"❌ AI 분석 중 오류 발생: {e}")
+            import traceback
+            traceback.print_exc()
+            return self._create_fallback_result(stock_name, chart_type, str(e), "analysis_error")
 
 if __name__ == "__main__":
     main() 

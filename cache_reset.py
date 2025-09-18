@@ -137,18 +137,25 @@ class CacheReset:
     def clear_chart_cache(self):
         """차트 캐시 삭제"""
         print("📊 차트 캐시 삭제 중...")
-        chart_dirs = ['daily_charts', 'weekly_charts', 'monthly_charts']
+        chart_dirs = ['daily_charts', 'weekly_charts', 'monthly_charts', 'chart_data_json']
         removed_count = 0
         
         for chart_dir in chart_dirs:
             chart_path = self.project_root / chart_dir
             if chart_path.exists():
                 try:
-                    # PNG 파일들만 삭제
-                    for png_file in chart_path.glob('*.png'):
-                        png_file.unlink()
-                        print(f"   ✅ {png_file.name} 삭제됨")
-                        removed_count += 1
+                    if chart_dir == 'chart_data_json':
+                        # JSON 파일들 삭제
+                        for json_file in chart_path.glob('*.json'):
+                            json_file.unlink()
+                            print(f"   ✅ {json_file.name} 삭제됨")
+                            removed_count += 1
+                    else:
+                        # PNG 파일들만 삭제
+                        for png_file in chart_path.glob('*.png'):
+                            png_file.unlink()
+                            print(f"   ✅ {png_file.name} 삭제됨")
+                            removed_count += 1
                 except Exception as e:
                     print(f"   ❌ {chart_dir} 정리 실패: {e}")
         
@@ -266,6 +273,12 @@ class CacheReset:
             chart_path = self.project_root / chart_dir
             if chart_path.exists():
                 chart_count += len(list(chart_path.glob('*.png')))
+        
+        # JSON 차트 데이터 파일 개수
+        json_chart_path = self.project_root / 'chart_data_json'
+        if json_chart_path.exists():
+            chart_count += len(list(json_chart_path.glob('*.json')))
+        
         print(f"   📊 차트 파일: {chart_count}개")
         
         # 서버 상태 확인
