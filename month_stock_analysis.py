@@ -106,9 +106,9 @@ def get_monthly_stock_data_from_db(stock_code):
             db.disconnect()
             return generate_monthly_from_daily(stock_code)
         
-        # 월봉 데이터 조회 (보조지표 포함)
+        # 월봉 데이터 조회 (보조지표 포함, month_end 포함)
         monthly_query = """
-        SELECT month_start, open, high, low, close, volume,
+        SELECT month_start, month_end, open, high, low, close, volume,
                ma5, ma20, ma60, ma6, ma12, ma24, cci, adx, plus_di, minus_di,
                bb_upper, bb_middle, bb_lower, macd, macd_signal, macd_histogram, rsi
         FROM monthly_data 
@@ -127,10 +127,11 @@ def get_monthly_stock_data_from_db(stock_code):
             # DataFrame으로 변환
             df = pd.DataFrame(monthly_data)
             df['month_start'] = pd.to_datetime(df['month_start'])
+            df['month_end'] = pd.to_datetime(df['month_end'])
             df.set_index('month_start', inplace=True)
             
-            # 컬럼명을 기존 형식과 맞춤
-            df.columns = ['Open', 'High', 'Low', 'Close', 'Volume', 
+            # 컬럼명을 기존 형식과 맞춤 (month_end 제외)
+            df.columns = ['Month_End', 'Open', 'High', 'Low', 'Close', 'Volume', 
                          'MA5', 'MA20', 'MA60', 'MA6', 'MA12', 'MA24', 'CCI', 'ADX', 'Plus_DI', 'Minus_DI',
                          'BB_Upper', 'BB_Middle', 'BB_Lower', 'MACD', 'MACD_Signal', 'MACD_Histogram', 'RSI']
             
@@ -299,14 +300,15 @@ def save_monthly_to_db(stock_code, monthly_df):
         if not db.connect():
             return False
         
-        # 월봉 데이터 삽입 (보조지표 포함)
+        # 월봉 데이터 삽입 (보조지표 포함, month_end 포함)
         monthly_insert_sql = """
         INSERT INTO monthly_data 
-        (stock_code, month_start, open, high, low, close, volume,
+        (stock_code, month_start, month_end, open, high, low, close, volume,
          ma5, ma20, ma60, ma6, ma12, ma24, cci, adx, plus_di, minus_di, 
          bb_upper, bb_middle, bb_lower, macd, macd_signal, macd_histogram, rsi)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
+        month_end = VALUES(month_end),
         open = VALUES(open), high = VALUES(high), low = VALUES(low), 
         close = VALUES(close), volume = VALUES(volume),
         ma5 = VALUES(ma5), ma20 = VALUES(ma20), ma60 = VALUES(ma60),
@@ -319,9 +321,17 @@ def save_monthly_to_db(stock_code, monthly_df):
         
         success_count = 0
         for date, row in monthly_df.iterrows():
+            # month_end 값 가져오기 (Month_End 컬럼이 있으면 사용, 없으면 month_start로 설정)
+            month_end = row.get('Month_End', date)
+            if hasattr(month_end, 'strftime'):
+                month_end_str = month_end.strftime('%Y-%m-%d')
+            else:
+                month_end_str = month_end
+            
             monthly_data = (
                 stock_code,
-                date.strftime('%Y-%m-%d'),
+                date.strftime('%Y-%m-%d'),  # month_start
+                month_end_str,              # month_end
                 float(row['Open']),
                 float(row['High']),
                 float(row['Low']),
@@ -445,7 +455,7 @@ def is_complete_month(target_date, current_date):
         return False
 
 def convert_daily_to_monthly(daily_data, existing_monthly_data=None):
-    """일봉 데이터를 월봉으로 변환 (완성된 월만 포함)"""
+    """일봉 데이터를 월봉으로 변환 (완성된 월만 포함, 중복 방지)"""
     try:
         # 일봉 데이터를 월별로 그룹화
         daily_data_copy = daily_data.copy()
@@ -461,17 +471,21 @@ def convert_daily_to_monthly(daily_data, existing_monthly_data=None):
         
         for month, group in daily_data_copy.groupby('Month'):
             if len(group) > 0:
-                # 월봉 데이터 계산
-                month_start = group.index[0]
+                # 월의 첫 거래일과 마지막 거래일
+                month_first_day = group.index[0]  # 월의 첫 거래일
+                month_last_day = group.index[-1]  # 월의 마지막 거래일
                 
                 # ✅ 완성된 월인지 확인 - 미완성 월은 제외
-                if not is_complete_month(month_start, current_date):
-                    print(f"   ⚠️ 미완성 월 제외: {month_start.strftime('%Y-%m')}")
+                if not is_complete_month(month_last_day, current_date):
+                    print(f"   ⚠️ 미완성 월 제외: {month_first_day.strftime('%Y-%m')}")
                     continue  # 미완성 월은 건너뛰기
                 
-                # ✅ 완성된 월만 처리 - 월 첫날을 기준 날짜로 사용
+                # ✅ 월봉 데이터 생성 - 월의 첫째 날로 month_start 고정
+                month_start = month_first_day.replace(day=1)  # 월의 첫째 날로 고정
+                
                 monthly_data.append({
-                    'Date': month_start,                    # 월 첫날을 기준 날짜로 사용
+                    'Date': month_start,                    # 월의 첫째 날로 고정
+                    'Month_End': month_last_day,            # 월의 마지막 거래일
                     'Open': group['Open'].iloc[0],          # 월 첫날 시가
                     'High': group['High'].max(),            # 월 최고가
                     'Low': group['Low'].min(),              # 월 최저가
@@ -495,10 +509,12 @@ def convert_daily_to_monthly(daily_data, existing_monthly_data=None):
         # ✅ 완성된 월만 포함되었음을 알림
         print(f"   ✅ 완성된 월봉만 포함: {len(monthly_df)}개월")
         
-        # 기존 월봉 데이터가 있는 경우 병합
+        # 기존 월봉 데이터가 있는 경우 병합 (중복 방지 강화)
         if existing_monthly_data is not None:
-            # 중복 제거하고 병합
+            # 중복 제거하고 병합 (월별로 중복 제거)
             combined_data = pd.concat([existing_monthly_data, monthly_df])
+            
+            # 월별 중복 제거 (같은 월의 데이터가 있으면 최신 데이터 유지)
             combined_data = combined_data[~combined_data.index.duplicated(keep='last')]
             combined_data.sort_index(inplace=True)
             
@@ -960,9 +976,30 @@ def create_monthly_stock_chart(hist, stock_code):
     
     print(f"\n📈 월봉 캔들차트를 생성합니다...")
     
+    # 중복 데이터 제거 (같은 월의 여러 데이터가 있으면 최신 데이터만 유지)
+    print(f"   🔍 중복 데이터 확인 중...")
+    original_count = len(hist)
+    
+    # 월별로 그룹화하여 중복 제거
+    hist_clean = hist.copy()
+    hist_clean['Month'] = hist_clean.index.to_period('M')
+    
+    # 월별로 최신 데이터만 유지
+    hist_clean = hist_clean.groupby('Month').last()
+    
+    # Month 컬럼이 있으면 제거
+    if 'Month' in hist_clean.columns:
+        hist_clean = hist_clean.drop('Month', axis=1)
+    
+    removed_count = original_count - len(hist_clean)
+    if removed_count > 0:
+        print(f"   ✅ 중복 데이터 {removed_count}개 제거 완료 (원본: {original_count}개 → 정리: {len(hist_clean)}개)")
+    else:
+        print(f"   ✅ 중복 데이터 없음 (총 {len(hist_clean)}개)")
+    
     # 기술적 지표 계산
     try:
-        df = calculate_technical_indicators(hist.copy(), stock_code)
+        df = calculate_technical_indicators(hist_clean.copy(), stock_code)
         df.index.name = 'Date'
     except Exception as e:
         print(f"   ❌ 기술적 지표 계산 중 오류 발생: {e}")
