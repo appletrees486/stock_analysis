@@ -50,7 +50,12 @@ Thumbs.db
 
 # Charts and Analysis Results
 daily_charts/
+weekly_charts/
+monthly_charts/
 ai_analysis_results/
+chart_data_json/
+results/
+uploads/
 
 # Logs
 *.log

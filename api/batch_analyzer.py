@@ -94,6 +94,11 @@ class BatchAnalyzer:
             self.batch_status[batch_id]['total'] = len(stock_codes)
             self.batch_results[batch_id] = []
             
+            # 배치로 종목명 조회 (성능 최적화)
+            from batch_stock_analyzer_optimized import get_stock_names_batch
+            print(f"🔍 종목명 배치 조회 중...")
+            stock_names_cache = get_stock_names_batch(stock_codes)
+            
             pass  # 대량 분석 시작
             
             # 각 종목별 분석
@@ -119,7 +124,7 @@ class BatchAnalyzer:
                     tracker = FastProgressTracker(1)
                     
                     batch_result = analyze_single_stock_fast(
-                        stock_code, chart_type, chart_type_en, tracker, batch_id, trading_type
+                        stock_code, chart_type, chart_type_en, tracker, batch_id, trading_type, len(stock_codes), stock_names_cache
                     )
                     
                     pass  # 배치 분석 결과 확인

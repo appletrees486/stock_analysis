@@ -17,11 +17,45 @@ import threading
 import matplotlib
 matplotlib.use('Agg')
 
-# 전역 변수로 모듈 캐싱
+# 전역 변수로 모듈 캐싱 (성능 최적화)
 _analysis_modules = {}
+_module_initialized = {}
 
-def get_analysis_module(chart_type_en: str):
-    """분석 모듈 캐싱으로 성능 향상"""
+def should_create_docx(batch_id: str, total_stocks: int) -> bool:
+    """DOCX 생성 여부 결정 (성능 최적화)"""
+    # 소규모 배치(10개 이하)만 DOCX 생성
+    if total_stocks <= 10:
+        return True
+    
+    # 대규모 배치의 경우 JSON만 저장
+    return False
+
+def get_stock_names_batch(stock_codes: list) -> dict:
+    """배치로 종목명 조회 (성능 최적화)"""
+    stock_names = {}
+    try:
+        from database_config import DatabaseManager
+        db_manager = DatabaseManager()
+        if db_manager.connect():
+            # IN 절을 사용하여 한 번에 조회
+            placeholders = ','.join(['%s'] * len(stock_codes))
+            query = f"SELECT stock_code, stock_name FROM stocks WHERE stock_code IN ({placeholders})"
+            results = db_manager.fetch_all(query, stock_codes)
+            
+            for row in results:
+                stock_names[row['stock_code']] = row['stock_name']
+            
+            print(f"✅ 배치 종목명 조회 완료: {len(stock_names)}개")
+            db_manager.disconnect()
+        else:
+            print(f"⚠️ DB 연결 실패")
+    except Exception as e:
+        print(f"⚠️ 배치 종목명 조회 중 오류: {e}")
+    
+    return stock_names
+
+def get_analysis_module_cached(chart_type_en: str):
+    """캐시된 분석 모듈 반환 (성능 최적화)"""
     if chart_type_en not in _analysis_modules:
         if chart_type_en == "daily":
             import day_stock_analysis
@@ -32,7 +66,17 @@ def get_analysis_module(chart_type_en: str):
         elif chart_type_en == "monthly":
             import month_stock_analysis
             _analysis_modules[chart_type_en] = month_stock_analysis
+        
+        # 모듈 초기화 (한 번만)
+        if chart_type_en not in _module_initialized:
+            _module_initialized[chart_type_en] = True
+            # 필요한 초기화 작업 수행 (필요시)
+    
     return _analysis_modules[chart_type_en]
+
+def get_analysis_module(chart_type_en: str):
+    """분석 모듈 캐싱으로 성능 향상 (하위 호환성 유지)"""
+    return get_analysis_module_cached(chart_type_en)
 
 def check_dependencies():
     """필요한 파일들 확인 (간소화)"""
@@ -210,9 +254,9 @@ class FastProgressTracker:
                       f"남은시간: {remaining/60:.1f}분", end="", flush=True)
 
 def create_chart_fast(stock_code: str, chart_type_en: str, trading_type: str = "거래량") -> tuple[bool, object]:
-    """고속 차트 생성"""
+    """고속 차트 생성 (성능 최적화)"""
     try:
-        module = get_analysis_module(chart_type_en)
+        module = get_analysis_module_cached(chart_type_en)
         
         if chart_type_en == "daily":
             hist = module.get_stock_data(stock_code)
@@ -325,11 +369,10 @@ def create_chart_fast(stock_code: str, chart_type_en: str, trading_type: str = "
         traceback.print_exc()
         return False, None
 
-def run_ai_analysis_fast(stock_name: str, stock_code: str, chart_type: str, chart_type_en: str, chart_data=None, batch_id=None, additional_info=None, trading_type: str = '') -> bool:
+def run_ai_analysis_fast(stock_name: str, stock_code: str, chart_type: str, chart_type_en: str, chart_data=None, batch_id=None, additional_info=None, trading_type: str = '', total_stocks_in_batch: int = 1, stock_names_cache: dict = None) -> bool:
     """고속 AI 분석"""
     try:
         charts_dir = f"{chart_type_en}_charts"
-        print(f"🔍 차트 폴더 확인: {charts_dir}")
         
         if not os.path.exists(charts_dir):
             print(f"❌ 차트 폴더가 존재하지 않습니다: {charts_dir}")
@@ -337,7 +380,6 @@ def run_ai_analysis_fast(stock_name: str, stock_code: str, chart_type: str, char
         
         # 차트 파일 찾기 (최적화)
         chart_files = [f for f in os.listdir(charts_dir) if f.endswith('.png') and stock_code in f]
-        print(f"📁 찾은 차트 파일들: {chart_files}")
         
         if not chart_files:
             print(f"❌ 종목 {stock_code}의 차트 파일을 찾을 수 없습니다")
@@ -356,7 +398,6 @@ def run_ai_analysis_fast(stock_name: str, stock_code: str, chart_type: str, char
             selected_file = sorted(chart_files_with_time, key=lambda x: x[0])[-1][1]
         else:
             selected_file = chart_files[0]  # fallback
-        print(f"📊 선택된 차트 파일: {selected_file}")
         
         # AI 분석 실행
         import ai_chart_analysis
@@ -367,65 +408,36 @@ def run_ai_analysis_fast(stock_name: str, stock_code: str, chart_type: str, char
             print("❌ API 키를 가져올 수 없습니다")
             return False
         
-        print(f"✅ API 키 확인 완료")
-        
-        # DB에서 한글 종목명 조회 (stocks 테이블 기반 통일)
+        # DB에서 한글 종목명 조회 (캐시 사용 - 성능 최적화)
         db_stock_name = stock_code  # 기본값
-        try:
-            from database_config import DatabaseManager
-            db_manager = DatabaseManager()
-            if db_manager.connect():
-                query = "SELECT stock_name FROM stocks WHERE stock_code = %s"
-                result_db = db_manager.fetch_one(query, (stock_code,))
-                if result_db and result_db.get('stock_name'):
-                    db_stock_name = str(result_db['stock_name'])
-                    print(f"✅ DB에서 종목명 조회 성공: {stock_code} -> {db_stock_name}")
-                else:
-                    print(f"⚠️ DB에서 종목명을 찾을 수 없음: {stock_code}")
-                db_manager.disconnect()
-            else:
-                print(f"⚠️ DB 연결 실패")
-        except Exception as e:
-            print(f"⚠️ DB 종목명 조회 중 오류: {e}")
+        if stock_names_cache and stock_code in stock_names_cache:
+            db_stock_name = stock_names_cache[stock_code]
         
         analyzer = ai_chart_analysis.AIChartAnalyzer(api_key)
         image_path = os.path.join(charts_dir, selected_file)
         
         print(f"🤖 AI 분석 시작: {db_stock_name} ({stock_code})")
-        print(f"📁 이미지 경로: {image_path}")
-        print(f"📊 차트 유형: {chart_type}")
         
         # additional_info에서 종목명 우선 사용
         final_stock_name = db_stock_name
         if additional_info and "stock_name" in additional_info:
             final_stock_name = additional_info["stock_name"]
-            print(f"✅ additional_info에서 종목명 사용: {final_stock_name}")
         
         # additional_info에 거래타입 추가
         if not additional_info:
             additional_info = {}
         if trading_type:
             additional_info["trading_type"] = trading_type
-            print(f"✅ 거래타입 추가: {trading_type}")
         
         # additional_info에서 JSON 파일 경로 가져오기
         json_data_path = ""
         if additional_info and "json_data_path" in additional_info:
             json_data_path = additional_info["json_data_path"]
-            if json_data_path and os.path.exists(json_data_path):
-                print(f"✅ JSON 파일 경로 확인: {json_data_path}")
-            else:
-                print(f"⚠️ JSON 파일이 존재하지 않음: {json_data_path}")
+            if not (json_data_path and os.path.exists(json_data_path)):
                 json_data_path = ""
-        else:
-            print(f"⚠️ additional_info에서 JSON 파일 경로를 찾을 수 없음")
         
         # 차트 데이터가 있는 경우 AI 분석에 전달
         if chart_data is not None:
-            print(f"📊 차트 데이터 포함하여 분석")
-            print(f"📊 additional_info: {additional_info}")
-            if json_data_path:
-                print(f"📊 JSON 데이터 포함: {json_data_path}")
             result = analyzer.analyze_chart_image(
                 image_path, 
                 final_stock_name, 
@@ -435,10 +447,6 @@ def run_ai_analysis_fast(stock_name: str, stock_code: str, chart_type: str, char
                 additional_info=additional_info
             )
         else:
-            print(f"📊 차트 데이터 없이 분석")
-            print(f"📊 additional_info: {additional_info}")
-            if json_data_path:
-                print(f"📊 JSON 데이터 포함: {json_data_path}")
             result = analyzer.analyze_chart_image(
                 image_path, 
                 final_stock_name, 
@@ -448,55 +456,50 @@ def run_ai_analysis_fast(stock_name: str, stock_code: str, chart_type: str, char
             )
         
         if result:
-            print(f"✅ AI 분석 성공")
+            print(f"✅ {stock_code} 분석 완료")
             # 결과 저장 (간소화)
             output_dir = "ai_analysis_results"
             if not os.path.exists(output_dir):
                 os.makedirs(output_dir)
-                print(f"📁 {output_dir} 폴더 생성")
             
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             
-            # 배치 ID가 있으면 파일명에 포함
+            # 파일명 생성 (성능 최적화)
+            base_filename = f"analysis_{chart_type_en}_{stock_code}_{timestamp}"
             if batch_id:
-                json_path = os.path.join(output_dir, f"analysis_{chart_type_en}_{stock_code}_{timestamp}_{batch_id}.json")
-                doc_path = os.path.join(output_dir, f"analysis_{chart_type_en}_{stock_code}_{timestamp}_{batch_id}.docx")
-            else:
-                json_path = os.path.join(output_dir, f"analysis_{chart_type_en}_{stock_code}_{timestamp}.json")
-                doc_path = os.path.join(output_dir, f"analysis_{chart_type_en}_{stock_code}_{timestamp}.docx")
+                base_filename += f"_{batch_id}"
             
-            print(f"💾 JSON 파일 저장: {json_path}")
+            json_path = os.path.join(output_dir, f"{base_filename}.json")
+            doc_path = os.path.join(output_dir, f"{base_filename}.docx")
+            
             try:
                 json_success = analyzer.save_analysis_result(result, json_path)
-                print(f"   JSON 저장 결과: {json_success}")
             except Exception as e:
-                print(f"   ❌ JSON 저장 중 오류: {e}")
+                print(f"❌ {stock_code} JSON 저장 오류: {e}")
                 json_success = False
             
-            print(f"💾 DOCX 파일 생성: {doc_path}")
-            try:
-                doc_success = analyzer.create_word_document_hybrid(result, image_path, doc_path, chart_type)
-                print(f"   DOCX 생성 결과: {doc_success}")
-            except Exception as e:
-                print(f"   ❌ DOCX 생성 중 오류: {e}")
-                doc_success = False
+            # DOCX 생성 조건부 실행 (성능 최적화)
+            doc_success = True  # 기본값을 True로 설정
+            if should_create_docx(batch_id, total_stocks_in_batch):
+                try:
+                    doc_success = analyzer.create_word_document_hybrid(result, image_path, doc_path, chart_type)
+                except Exception as e:
+                    print(f"❌ {stock_code} DOCX 생성 오류: {e}")
+                    doc_success = False
             
             if json_success and doc_success:
-                print(f"✅ 파일 저장 완료")
                 return True
             else:
-                print(f"❌ 파일 저장 실패 - JSON: {json_success}, DOCX: {doc_success}")
+                print(f"❌ {stock_code} 파일 저장 실패 - JSON: {json_success}, DOCX: {doc_success}")
                 return False
         else:
-            print(f"❌ AI 분석 결과가 없습니다")
+            print(f"❌ {stock_code} AI 분석 실패")
             return False
     except Exception as e:
-        print(f"❌ AI 분석 중 오류: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"❌ {stock_code} AI 분석 오류: {e}")
         return False
 
-def analyze_single_stock_fast(stock_input: str, chart_type: str, chart_type_en: str, tracker: FastProgressTracker, batch_id=None, trading_type: str = '') -> Dict:
+def analyze_single_stock_fast(stock_input: str, chart_type: str, chart_type_en: str, tracker: FastProgressTracker, batch_id=None, trading_type: str = '', total_stocks_in_batch: int = 1, stock_names_cache: dict = None) -> Dict:
     """고속 단일 종목 분석"""
     result = {
         "stock_input": stock_input,
@@ -526,7 +529,7 @@ def analyze_single_stock_fast(stock_input: str, chart_type: str, chart_type_en: 
             # 기존 형식: hist만 반환된 경우
             
             # AI 분석 (차트 데이터 + 추가 정보 포함)
-            ai_success = run_ai_analysis_fast(stock_input, stock_code, chart_type, chart_type_en, chart_data, batch_id, additional_info, trading_type)
+            ai_success = run_ai_analysis_fast(stock_input, stock_code, chart_type, chart_type_en, chart_data, batch_id, additional_info, trading_type, total_stocks_in_batch, stock_names_cache)
             if ai_success:
                 result["ai_analysis_done"] = True
                 result["success"] = True
@@ -551,13 +554,18 @@ def run_batch_analysis_fast(stock_list: List[str], chart_type: str, chart_type_e
     print(f"📊 총 {len(stock_list)}개 종목 | 차트 유형: {chart_type}")
     print("-" * 60)
     
+    # 배치로 종목명 조회 (성능 최적화)
+    print(f"🔍 종목명 배치 조회 중...")
+    stock_names_cache = get_stock_names_batch(stock_list)
+    
     tracker = FastProgressTracker(len(stock_list))
     results = []
     
     # 순차 처리 (안정성 우선)
+    total_stocks = len(stock_list)
     for stock in stock_list:
         try:
-            result = analyze_single_stock_fast(stock, chart_type, chart_type_en, tracker, batch_id, trading_type)
+            result = analyze_single_stock_fast(stock, chart_type, chart_type_en, tracker, batch_id, trading_type, total_stocks, stock_names_cache)
             results.append(result)
         except Exception as e:
             results.append({

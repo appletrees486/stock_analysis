@@ -1,7 +1,7 @@
 # 종목 정보 업데이트 가이드
 
 ## 개요
-`stock_list_final.json` 파일의 종목 정보를 MySQL 데이터베이스 `stocks` 테이블에 업데이트하는 스크립트입니다.
+JSON 파일의 종목 정보를 MySQL 데이터베이스 `stocks` 테이블에 업데이트하는 스크립트입니다.
 
 ## 파일
 - `update_stocks_from_json.py` - MySQL 데이터베이스용 종목 정보 업데이트 스크립트
@@ -26,12 +26,7 @@ python update_stocks_from_json.py
 - **데이터 변환**: JSON → MySQL 테이블 형식
 - **배치 처리**: 1000개씩 처리하여 성능 최적화
 - **중복 처리**: `ON DUPLICATE KEY UPDATE` 사용
-- **로깅**: 상세한 진행 상황 기록 (`update_stocks.log`)
-
-## 실행 결과
-- 총 9,625개 종목 처리
-- 기존 종목 수와 최종 종목 수 비교
-- 처리된 종목 수 확인
+- **로깅**: 상세한 진행 상황 기록
 
 ## 주의사항
 1. **데이터베이스 연결**: `database_config.py` 설정 확인
