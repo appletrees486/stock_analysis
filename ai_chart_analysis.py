@@ -3554,20 +3554,21 @@ class SummaryFileGenerator:
             lines = text.split('\n')
             clean_lines = []
             
+            # "나머지 종목들의 세부 차트 분석은 첨부파일에서 확인하세요." 이후 내용 삭제
+            cutoff_found = False
+            
             for line in lines:
                 line_stripped = line.strip()
                 
-                # "검색 최적화 태그:"로 시작하는 줄인지 확인
-                if line_stripped.startswith('검색 최적화 태그:'):
-                    # 검색 최적화 태그 줄이므로 제거
-                    continue
-                # 해시태그만 포함된 줄인지 확인 (기존 로직 유지)
-                elif line_stripped and all(word.startswith('#') for word in line_stripped.split() if word.strip()):
-                    # 해시태그만 포함된 줄이므로 제거
-                    continue
-                else:
-                    # 일반 텍스트는 그대로 포함
+                # 기준점 문구를 찾으면 그 이후는 모두 제거
+                if "나머지 종목들의 세부 차트 분석은 첨부파일에서 확인하세요." in line_stripped:
+                    cutoff_found = True
+                    # 기준점 문구는 포함
                     clean_lines.append(line)
+                    break
+                
+                # 기준점을 찾기 전까지는 모든 줄 포함
+                clean_lines.append(line)
             
             # 연속된 줄바꿈 정리 (3개 이상을 2개로)
             clean_text = '\n'.join(clean_lines)

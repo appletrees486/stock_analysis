@@ -218,6 +218,96 @@
             margin-bottom: 10px;
             color: #666;
         }
+        
+        /* 메일 발송 옵션 스타일 */
+        .email-options {
+            margin-top: 20px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+        }
+        
+        .email-toggle {
+            margin-bottom: 15px;
+        }
+        
+        .toggle-switch {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+        }
+        
+        .toggle-switch input[type="checkbox"] {
+            display: none;
+        }
+        
+        .toggle-slider {
+            position: relative;
+            width: 50px;
+            height: 24px;
+            background: #ccc;
+            border-radius: 24px;
+            transition: background 0.3s;
+            margin-right: 10px;
+        }
+        
+        .toggle-slider:before {
+            content: '';
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: white;
+            top: 2px;
+            left: 2px;
+            transition: transform 0.3s;
+        }
+        
+        .toggle-switch input[type="checkbox"]:checked + .toggle-slider {
+            background: #28a745;
+        }
+        
+        .toggle-switch input[type="checkbox"]:checked + .toggle-slider:before {
+            transform: translateX(26px);
+        }
+        
+        .toggle-label {
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .email-input-group {
+            margin-top: 15px;
+        }
+        
+        .email-input-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .email-input-group input[type="email"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            margin-bottom: 5px;
+        }
+        
+        .email-input-group input[type="email"]:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+        }
+        
+        .email-help {
+            color: #666;
+            font-size: 0.9em;
+        }
     </style>
 </head>
 <body>
@@ -284,6 +374,24 @@
                     <span class="btn-loading" style="display: none;">분석 시작 중...</span>
                 </button>
                 <button type="button" class="btn btn-secondary" id="clearFilesBtn">파일 초기화</button>
+            </div>
+            
+            <!-- 메일 발송 옵션 섹션 -->
+            <div class="email-options" id="emailOptions" style="display: none;">
+                <hr style="margin: 30px 0; border: 1px solid #e9ecef;">
+                <h3>📧 분석 완료 zip 파일 메일 보내기</h3>
+                <div class="email-toggle">
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="emailEnabled">
+                        <span class="toggle-slider"></span>
+                        <span class="toggle-label">활성화</span>
+                    </label>
+                </div>
+                <div class="email-input-group" id="emailInputGroup" style="display: none;">
+                    <label for="emailAddress">메일 주소</label>
+                    <input type="email" id="emailAddress" placeholder="분석 완료 후 zip 파일을 받을 이메일 주소를 입력하세요">
+                    <small class="email-help">분석이 완료되면 자동으로 결과 zip 파일이 발송됩니다.</small>
+                </div>
             </div>
         </div>
         

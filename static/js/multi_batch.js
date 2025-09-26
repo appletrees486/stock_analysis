@@ -12,6 +12,12 @@ document.addEventListener('DOMContentLoaded', function() {
     const queueItems = document.getElementById('queueItems');
     const errorDiv = document.getElementById('error');
     
+    // 메일 발송 옵션 요소들
+    const emailOptions = document.getElementById('emailOptions');
+    const emailEnabled = document.getElementById('emailEnabled');
+    const emailInputGroup = document.getElementById('emailInputGroup');
+    const emailAddress = document.getElementById('emailAddress');
+    
     let selectedFiles = [];
     let analysisQueue = [];
     let statusIntervals = {};
@@ -162,8 +168,10 @@ document.addEventListener('DOMContentLoaded', function() {
     function updateFormVisibility() {
         if (selectedFiles.length > 0) {
             formActions.style.display = 'block';
+            emailOptions.style.display = 'block';
         } else {
             formActions.style.display = 'none';
+            emailOptions.style.display = 'none';
         }
     }
 
@@ -220,6 +228,12 @@ document.addEventListener('DOMContentLoaded', function() {
             formData.append('stock_list', file);
             formData.append('chart_type', fileInfo.chartType);
             formData.append('trading_type', fileInfo.tradingType);
+            
+            // 메일 발송 옵션 추가
+            if (emailEnabled.checked && emailAddress.value.trim()) {
+                formData.append('email_enabled', 'true');
+                formData.append('email_address', emailAddress.value.trim());
+            }
             
             const response = await fetch('/api/analyze/batch', {
                 method: 'POST',
@@ -419,6 +433,16 @@ document.addEventListener('DOMContentLoaded', function() {
         updateFormVisibility();
         batchQueue.style.display = 'none';
         hideError();
+    });
+
+    // 메일 발송 옵션 이벤트 리스너
+    emailEnabled.addEventListener('change', function() {
+        if (this.checked) {
+            emailInputGroup.style.display = 'block';
+        } else {
+            emailInputGroup.style.display = 'none';
+            emailAddress.value = '';
+        }
     });
 
     // 에러 표시

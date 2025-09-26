@@ -18,6 +18,14 @@ import sys
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Gmail API 모듈 임포트
+try:
+    from gmail_sender import send_email_with_attachments
+    GMAIL_AVAILABLE = True
+except ImportError:
+    GMAIL_AVAILABLE = False
+    logger.warning("Gmail API 모듈을 사용할 수 없습니다. 메일 발송 기능이 비활성화됩니다.")
+
 logger = logging.getLogger(__name__)
 
 class BatchAnalyzer:
@@ -38,7 +46,7 @@ class BatchAnalyzer:
         # 싱글톤이므로 초기화는 한 번만
         pass
     
-    def start_batch_analysis(self, stock_list_path: str, chart_type: str, batch_id: str, trading_type: str = ''):
+    def start_batch_analysis(self, stock_list_path: str, chart_type: str, batch_id: str, trading_type: str = '', email_enabled: bool = False, email_address: str = ''):
         """대량 분석 시작"""
         try:
             pass  # 대량 분석 시작
@@ -52,11 +60,13 @@ class BatchAnalyzer:
                 'start_time': datetime.now().isoformat(),
                 'progress': 0,
                 'chart_type': chart_type,
-                'trading_type': trading_type
+                'trading_type': trading_type,
+                'email_enabled': email_enabled,
+                'email_address': email_address
             }
             
             # 동기적으로 분석 실행 (스레드 문제 해결)
-            self._run_batch_analysis(stock_list_path, chart_type, batch_id, trading_type)
+            self._run_batch_analysis(stock_list_path, chart_type, batch_id, trading_type, email_enabled, email_address)
             
             pass  # 대량 분석 완료
             
@@ -68,7 +78,7 @@ class BatchAnalyzer:
                 'start_time': datetime.now().isoformat()
             }
     
-    def _run_batch_analysis(self, stock_list_path: str, chart_type: str, batch_id: str, trading_type: str = ''):
+    def _run_batch_analysis(self, stock_list_path: str, chart_type: str, batch_id: str, trading_type: str = '', email_enabled: bool = False, email_address: str = ''):
         """백그라운드에서 대량 분석 실행"""
         try:
             # 종목 리스트 읽기
@@ -373,7 +383,7 @@ class BatchAnalyzer:
             # 결과 저장
             try:
                 logger.info(f"배치 결과 저장 시작: batch_id={batch_id}")
-                self._save_batch_results(batch_id)
+                self._save_batch_results(batch_id, email_enabled, email_address)
                 logger.info(f"배치 결과 저장 완료: batch_id={batch_id}")
             except Exception as e:
                 logger.error(f"배치 결과 저장 실패: batch_id={batch_id}, 오류: {e}")
@@ -467,7 +477,7 @@ class BatchAnalyzer:
             logger.warning(f"summary_meta 추출 중 오류: {e}")
             return None
 
-    def _save_batch_results(self, batch_id: str):
+    def _save_batch_results(self, batch_id: str, email_enabled: bool = False, email_address: str = ''):
         """배치 결과를 파일로 저장"""
         try:
             logger.info(f"배치 결과 저장 시작: {batch_id}")
@@ -481,6 +491,8 @@ class BatchAnalyzer:
             # ZIP 파일명 생성 (summary_meta 기반)
             zip_file = self._generate_zip_filename(batch_id)
             logger.info(f"ZIP 파일 생성: {zip_file}")
+            logger.info(f"ZIP 파일 절대 경로: {os.path.abspath(zip_file)}")
+            logger.info(f"ZIP 파일 존재 여부: {os.path.exists(zip_file)}")
             
             with zipfile.ZipFile(zip_file, 'w', zipfile.ZIP_DEFLATED) as zipf:
                 # ai_analysis_results 폴더의 개별 종목별 분석 결과 파일들 추가 (DOCX만) - 비활성화
@@ -495,7 +507,21 @@ class BatchAnalyzer:
                 logger.info(f"통합 분석 파일들 ZIP에 추가 완료")
             
             logger.info(f"ZIP 파일 생성 완료: {zip_file}")
+            logger.info(f"ZIP 파일 최종 확인 - 존재: {os.path.exists(zip_file)}, 크기: {os.path.getsize(zip_file) if os.path.exists(zip_file) else 'N/A'} bytes")
             logger.info(f"배치 결과 저장 완료: {batch_id}")
+            
+            # 메일 발송 (옵션이 활성화된 경우)
+            if email_enabled and email_address and GMAIL_AVAILABLE:
+                logger.info(f"📧 메일 발송 조건 확인 - email_enabled: {email_enabled}, email_address: {email_address}, GMAIL_AVAILABLE: {GMAIL_AVAILABLE}")
+                # ZIP 파일 생성 완료 후 잠시 대기 (파일 시스템 동기화)
+                import time
+                time.sleep(1)
+                # 생성된 ZIP 파일 재확인
+                if os.path.exists(zip_file):
+                    logger.info(f"📎 메일 발송용 ZIP 파일 재확인 - 존재: True, 크기: {os.path.getsize(zip_file)} bytes")
+                    self._send_completion_email(batch_id, zip_file, email_address)
+                else:
+                    logger.error(f"❌ 메일 발송용 ZIP 파일을 찾을 수 없습니다: {zip_file}")
             
             # 메모리 정리
             self.cleanup_batch_memory(batch_id)
@@ -1819,4 +1845,151 @@ class BatchAnalyzer:
                 
         except Exception as e:
             logger.error(f"❌ 태그 문서 생성 중 오류: {e}")
+            return None
+    
+    def _send_completion_email(self, batch_id: str, zip_file: str, email_address: str):
+        """분석 완료 후 메일 발송"""
+        try:
+            if not GMAIL_AVAILABLE:
+                logger.warning("Gmail API가 사용 불가능합니다. 메일 발송을 건너뜁니다.")
+                return
+            
+            # 배치 ID로 정확한 ZIP 파일 찾기
+            correct_zip_file = self._find_correct_zip_file(batch_id, zip_file)
+            if not correct_zip_file:
+                logger.error(f"❌ 배치 {batch_id}에 해당하는 ZIP 파일을 찾을 수 없습니다.")
+                return
+            
+            # 오늘 날짜로 제목 생성
+            today = datetime.now().strftime('%Y-%m-%d')
+            subject = f"{today} 분석완료 파일"
+            
+            # 메일 본문 생성
+            status = self.batch_status.get(batch_id, {})
+            chart_type = status.get('chart_type', 'N/A')
+            trading_type = status.get('trading_type', 'N/A')
+            completed = status.get('completed', 0)
+            total = status.get('total', 0)
+            
+            body = f"""
+안녕하세요!
+
+주식 차트 분석이 완료되었습니다.
+
+📊 분석 정보:
+- 배치 ID: {batch_id}
+- 차트 유형: {chart_type}
+- 거래 타입: {trading_type}
+- 분석 완료: {completed}개 / {total}개
+- 완료 시간: {datetime.now().strftime('%Y년 %m월 %d일 %H시 %M분')}
+
+📎 첨부파일: 분석 결과 ZIP 파일 ({os.path.basename(correct_zip_file)})
+
+감사합니다.
+AI 주식 차트 분석 시스템
+"""
+            
+            # 메일 발송
+            logger.info(f"📧 메일 발송 시작: {email_address}")
+            logger.info(f"📎 첨부파일: {correct_zip_file}")
+            logger.info(f"📎 파일 크기: {os.path.getsize(correct_zip_file)} bytes")
+            
+            success = send_email_with_attachments(
+                to=email_address,
+                subject=subject,
+                body=body,
+                attachments=[correct_zip_file]
+            )
+            
+            if success:
+                logger.info(f"✅ 분석 완료 메일 발송 성공: {email_address}")
+                logger.info(f"📎 첨부파일: {correct_zip_file}")
+            else:
+                logger.error(f"❌ 분석 완료 메일 발송 실패: {email_address}")
+                
+        except Exception as e:
+            logger.error(f"❌ 메일 발송 중 오류: {e}")
+            # 메일 발송 실패해도 분석 결과는 정상적으로 완료된 것으로 처리
+    
+    def _find_correct_zip_file(self, batch_id: str, suggested_zip_file: str) -> str:
+        """배치 ID에 해당하는 정확한 ZIP 파일 찾기"""
+        try:
+            logger.info(f"🔍 ZIP 파일 찾기 시작 - 배치 ID: {batch_id}")
+            logger.info(f"🔍 제안된 파일: {suggested_zip_file}")
+            
+            # 1. 제안된 파일이 존재하는지 확인 (절대 경로와 상대 경로 모두)
+            if os.path.exists(suggested_zip_file):
+                logger.info(f"✅ 제안된 ZIP 파일 확인: {suggested_zip_file}")
+                logger.info(f"📎 파일 크기: {os.path.getsize(suggested_zip_file)} bytes")
+                return suggested_zip_file
+            
+            # 상대 경로로도 시도
+            suggested_relative = os.path.basename(suggested_zip_file)
+            if os.path.exists(suggested_relative):
+                logger.info(f"✅ 상대 경로 ZIP 파일 확인: {suggested_relative}")
+                logger.info(f"📎 파일 크기: {os.path.getsize(suggested_relative)} bytes")
+                return suggested_relative
+            
+            # 2. results 폴더에서 배치 ID가 포함된 ZIP 파일 찾기
+            results_dir = "results"
+            logger.info(f"🔍 results 폴더 검색: {results_dir}")
+            logger.info(f"🔍 results 폴더 존재 여부: {os.path.exists(results_dir)}")
+            
+            if os.path.exists(results_dir):
+                import glob
+                
+                # 모든 ZIP 파일 목록 확인
+                all_zip_files = glob.glob(os.path.join(results_dir, "*.zip"))
+                logger.info(f"🔍 results 폴더의 모든 ZIP 파일: {len(all_zip_files)}개")
+                for i, zip_file in enumerate(all_zip_files):
+                    logger.info(f"  {i+1}. {os.path.basename(zip_file)}")
+                
+                # 배치 ID가 포함된 ZIP 파일 패턴으로 검색
+                pattern = os.path.join(results_dir, f"*{batch_id}.zip")
+                logger.info(f"🔍 검색 패턴: {pattern}")
+                matching_files = glob.glob(pattern)
+                logger.info(f"🔍 패턴 매칭 결과: {len(matching_files)}개")
+                
+                if matching_files:
+                    for i, match_file in enumerate(matching_files):
+                        logger.info(f"  매칭 {i+1}: {os.path.basename(match_file)}")
+                    
+                    # 가장 최근 파일 선택
+                    correct_file = max(matching_files, key=os.path.getctime)
+                    logger.info(f"✅ 배치 ID로 찾은 ZIP 파일: {correct_file}")
+                    logger.info(f"📎 파일 크기: {os.path.getsize(correct_file)} bytes")
+                    return correct_file
+                else:
+                    logger.warning(f"⚠️ 배치 ID {batch_id}가 포함된 ZIP 파일을 찾을 수 없습니다.")
+                    
+                    # 배치 ID가 부분적으로 포함된 파일 찾기
+                    logger.info(f"🔍 부분 매칭 검색 시작...")
+                    partial_matches = []
+                    for zip_file in all_zip_files:
+                        if batch_id in os.path.basename(zip_file):
+                            partial_matches.append(zip_file)
+                            logger.info(f"  부분 매칭: {os.path.basename(zip_file)}")
+                    
+                    if partial_matches:
+                        correct_file = max(partial_matches, key=os.path.getctime)
+                        logger.info(f"✅ 부분 매칭으로 찾은 ZIP 파일: {correct_file}")
+                        logger.info(f"📎 파일 크기: {os.path.getsize(correct_file)} bytes")
+                        return correct_file
+            
+            # 3. results 폴더의 모든 ZIP 파일 중 가장 최근 파일
+            if os.path.exists(results_dir):
+                all_zip_files = glob.glob(os.path.join(results_dir, "*.zip"))
+                if all_zip_files:
+                    latest_file = max(all_zip_files, key=os.path.getctime)
+                    logger.warning(f"⚠️ 최신 ZIP 파일 사용: {latest_file}")
+                    logger.info(f"📎 파일 크기: {os.path.getsize(latest_file)} bytes")
+                    return latest_file
+            
+            logger.error(f"❌ ZIP 파일을 찾을 수 없습니다. 배치 ID: {batch_id}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ ZIP 파일 찾기 중 오류: {e}")
+            import traceback
+            logger.error(f"상세 오류: {traceback.format_exc()}")
             return None
