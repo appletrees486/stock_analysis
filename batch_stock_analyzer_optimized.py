@@ -402,18 +402,22 @@ def run_ai_analysis_fast(stock_name: str, stock_code: str, chart_type: str, char
         # AI 분석 실행
         import ai_chart_analysis
         from config import config
+        from database_config import get_db_config
         
         api_key = config.get_api_key()
         if not api_key:
             print("❌ API 키를 가져올 수 없습니다")
             return False
         
+        # DB 설정 로드
+        db_config = get_db_config()
+        
         # DB에서 한글 종목명 조회 (캐시 사용 - 성능 최적화)
         db_stock_name = stock_code  # 기본값
         if stock_names_cache and stock_code in stock_names_cache:
             db_stock_name = stock_names_cache[stock_code]
         
-        analyzer = ai_chart_analysis.AIChartAnalyzer(api_key)
+        analyzer = ai_chart_analysis.AIChartAnalyzer(api_key, db_config)
         image_path = os.path.join(charts_dir, selected_file)
         
         print(f"🤖 AI 분석 시작: {db_stock_name} ({stock_code})")

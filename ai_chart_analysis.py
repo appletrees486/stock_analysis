@@ -406,7 +406,7 @@ class AIChartAnalyzer:
         genai.configure(api_key=api_key)
         
         # 제미나이 모델 설정
-        self.model = genai.GenerativeModel('gemini-1.5-flash')
+        self.model = genai.GenerativeModel('gemini-2.0-flash')
         
         # 종목명 매퍼 초기화 (DB 기반)
         self.stock_mapper = StockNameMapper(db_config)
@@ -466,15 +466,19 @@ class AIChartAnalyzer:
         return api_key
     
     def _validate_api_key(self, api_key: str) -> bool:
-        """API 키 유효성 검증"""
+        """API 키 유효성 검증 (간소화)"""
         try:
-            # API 키를 먼저 설정
-            genai.configure(api_key=api_key)
-            test_model = genai.GenerativeModel('gemini-1.5-flash')
-            response = test_model.generate_content("테스트")
+            # API 키 형식만 검증 (실제 API 호출은 하지 않음)
+            if not api_key or len(api_key) < 20:
+                return False
+            
+            # Google AI API 키 형식 확인
+            if not api_key.startswith('AIza'):
+                return False
+                
             return True
         except Exception as e:
-            pass  # API 키 유효성 검증 실패
+            print(f"⚠️ API 키 검증 오류: {e}")
             return False
     
     def _set_default_config(self):
@@ -658,9 +662,24 @@ JSON 파일의 모든 수치를 정확히 반영하여 분석해주세요."""
                 # 최근 데이터 요약 정보 생성
                 recent_data = chart_data.tail(10)  # 최근 10개 데이터
                 
+                # 날짜 인덱스 처리 (int 타입일 경우 대비)
+                start_date = chart_data.index[0]
+                end_date = chart_data.index[-1]
+                
+                # 날짜 형식 변환
+                if hasattr(start_date, 'strftime'):
+                    start_date_str = start_date.strftime('%Y-%m-%d')
+                else:
+                    start_date_str = str(start_date)
+                    
+                if hasattr(end_date, 'strftime'):
+                    end_date_str = end_date.strftime('%Y-%m-%d')
+                else:
+                    end_date_str = str(end_date)
+                
                 data_summary = f"""
 **차트 데이터 정보:**
-- 데이터 기간: {chart_data.index[0].strftime('%Y-%m-%d')} ~ {chart_data.index[-1].strftime('%Y-%m-%d')}
+- 데이터 기간: {start_date_str} ~ {end_date_str}
 - 총 데이터 수: {len(chart_data)}개
 - 최근 10개 데이터:
 """
@@ -673,7 +692,13 @@ JSON 파일의 모든 수치를 정확히 반영하여 분석해주세요."""
                     close_val = f"{row['Close']:,.0f}" if pd.notna(row['Close']) else "N/A"
                     volume_val = f"{row['Volume']:,.0f}" if pd.notna(row['Volume']) else "N/A"
                     
-                    data_summary += f"- {date.strftime('%Y-%m-%d')}: 시가 {open_val}, 고가 {high_val}, 저가 {low_val}, 종가 {close_val}, 거래대금 {volume_val}\n"
+                    # 날짜 형식 변환 (int 타입일 경우 대비)
+                    if hasattr(date, 'strftime'):
+                        date_str = date.strftime('%Y-%m-%d')
+                    else:
+                        date_str = str(date)
+                    
+                    data_summary += f"- {date_str}: 시가 {open_val}, 고가 {high_val}, 저가 {low_val}, 종가 {close_val}, 거래대금 {volume_val}\n"
                 
                 # 기술적 지표 정보 추가 (있는 경우)
                 if 'MA5' in chart_data.columns and pd.notna(chart_data['MA5'].iloc[-1]):
@@ -961,9 +986,24 @@ JSON 파일의 모든 수치를 정확히 반영하여 분석해주세요."""
                 # 최근 데이터 요약 정보 생성 (간략화)
                 recent_data = chart_data.tail(5)  # 최근 5개 데이터만
                 
+                # 날짜 인덱스 처리 (int 타입일 경우 대비)
+                start_date = chart_data.index[0]
+                end_date = chart_data.index[-1]
+                
+                # 날짜 형식 변환
+                if hasattr(start_date, 'strftime'):
+                    start_date_str = start_date.strftime('%Y-%m-%d')
+                else:
+                    start_date_str = str(start_date)
+                    
+                if hasattr(end_date, 'strftime'):
+                    end_date_str = end_date.strftime('%Y-%m-%d')
+                else:
+                    end_date_str = str(end_date)
+                
                 data_summary = f"""
 **차트 데이터 요약:**
-- 데이터 기간: {chart_data.index[0].strftime('%Y-%m-%d')} ~ {chart_data.index[-1].strftime('%Y-%m-%d')}
+- 데이터 기간: {start_date_str} ~ {end_date_str}
 - 총 데이터 수: {len(chart_data)}개
 """
                 
@@ -1547,8 +1587,8 @@ JSON 파일의 모든 수치를 정확히 반영하여 분석해주세요."""
                 "metadata": {
                     "chart_type": chart_type,
                     "data_period": {
-                        "start": chart_data_clean.index[0].strftime('%Y-%m-%d'),
-                        "end": chart_data_clean.index[-1].strftime('%Y-%m-%d')
+                        "start": chart_data_clean.index[0].strftime('%Y-%m-%d') if hasattr(chart_data_clean.index[0], 'strftime') else str(chart_data_clean.index[0]),
+                        "end": chart_data_clean.index[-1].strftime('%Y-%m-%d') if hasattr(chart_data_clean.index[-1], 'strftime') else str(chart_data_clean.index[-1])
                     },
                     "total_records": len(chart_data_clean)
                 },
@@ -1620,7 +1660,7 @@ JSON 파일의 모든 수치를 정확히 반영하여 분석해주세요."""
             recent_data = chart_data_clean.tail(30)
             for date, row in recent_data.iterrows():
                 data_point = {
-                    "date": date.strftime('%Y-%m-%d'),
+                    "date": date.strftime('%Y-%m-%d') if hasattr(date, 'strftime') else str(date),
                     "open": float(row['Open']),
                     "high": float(row['High']),
                     "low": float(row['Low']),
@@ -3462,6 +3502,194 @@ class SummaryFileGenerator:
             print(f"⚠️ AI 분석기 초기화 실패: {e}")
             self.analyzer = None
     
+    def _extract_seo_tags_from_summary(self, summary_text: str) -> list:
+        """
+        요약 텍스트에서 검색 최적화 태그를 추출하는 메서드
+        
+        Args:
+            summary_text (str): 요약 텍스트
+            
+        Returns:
+            list: 추출된 태그 리스트
+        """
+        try:
+            tags = []
+            
+            # 해시태그 패턴 찾기 (#으로 시작하는 태그들)
+            import re
+            hashtag_pattern = r'#([가-힣a-zA-Z0-9_]+)'
+            hashtags = re.findall(hashtag_pattern, summary_text)
+            
+            for tag in hashtags:
+                # 태그 길이 검증 (2-15자)
+                if len(tag) >= 2 and len(tag) <= 15:
+                    tags.append(tag)
+            
+            # 중복 제거
+            unique_tags = []
+            for tag in tags:
+                if tag not in unique_tags:
+                    unique_tags.append(tag)
+            
+            # 최대 15개로 제한
+            return unique_tags[:15]
+            
+        except Exception as e:
+            print(f"⚠️ 검색 최적화 태그 추출 중 오류: {e}")
+            return []
+
+    def _remove_seo_tags_from_text(self, text: str) -> str:
+        """
+        텍스트에서 검색 최적화 태그 부분을 제거하는 메서드
+        
+        Args:
+            text (str): 원본 텍스트
+            
+        Returns:
+            str: 태그 부분이 제거된 깨끗한 텍스트
+        """
+        try:
+            import re
+            # 해시태그가 포함된 줄을 제거
+            lines = text.split('\n')
+            clean_lines = []
+            
+            for line in lines:
+                line_stripped = line.strip()
+                
+                # 해시태그만 포함된 줄인지 확인
+                if line_stripped and all(word.startswith('#') for word in line_stripped.split() if word.strip()):
+                    # 해시태그만 포함된 줄이므로 제거
+                    continue
+                else:
+                    # 일반 텍스트는 그대로 포함
+                    clean_lines.append(line)
+            
+            # 연속된 줄바꿈 정리 (3개 이상을 2개로)
+            clean_text = '\n'.join(clean_lines)
+            clean_text = re.sub(r'\n{3,}', '\n\n', clean_text)
+            
+            # 앞뒤 공백 제거
+            return clean_text.strip()
+            
+        except Exception as e:
+            print(f"⚠️ 검색 최적화 태그 제거 중 오류: {e}")
+            return text
+
+    def create_tags_document(self, results_dir: str = "ai_analysis_results", batch_id: str = None) -> str:
+        """
+        모든 summary JSON에서 검색 최적화 태그를 수집하여 tag.docx 생성
+        
+        Args:
+            results_dir (str): 분석 결과 폴더 경로
+            batch_id (str): 배치 ID (파일명 구분용)
+            
+        Returns:
+            str: 생성된 tag.docx 파일 경로 또는 None
+        """
+        try:
+            print("🏷️ 검색 최적화 태그 수집 중...")
+            
+            if not os.path.exists(results_dir):
+                print(f"❌ 분석 결과 폴더가 존재하지 않습니다: {results_dir}")
+                return None
+            
+            # summary JSON 파일들 찾기
+            summary_files = []
+            for file in os.listdir(results_dir):
+                if file.startswith('summary_') and file.endswith('.json'):
+                    summary_files.append(os.path.join(results_dir, file))
+            
+            if not summary_files:
+                print("❌ summary JSON 파일을 찾을 수 없습니다")
+                return None
+            
+            print(f"📁 발견된 summary 파일: {len(summary_files)}개")
+            
+            # 모든 태그 수집
+            all_tags = []
+            for summary_file in summary_files:
+                try:
+                    with open(summary_file, 'r', encoding='utf-8') as f:
+                        summary_data = json.load(f)
+                    
+                    # market_summary에서 검색_최적화_태그 추출
+                    market_summary = summary_data.get("market_summary", {})
+                    if isinstance(market_summary, dict):
+                        tags = market_summary.get("검색_최적화_태그", [])
+                        if isinstance(tags, list):
+                            all_tags.extend(tags)
+                    
+                except Exception as e:
+                    print(f"⚠️ {summary_file} 읽기 실패: {e}")
+                    continue
+            
+            if not all_tags:
+                print("❌ 검색 최적화 태그를 찾을 수 없습니다")
+                return None
+            
+            # 중복 제거 및 정렬
+            unique_tags = sorted(list(set(all_tags)))
+            print(f"✅ 수집된 태그: {len(unique_tags)}개")
+            
+            # tag.docx 파일명 생성 (배치 ID 또는 타임스탬프 포함)
+            from datetime import datetime
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            
+            if batch_id:
+                filename = f"tag_{batch_id}_{timestamp}.docx"
+            else:
+                filename = f"tag_{timestamp}.docx"
+            
+            output_path = os.path.join(results_dir, filename)
+            success = self._create_tags_docx(unique_tags, output_path)
+            
+            if success:
+                print(f"✅ tag.docx 생성 완료: {output_path}")
+                return output_path
+            else:
+                print("❌ tag.docx 생성 실패")
+                return None
+                
+        except Exception as e:
+            print(f"❌ 태그 문서 생성 중 오류: {e}")
+            return None
+
+    def _create_tags_docx(self, tags: list, output_path: str) -> bool:
+        """
+        태그 리스트를 DOCX 파일로 생성
+        
+        Args:
+            tags (list): 태그 리스트
+            output_path (str): 출력 파일 경로
+            
+        Returns:
+            bool: 생성 성공 여부
+        """
+        try:
+            from docx import Document
+            from docx.shared import Inches, Pt
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
+            from docx.oxml.ns import qn
+            
+            doc = Document()
+            
+            # 태그를 쉼표로 구분하여 표시
+            tags_text = ", ".join(tags)
+            tags_para = doc.add_paragraph(tags_text)
+            for run in tags_para.runs:
+                run.font.name = '맑은 고딕'
+                run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+            
+            # 문서 저장
+            doc.save(output_path)
+            return True
+            
+        except Exception as e:
+            print(f"❌ tag.docx 생성 중 오류: {e}")
+            return False
+
+
     def scan_analysis_results(self, results_dir: str = "ai_analysis_results") -> dict:
         """
         분석 결과 폴더를 스캔하여 차트 유형별로 그룹화
@@ -3775,6 +4003,26 @@ class SummaryFileGenerator:
                 ai_result = self.analyzer.analyze_text_with_prompt(formatted_prompt)
                 
                 if ai_result:
+                    # AI 결과에서 검색 최적화 태그 추출
+                    seo_tags = []
+                    clean_analysis_text = ""
+                    
+                    if isinstance(ai_result, dict) and "분석_결과" in ai_result:
+                        seo_tags = self._extract_seo_tags_from_summary(ai_result["분석_결과"])
+                        clean_analysis_text = self._remove_seo_tags_from_text(ai_result["분석_결과"])
+                        ai_result["분석_결과"] = clean_analysis_text
+                    elif isinstance(ai_result, str):
+                        seo_tags = self._extract_seo_tags_from_summary(ai_result)
+                        clean_analysis_text = self._remove_seo_tags_from_text(ai_result)
+                        ai_result = {
+                            "분석_결과": clean_analysis_text,
+                            "검색_최적화_태그": seo_tags
+                        }
+                    
+                    # market_summary에 검색 최적화 태그 추가
+                    if isinstance(ai_result, dict):
+                        ai_result["검색_최적화_태그"] = seo_tags
+                    
                     # 통합 요약 결과 구성
                     consolidated_result = {
                         "summary_meta": {
@@ -3808,7 +4056,8 @@ class SummaryFileGenerator:
                 "market_summary": {
                     "분석_결과": f"{chart_type_kr} 차트 {len(analysis_results)}개 종목 분석 완료",
                     "생성_시간": datetime.now().isoformat(),
-                    "분석_유형": f"{chart_type_kr}_통합요약"
+                    "분석_유형": f"{chart_type_kr}_통합요약",
+                    "검색_최적화_태그": [f"{chart_type_kr}분석", "차트분석", "투자분석"]
                 },
                 "stock_details": summary_data["종목별요약"],
                 "raw_analysis_count": len(analysis_results)
@@ -4107,8 +4356,18 @@ class SummaryFileGenerator:
             total_stocks = meta.get("total_stocks", 0)
             generated_at = meta.get("generated_at", "N/A")
             
+            # 거래일 형식 변환 (YYYY-MM-DD → M월 D일)
+            trading_date = meta.get("trading_date", "N/A")
+            formatted_trading_date = "N/A"
+            if trading_date != "N/A":
+                try:
+                    date_obj = datetime.strptime(trading_date, "%Y-%m-%d")
+                    formatted_trading_date = f"{date_obj.month}월 {date_obj.day}일"
+                except:
+                    formatted_trading_date = trading_date
+            
             # 제목 설정
-            title = doc.add_heading(f'{chart_type} 통합 분석 요약 보고서', 0)
+            title = doc.add_heading(f'{formatted_trading_date} {chart_type} 통합 분석 요약 보고서', 0)
             title.alignment = WD_ALIGN_PARAGRAPH.CENTER
             
             # 한글 폰트 적용
@@ -4151,18 +4410,8 @@ class SummaryFileGenerator:
             # 분석 개요 설명 추가 (모든 차트 유형에 적용)
             # summary_meta에서 거래일, 차트 유형, 거래타입 추출
             summary_meta = consolidated_result.get("summary_meta", {}) if consolidated_result else {}
-            trading_date = summary_meta.get("trading_date", "N/A")
             chart_type_from_meta = summary_meta.get("chart_type", chart_type)
             trading_type_from_meta = summary_meta.get("trading_type", "거래대금")
-            
-            # 거래일 형식 변환 (YYYY-MM-DD → M월 D일)
-            formatted_trading_date = "N/A"
-            if trading_date != "N/A":
-                try:
-                    date_obj = datetime.strptime(trading_date, "%Y-%m-%d")
-                    formatted_trading_date = f"{date_obj.month}월 {date_obj.day}일"
-                except:
-                    formatted_trading_date = trading_date
             
             overview_desc = f"{formatted_trading_date} {trading_type_from_meta} 기준 상위 50개 종목의 {chart_type_from_meta} 차트를 분석한 결과, 특이사항을 나타낸 종목은 아래와 같습니다. 핵심내용만 요약하여 제공해드리고, 자세한 내용은 첨부파일의 개별 종목별 차트분석 결과를 참고하시기 바랍니다."
             

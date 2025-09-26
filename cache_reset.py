@@ -364,44 +364,44 @@ def main():
     print("🛠️  로컬서버 캐시 리셋 도구")
     print("=" * 50)
     print("1. 전체 캐시 리셋 (서버 + 웹) - 권장")
-    print("2. 서버 캐시만 정리 (서버 재시작 안함)")
-    print("3. 웹 캐시만 초기화")
-    print("4. 서버만 재시작")
-    print("5. 서버 상태 확인")
-    print("6. 현재 상태 확인")
-    print("7. 종료")
+    # print("2. 서버 캐시만 정리 (서버 재시작 안함)")
+    # print("3. 웹 캐시만 초기화")
+    # print("4. 서버만 재시작")
+    # print("5. 서버 상태 확인")
+    # print("6. 현재 상태 확인")
+    # print("7. 종료")
     
     while True:
         try:
-            choice = input("\n선택하세요 (1-7): ").strip()
+            choice = input("\n선택하세요 (1): ").strip()
             
             if choice == '1':
                 reset_tool.run_full_reset()
                 break
-            elif choice == '2':
-                print("🧹 서버 캐시 정리만 실행")
-                reset_tool.clear_pycache()
-                reset_tool.clear_log_files()
-                reset_tool.clear_temp_files()
-                reset_tool.clear_upload_cache()
-                reset_tool.clear_chart_cache()
-                print("\n✅ 서버 캐시 정리 완료!")
-                break
-            elif choice == '3':
-                reset_tool.run_web_cache_reset()
-                break
-            elif choice == '4':
-                reset_tool.restart_server()
-                break
-            elif choice == '5':
-                reset_tool.check_server_status()
-            elif choice == '6':
-                reset_tool.show_status()
-            elif choice == '7':
-                print("👋 종료합니다.")
-                break
+            # elif choice == '2':
+            #     print("🧹 서버 캐시 정리만 실행")
+            #     reset_tool.clear_pycache()
+            #     reset_tool.clear_log_files()
+            #     reset_tool.clear_temp_files()
+            #     reset_tool.clear_upload_cache()
+            #     reset_tool.clear_chart_cache()
+            #     print("\n✅ 서버 캐시 정리 완료!")
+            #     break
+            # elif choice == '3':
+            #     reset_tool.run_web_cache_reset()
+            #     break
+            # elif choice == '4':
+            #     reset_tool.restart_server()
+            #     break
+            # elif choice == '5':
+            #     reset_tool.check_server_status()
+            # elif choice == '6':
+            #     reset_tool.show_status()
+            # elif choice == '7':
+            #     print("👋 종료합니다.")
+            #     break
             else:
-                print("❌ 잘못된 선택입니다. 1-7 중에서 선택해주세요.")
+                print("❌ 잘못된 선택입니다. 1을 선택해주세요.")
                 
         except KeyboardInterrupt:
             print("\n\n👋 사용자가 중단했습니다.")

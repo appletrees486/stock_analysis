@@ -671,7 +671,7 @@ class BatchAnalyzer:
             try:
                 import tempfile
                 if total_analysis_result:
-                    total_analysis_doc_filename = f"total_analysis/total_analysis_{chart_type_en}_{timestamp}.docx"
+                    total_analysis_doc_filename = f"total_analysis/통합요약_분석_{chart_type_en}_{timestamp}.docx"
                     
                     # 임시 파일로 생성 후 ZIP에 추가
                     with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as temp_file:
@@ -719,6 +719,19 @@ class BatchAnalyzer:
                     logger.warning(f"요약 분석 정보를 찾을 수 없습니다")
             except Exception as e:
                 logger.error(f"요약 분석 파일 ZIP 추가 실패: {e}")
+            
+            # 7. 태그 DOCX 파일 생성 및 ZIP에 추가 (최상위)
+            try:
+                logger.info(f"태그 DOCX 파일 생성 시작")
+                tag_docx_path = self._create_tags_document(batch_id)
+                if tag_docx_path and os.path.exists(tag_docx_path):
+                    # ZIP 최상위에 tag.docx 추가 (파일명을 tag.docx로 고정)
+                    zipf.write(tag_docx_path, "tag.docx")
+                    logger.info(f"태그 DOCX 추가: tag.docx")
+                else:
+                    logger.warning(f"태그 DOCX 파일 생성 실패")
+            except Exception as e:
+                logger.error(f"태그 DOCX ZIP 추가 실패: {e}")
             
             logger.info(f"통합 파일들 ZIP 추가 완료: {chart_type_en}")
             
@@ -803,8 +816,8 @@ class BatchAnalyzer:
             logger.info(f"   📊 통합 JSON: consolidated_{chart_type_en}_{timestamp}.json")
             logger.info(f"   📄 통합 Word: consolidated_{chart_type_en}_{timestamp}.docx")
             logger.info(f"   📋 요약본: summary_{chart_type_en}_{timestamp}.docx")
-            logger.info(f"   📊 Total Analysis: total_analysis_{chart_type_en}_{timestamp}.json")
-            logger.info(f"   📄 Total Analysis DOCX: total_analysis_{chart_type_en}_{timestamp}.docx")
+            logger.info(f"   📊 Total Analysis: 통합요약_분석_{chart_type_en}_{timestamp}.json")
+            logger.info(f"   📄 Total Analysis DOCX: 통합요약_분석_{chart_type_en}_{timestamp}.docx")
             
         except Exception as e:
             logger.error(f"❌ 통합 파일 생성 중 치명적 오류: {e}")
@@ -1769,3 +1782,41 @@ class BatchAnalyzer:
             return 0
         except:
             return 0
+    
+    def _create_tags_document(self, batch_id: str) -> str:
+        """
+        모든 summary JSON에서 검색 최적화 태그를 수집하여 tag.docx 생성
+        
+        Args:
+            batch_id (str): 배치 ID
+            
+        Returns:
+            str: 생성된 tag.docx 파일 경로 또는 None
+        """
+        try:
+            logger.info("🏷️ 검색 최적화 태그 수집 중...")
+            
+            # ai_chart_analysis 모듈에서 SummaryFileGenerator import
+            sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            from ai_chart_analysis import SummaryFileGenerator
+            from database_config import get_db_config
+            
+            # 데이터베이스 설정 로드
+            db_config = get_db_config()
+            
+            # 요약 파일 생성기 초기화
+            summary_generator = SummaryFileGenerator(db_config)
+            
+            # 태그 DOCX 파일 생성 (배치 ID 전달)
+            tag_docx_path = summary_generator.create_tags_document(batch_id=batch_id)
+            
+            if tag_docx_path:
+                logger.info(f"✅ 태그 DOCX 생성 완료: {tag_docx_path}")
+                return tag_docx_path
+            else:
+                logger.warning("❌ 태그 DOCX 생성 실패")
+                return None
+                
+        except Exception as e:
+            logger.error(f"❌ 태그 문서 생성 중 오류: {e}")
+            return None

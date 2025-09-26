@@ -555,11 +555,40 @@ def calculate_technical_indicators(df, stock_code=None):
         df['MA20'] = df['Close'].rolling(window=20).mean() # DB 저장용
         df['MA60'] = df['Close'].rolling(window=60).mean() # DB 저장용 장기 추세
         
-        # 볼린저 밴드 계산 (20개월,2) - 변동성 스퀴즈/돌파
+        # 🔥 개선된 볼린저 밴드 계산 (20개월,2) - 로그 스케일 최적화
         df['BB_Middle'] = df['Close'].rolling(window=20).mean()
         bb_std = df['Close'].rolling(window=20).std()
+        
+        # 기본 볼린저 밴드 계산
         df['BB_Upper'] = df['BB_Middle'] + (bb_std * 2)
         df['BB_Lower'] = df['BB_Middle'] - (bb_std * 2)
+        
+        # 🔥 로그 스케일용 볼린저 밴드 하한선 개선 (간단하고 효율적인 방법)
+        # 1. 최소값을 1원으로 설정
+        df['BB_Lower'] = df['BB_Lower'].clip(lower=1.0)
+        
+        # 2. 중간선의 40% 이하로는 내려가지 않도록 제한
+        df['BB_Lower'] = df['BB_Lower'].clip(lower=df['BB_Middle'] * 0.4)
+        
+        # 3. 전체 데이터의 최저가의 60% 이하로는 절대 내려가지 않도록 제한
+        global_min_price = df[['High', 'Low', 'Close', 'Open']].min().min()
+        if global_min_price > 0:
+            df['BB_Lower'] = df['BB_Lower'].clip(lower=global_min_price * 0.6)
+        
+        # 4. 볼린저 밴드 폭이 너무 넓어지지 않도록 제한 (중간선의 150% 이하)
+        max_band_width = df['BB_Middle'] * 1.5
+        band_width = df['BB_Upper'] - df['BB_Lower']
+        
+        # 밴드 폭이 너무 넓으면 하한선을 조정
+        mask = band_width > max_band_width
+        df.loc[mask, 'BB_Lower'] = df.loc[mask, 'BB_Upper'] - max_band_width[mask]
+        df['BB_Lower'] = df['BB_Lower'].clip(lower=1.0)  # 최소 1원 보장
+        
+        # 볼린저 밴드 데이터 검증
+        print(f"   📊 볼린저 밴드 계산 완료:")
+        print(f"   📊 BB_Upper 범위: {df['BB_Upper'].min():.0f} ~ {df['BB_Upper'].max():.0f}")
+        print(f"   📊 BB_Lower 범위: {df['BB_Lower'].min():.0f} ~ {df['BB_Lower'].max():.0f}")
+        print(f"   📊 BB_Middle 범위: {df['BB_Middle'].min():.0f} ~ {df['BB_Middle'].max():.0f}")
         
         # 거래량 + 12개월 이동평균 거래량
         df['Volume_MA12'] = df['Volume'].rolling(window=12).mean()
@@ -716,41 +745,20 @@ def calculate_technical_indicators(df, stock_code=None):
         return df
 
 def detect_trading_suspension(row, df):
-    """거래정지 기간 감지 함수 - 월봉용"""
-    # 월봉 데이터의 특성을 고려한 더 엄격한 조건들
+    """거래정지 기간 감지 함수 - 월봉용 (정확한 조건)"""
+    # 월봉 데이터의 특성을 고려한 조건들 (정확한 거래정지만 감지)
     
-    # 1. OHLC가 모두 동일한 경우 (거래 없음)
-    if row['Open'] == row['High'] == row['Low'] == row['Close']:
+    # 1. 가격이 0 이하인 경우 (상장폐지 등)
+    if row['Close'] <= 0 or row['Open'] <= 0 or row['High'] <= 0 or row['Low'] <= 0:
         return True
     
-    # 2. 거래량이 0인 경우
-    if row['Volume'] == 0:
+    # 2. OHLC가 모두 동일하고 거래량이 0인 경우 (명확한 거래정지)
+    if (row['Open'] == row['High'] == row['Low'] == row['Close'] and 
+        row['Volume'] == 0):
         return True
     
-    # 3. 가격이 0에 가까운 경우 (상장폐지, 감자 등)
-    if row['Close'] <= 1.0 or row['Open'] <= 1.0 or row['High'] <= 1.0 or row['Low'] <= 1.0:
-        return True
-    
-    # 4. 고가-저가 차이가 매우 작고 거래량이 매우 적은 경우
-    if abs(row['High'] - row['Low']) < 0.01 and row['Volume'] < 1000:
-        return True
-    
-    # 5. 가격이 급격히 하락하고 거래량이 평균의 5% 미만인 경우 (감자 등)
-    if row['Close'] < row['Open'] * 0.3 and row['Volume'] < df['Volume'].mean() * 0.05:
-        return True
-    
-    # 6. 가격 변동이 거의 없고 거래량이 평균의 10% 미만인 경우
-    if abs(row['High'] - row['Low']) < 0.01 and row['Volume'] < df['Volume'].mean() * 0.1:
-        return True
-    
-    # 7. 월봉 특화: 가격이 매우 낮고 거래량이 평균의 20% 미만인 경우
-    if row['Close'] < 10.0 and row['Volume'] < df['Volume'].mean() * 0.2:
-        return True
-    
-    # 8. 월봉 특화: 가격이 평균 가격의 5% 미만이고 거래량이 평균의 30% 미만인 경우
-    avg_price = df['Close'].mean()
-    if row['Close'] < avg_price * 0.05 and row['Volume'] < df['Volume'].mean() * 0.3:
-        return True
+    # 3. 거래량이 0이지만 가격 변동이 있는 경우는 거래정지로 간주하지 않음
+    # (데이터 수집 문제일 수 있음)
     
     return False
 
@@ -1028,22 +1036,25 @@ def create_monthly_stock_chart(hist, stock_code):
         # 실패시 기본값 사용
         pass
     
-    fig.suptitle(f'{chart_stock_name} ({stock_code}) 월봉 차트 분석(10Years)', fontsize=16, fontweight='bold')
+    fig.suptitle(f'{chart_stock_name} ({stock_code}) 개선된 월봉 차트 분석(10Years)', fontsize=16, fontweight='bold')
     
     # 1. 메인 차트 (캔들차트 + 보조지표 오버레이)
     ax1 = axes[0]
     
-    # 볼린저 밴드 영역 채우기 (이미지 참고 - 오렌지/베이지 스타일)
+    # 볼린저 밴드 영역 채우기 (기존 차트와 동일한 스타일 - 옅은 주황색)
     ax1.fill_between(range(len(df)), df['BB_Upper'], df['BB_Lower'], 
-                     alpha=0.15, color='#FFE4B5', label='Bollinger Bands')
+                     alpha=0.1, color='#FFA500', label='Bollinger Bands')
     
-    # 볼린저 밴드 상단과 하단을 오렌지/베이지 색으로 표시 (범례에 표시하지 않음)
-    ax1.plot(range(len(df)), df['BB_Upper'], color='#FFCE89', alpha=0.8, linewidth=1.5, label='_nolegend_', marker='None', linestyle='-')
-    ax1.plot(range(len(df)), df['BB_Lower'], color='#FFCE89', alpha=0.8, linewidth=1.5, label='_nolegend_', marker='None', linestyle='-')
+    # 볼린저 밴드 상단과 하단을 옅은 주황색으로 표시 (기존 차트와 동일)
+    ax1.plot(range(len(df)), df['BB_Upper'], color='#FF8C00', alpha=0.6, linewidth=1.0, label='_nolegend_', marker='None', linestyle='-')
+    ax1.plot(range(len(df)), df['BB_Lower'], color='#FF8C00', alpha=0.6, linewidth=1.0, label='_nolegend_', marker='None', linestyle='-')
     
-    # 캔들차트 그리기 (이미지 참고 - 빨간색/파란색)
+    # 캔들차트 그리기 (기존 차트와 동일한 스타일)
+    print(f"   📊 캔들차트 그리기 시작: {len(df)}개월 데이터")
+    drawn_candles = 0
+    
     for i, (date, row) in enumerate(df.iterrows()):
-        # 거래정지 기간 감지
+        # 거래정지 기간 감지 (정확한 조건으로 수정)
         is_trading_suspension = detect_trading_suspension(row, df)
         
         if is_trading_suspension:
@@ -1051,19 +1062,85 @@ def create_monthly_stock_chart(hist, stock_code):
             # 아무것도 그리지 않음 - 거래정지 기간은 시각적으로 표시하지 않음
             pass
         else:
-            # 일반 거래일: 기존 캔들차트 방식
+            # 일반 거래일: 기존 차트와 동일한 캔들 스타일
             if row['Close'] >= row['Open']:  # 상승
                 color = '#FF4444'  # 빨간색
+                # 상승 캔들: 몸통을 더 두껍게, 꼬리를 얇게
+                ax1.plot([i, i], [row['Low'], row['High']], color=color, linewidth=0.8, marker='None', linestyle='-')
+                ax1.plot([i, i], [row['Open'], row['Close']], color=color, linewidth=4.0, marker='None', linestyle='-')
             else:  # 하락
                 color = '#4444FF'  # 파란색
-            
-            ax1.plot([i, i], [row['Low'], row['High']], color=color, linewidth=1.0, marker='None', linestyle='-')
-            ax1.plot([i, i], [row['Open'], row['Close']], color=color, linewidth=3.0, marker='None', linestyle='-')
+                # 하락 캔들: 몸통을 더 두껍게, 꼬리를 얇게
+                ax1.plot([i, i], [row['Low'], row['High']], color=color, linewidth=0.8, marker='None', linestyle='-')
+                ax1.plot([i, i], [row['Open'], row['Close']], color=color, linewidth=4.0, marker='None', linestyle='-')
+            drawn_candles += 1
     
-    # 이동평균선 추가 (6, 12, 24개월선만 표시) - 월봉 차트 설정
-    ax1.plot(range(len(df)), df['MA6'], color='#F59E0B', linewidth=2.0, alpha=0.9, label='6개월선', marker='None', linestyle='-')
-    ax1.plot(range(len(df)), df['MA12'], color='#8B5CF6', linewidth=2.0, alpha=0.9, label='12개월선', marker='None', linestyle='-')
+    print(f"   ✅ 캔들차트 그리기 완료: {drawn_candles}개 캔들 표시")
+    
+    # 이동평균선 추가 (6, 12, 24개월선만 표시) - 기존 차트와 동일한 색상
+    ax1.plot(range(len(df)), df['MA6'], color='#8B5CF6', linewidth=2.0, alpha=0.9, label='6개월선', marker='None', linestyle='-')
+    ax1.plot(range(len(df)), df['MA12'], color='#F59E0B', linewidth=2.0, alpha=0.9, label='12개월선', marker='None', linestyle='-')
     ax1.plot(range(len(df)), df['MA24'], color='#06B6D4', linewidth=2.0, alpha=0.9, label='24개월선', marker='None', linestyle='-')
+    
+    # 🔥 개선된 Y축 설정 - 기존 차트와 동일한 스타일
+    # 데이터의 실제 최고가/최저가를 반영 (볼린저 밴드 포함)
+    price_data = df[['High', 'Low', 'Close', 'Open']].values.flatten()
+    bb_data = df[['BB_Upper', 'BB_Lower']].values.flatten()
+    
+    # 모든 가격 데이터와 볼린저 밴드 데이터 결합
+    all_price_data = np.concatenate([price_data, bb_data])
+    all_price_data = all_price_data[~np.isnan(all_price_data)]  # NaN 값 제거
+    all_price_data = all_price_data[all_price_data > 0]  # 0 이하 값 제거 (로그 스케일용)
+    
+    if len(all_price_data) > 0:
+        min_price = np.min(all_price_data)
+        max_price = np.max(all_price_data)
+        
+        # 🔥 Y축 동적 눈금 개수 조정 (가격 범위에 따라 5~20개 눈금 자동 선택)
+        y_min = 0  # 0부터 시작
+        
+        # 가격 범위 계산
+        price_range = max_price - min_price
+        
+        # 가격 범위에 따라 적절한 눈금 개수 결정
+        if price_range >= 500000:  # 50만원 이상 차이: 20개 눈금
+            tick_count = 20
+        elif price_range >= 200000:  # 20만원 이상 차이: 15개 눈금
+            tick_count = 15
+        elif price_range >= 100000:  # 10만원 이상 차이: 12개 눈금
+            tick_count = 12
+        elif price_range >= 50000:   # 5만원 이상 차이: 10개 눈금
+            tick_count = 10
+        elif price_range >= 20000:   # 2만원 이상 차이: 8개 눈금
+            tick_count = 8
+        elif price_range >= 10000:   # 1만원 이상 차이: 6개 눈금
+            tick_count = 6
+        else:  # 1만원 미만 차이: 5개 눈금
+            tick_count = 5
+        
+        # Y축 최대값을 적절히 설정 (10% 여유분)
+        y_max = int(max_price * 1.1)
+        
+        print(f"   📊 가격 범위: {min_price:,.0f}원 ~ {max_price:,.0f}원 (차이: {price_range:,.0f}원)")
+        print(f"   📊 Y축 범위: {y_min:,.0f}원 ~ {y_max:,.0f}원 ({tick_count}개 눈금)")
+        
+        # 선형 스케일 적용 (균등한 간격)
+        ax1.set_yscale('linear')
+        ax1.set_ylim(y_min, y_max)
+        
+        # Y축 눈금을 균등한 간격으로 설정 (개수 기반)
+        y_ticks = np.linspace(y_min, y_max, tick_count)  # 균등한 간격으로 tick_count개 생성
+        ax1.set_yticks(y_ticks)
+        ax1.set_yticklabels([f'{int(tick):,}' for tick in y_ticks])
+        
+        # Y축 레이블 스타일 개선 (천 단위 구분자 강조)
+        ax1.tick_params(axis='y', labelsize=10)
+        for label in ax1.get_yticklabels():
+            label.set_fontweight('bold')
+        
+        print(f"   ✅ 선형 스케일 적용 완료 (균등한 간격)")
+    else:
+        print(f"   ⚠️ 가격 데이터가 없어 기본 설정을 사용합니다.")
     
     # 메인 차트 설정
     #ax1.set_title('이동평균선이 포함된 가격 차트', fontsize=14, fontweight='bold')
@@ -1201,6 +1278,7 @@ def create_monthly_stock_chart(hist, stock_code):
     gc.collect()
     
     # 차트 데이터 반환 (보조지표 포함) - 일봉 분석과 동일한 패턴
+    print(f"🔍 월봉 차트 생성 완료 - filepath: {filepath}, stock_name: {chart_stock_name}, df 크기: {len(df) if df is not None else 'None'}")
     return filepath, chart_stock_name, df
 
 def get_stock_name(stock_code):
@@ -1256,9 +1334,16 @@ def save_chart_data_to_json(chart_data, stock_code, stock_name, trading_type="�
     try:
         print(f"\n📊 차트 데이터를 JSON으로 저장합니다...")
         
-        # 시간대 정보 제거
+        # 시간대 정보 제거 및 인덱스 타입 처리
         chart_data_clean = chart_data.copy()
-        if chart_data_clean.index.tz is not None:
+        
+        # PeriodIndex를 DatetimeIndex로 변환
+        if hasattr(chart_data_clean.index, 'to_timestamp'):
+            chart_data_clean.index = chart_data_clean.index.to_timestamp()
+            print("   🔧 PeriodIndex를 DatetimeIndex로 변환했습니다.")
+        
+        # 시간대 정보 제거
+        if hasattr(chart_data_clean.index, 'tz') and chart_data_clean.index.tz is not None:
             chart_data_clean.index = chart_data_clean.index.tz_localize(None)
             print("   🔧 시간대 정보를 제거했습니다.")
         
@@ -1308,19 +1393,23 @@ def save_chart_data_to_json(chart_data, stock_code, stock_name, trading_type="�
             },
             "technical_indicators": {
                 "latest_values": {
-                    # 이동평균선 (차트 표시용)
-                    "ma6": float(chart_data_clean['MA6'].iloc[-1]) if 'MA6' in chart_data_clean else None,
-                    "ma12": float(chart_data_clean['MA12'].iloc[-1]) if 'MA12' in chart_data_clean else None,
-                    "ma24": float(chart_data_clean['MA24'].iloc[-1]) if 'MA24' in chart_data_clean else None,
-                    # 보조지표 (차트 표시용)
-                    "macd": float(chart_data_clean['MACD'].iloc[-1]) if 'MACD' in chart_data_clean else None,
-                    "macd_signal": float(chart_data_clean['MACD_Signal'].iloc[-1]) if 'MACD_Signal' in chart_data_clean else None,
-                    "macd_histogram": float(chart_data_clean['MACD_Histogram'].iloc[-1]) if 'MACD_Histogram' in chart_data_clean else None,
-                    "rsi": float(chart_data_clean['RSI'].iloc[-1]) if 'RSI' in chart_data_clean else None,
-                    # 볼린저밴드 (차트 표시용)
-                    "bb_upper": float(chart_data_clean['BB_Upper'].iloc[-1]) if 'BB_Upper' in chart_data_clean else None,
-                    "bb_middle": float(chart_data_clean['BB_Middle'].iloc[-1]) if 'BB_Middle' in chart_data_clean else None,
-                    "bb_lower": float(chart_data_clean['BB_Lower'].iloc[-1]) if 'BB_Lower' in chart_data_clean else None
+                    # 이동평균선 (차트 표시용) - 안전한 변환
+                    "ma6": float(chart_data_clean['MA6'].iloc[-1]) if 'MA6' in chart_data_clean and pd.notna(chart_data_clean['MA6'].iloc[-1]) else None,
+                    "ma12": float(chart_data_clean['MA12'].iloc[-1]) if 'MA12' in chart_data_clean and pd.notna(chart_data_clean['MA12'].iloc[-1]) else None,
+                    "ma24": float(chart_data_clean['MA24'].iloc[-1]) if 'MA24' in chart_data_clean and pd.notna(chart_data_clean['MA24'].iloc[-1]) else None,
+                    # 보조지표 (차트 표시용) - 안전한 변환
+                    "macd": float(chart_data_clean['MACD'].iloc[-1]) if 'MACD' in chart_data_clean and pd.notna(chart_data_clean['MACD'].iloc[-1]) else None,
+                    "macd_signal": float(chart_data_clean['MACD_Signal'].iloc[-1]) if 'MACD_Signal' in chart_data_clean and pd.notna(chart_data_clean['MACD_Signal'].iloc[-1]) else None,
+                    "macd_histogram": float(chart_data_clean['MACD_Histogram'].iloc[-1]) if 'MACD_Histogram' in chart_data_clean and pd.notna(chart_data_clean['MACD_Histogram'].iloc[-1]) else None,
+                    "rsi": float(chart_data_clean['RSI'].iloc[-1]) if 'RSI' in chart_data_clean and pd.notna(chart_data_clean['RSI'].iloc[-1]) else None,
+                    "cci": float(chart_data_clean['CCI'].iloc[-1]) if 'CCI' in chart_data_clean and pd.notna(chart_data_clean['CCI'].iloc[-1]) else None,
+                    "adx": float(chart_data_clean['ADX'].iloc[-1]) if 'ADX' in chart_data_clean and pd.notna(chart_data_clean['ADX'].iloc[-1]) else None,
+                    "plus_di": float(chart_data_clean['Plus_DI'].iloc[-1]) if 'Plus_DI' in chart_data_clean and pd.notna(chart_data_clean['Plus_DI'].iloc[-1]) else None,
+                    "minus_di": float(chart_data_clean['Minus_DI'].iloc[-1]) if 'Minus_DI' in chart_data_clean and pd.notna(chart_data_clean['Minus_DI'].iloc[-1]) else None,
+                    # 볼린저밴드 (차트 표시용) - 안전한 변환
+                    "bb_upper": float(chart_data_clean['BB_Upper'].iloc[-1]) if 'BB_Upper' in chart_data_clean and pd.notna(chart_data_clean['BB_Upper'].iloc[-1]) else None,
+                    "bb_middle": float(chart_data_clean['BB_Middle'].iloc[-1]) if 'BB_Middle' in chart_data_clean and pd.notna(chart_data_clean['BB_Middle'].iloc[-1]) else None,
+                    "bb_lower": float(chart_data_clean['BB_Lower'].iloc[-1]) if 'BB_Lower' in chart_data_clean and pd.notna(chart_data_clean['BB_Lower'].iloc[-1]) else None
                 }
             },
             "chart_data": []
@@ -1329,38 +1418,54 @@ def save_chart_data_to_json(chart_data, stock_code, stock_name, trading_type="�
         # 차트 데이터 추가 (최근 30개 데이터만 - AI 분석에 충분)
         recent_data = chart_data_clean.tail(30)
         for date, row in recent_data.iterrows():
+            # 날짜 처리 (Timestamp, PeriodIndex 등 다양한 타입 지원)
+            if hasattr(date, 'strftime'):
+                date_str = date.strftime('%Y-%m-%d')
+            elif hasattr(date, 'to_pydatetime'):
+                date_str = date.to_pydatetime().strftime('%Y-%m-%d')
+            else:
+                date_str = str(date)[:10]  # YYYY-MM-DD 형식으로 자르기
+            
             data_point = {
-                "date": date.strftime('%Y-%m-%d'),
-                "open": float(row['Open']),
-                "high": float(row['High']),
-                "low": float(row['Low']),
-                "close": float(row['Close']),
-                "volume": int(row['Volume'])
+                "date": date_str,
+                "open": float(row['Open']) if pd.notna(row['Open']) else None,
+                "high": float(row['High']) if pd.notna(row['High']) else None,
+                "low": float(row['Low']) if pd.notna(row['Low']) else None,
+                "close": float(row['Close']) if pd.notna(row['Close']) else None,
+                "volume": int(row['Volume']) if pd.notna(row['Volume']) else None
             }
             
-            # 기술적 지표 추가 (차트 표시용만)
+            # 기술적 지표 추가 (차트 표시용만) - 안전한 변환
             # 이동평균선
-            if 'MA6' in row:
+            if 'MA6' in row and pd.notna(row['MA6']):
                 data_point["ma6"] = float(row['MA6'])
-            if 'MA12' in row:
+            if 'MA12' in row and pd.notna(row['MA12']):
                 data_point["ma12"] = float(row['MA12'])
-            if 'MA24' in row:
+            if 'MA24' in row and pd.notna(row['MA24']):
                 data_point["ma24"] = float(row['MA24'])
             # 보조지표
-            if 'MACD' in row:
+            if 'MACD' in row and pd.notna(row['MACD']):
                 data_point["macd"] = float(row['MACD'])
-            if 'MACD_Signal' in row:
+            if 'MACD_Signal' in row and pd.notna(row['MACD_Signal']):
                 data_point["macd_signal"] = float(row['MACD_Signal'])
-            if 'MACD_Histogram' in row:
+            if 'MACD_Histogram' in row and pd.notna(row['MACD_Histogram']):
                 data_point["macd_histogram"] = float(row['MACD_Histogram'])
-            if 'RSI' in row:
+            if 'RSI' in row and pd.notna(row['RSI']):
                 data_point["rsi"] = float(row['RSI'])
+            if 'CCI' in row and pd.notna(row['CCI']):
+                data_point["cci"] = float(row['CCI'])
+            if 'ADX' in row and pd.notna(row['ADX']):
+                data_point["adx"] = float(row['ADX'])
+            if 'Plus_DI' in row and pd.notna(row['Plus_DI']):
+                data_point["plus_di"] = float(row['Plus_DI'])
+            if 'Minus_DI' in row and pd.notna(row['Minus_DI']):
+                data_point["minus_di"] = float(row['Minus_DI'])
             # 볼린저밴드
-            if 'BB_Upper' in row:
+            if 'BB_Upper' in row and pd.notna(row['BB_Upper']):
                 data_point["bb_upper"] = float(row['BB_Upper'])
-            if 'BB_Middle' in row:
+            if 'BB_Middle' in row and pd.notna(row['BB_Middle']):
                 data_point["bb_middle"] = float(row['BB_Middle'])
-            if 'BB_Lower' in row:
+            if 'BB_Lower' in row and pd.notna(row['BB_Lower']):
                 data_point["bb_lower"] = float(row['BB_Lower'])
             
             json_data["chart_data"].append(data_point)
@@ -1766,8 +1871,8 @@ def get_monthly_stock_data(stock_code):
 
 def main():
     """메인 함수"""
-    print("🚀 국내 주식 월봉 시세 조회 프로그램 (10년/120개월+)")
-    print("="*60)
+    print("🚀 개선된 국내 주식 월봉 시세 조회 프로그램 (Y축 자동 조정 + 로그 스케일)")
+    print("="*80)
     
     # 종목코드 입력
     while True:
@@ -1801,19 +1906,23 @@ def main():
             text_path = save_chart_summary_to_text(chart_data, stock_code, stock_name)
             
             if json_path:
-                print(f"\n✅ 월봉 분석이 완료되었습니다!")
-                print(f"📈 차트 이미지: {chart_path}")
+                print(f"\n✅ 개선된 월봉 분석이 완료되었습니다!")
+                print(f"📈 개선된 차트 이미지: {chart_path}")
                 print(f"📊 JSON 데이터: {json_path}")
                 if csv_path:
                     print(f"📋 CSV 데이터: {csv_path}")
                 if text_path:
                     print(f"📝 텍스트 요약: {text_path}")
+                print(f"\n🔍 개선 사항:")
+                print(f"   - Y축 범위 자동 조정 (데이터 기반)")
+                print(f"   - 로그 스케일 적용 (네이버 차트와 동일)")
+                print(f"   - 최고가/최저가 완전 표시")
                 print(f"\n💡 AI 분석을 원하시면 다음 명령어를 사용하세요:")
                 print(f"   from ai_chart_analysis import analyze_stock_chart")
                 print(f"   result = analyze_stock_chart('{stock_code}', '월봉')")
             else:
-                print(f"\n✅ 월봉 분석이 완료되었습니다!")
-                print(f"📈 차트 이미지: {chart_path}")
+                print(f"\n✅ 개선된 월봉 분석이 완료되었습니다!")
+                print(f"📈 개선된 차트 이미지: {chart_path}")
                 print(f"❌ 데이터 파일 저장에 실패했습니다.")
         else:
             print(f"\n❌ 차트 생성에 실패했습니다.")
