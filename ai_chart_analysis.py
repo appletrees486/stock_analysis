@@ -3550,15 +3550,19 @@ class SummaryFileGenerator:
         """
         try:
             import re
-            # 해시태그가 포함된 줄을 제거
+            # "검색 최적화 태그:" 부분을 포함한 줄을 제거
             lines = text.split('\n')
             clean_lines = []
             
             for line in lines:
                 line_stripped = line.strip()
                 
-                # 해시태그만 포함된 줄인지 확인
-                if line_stripped and all(word.startswith('#') for word in line_stripped.split() if word.strip()):
+                # "검색 최적화 태그:"로 시작하는 줄인지 확인
+                if line_stripped.startswith('검색 최적화 태그:'):
+                    # 검색 최적화 태그 줄이므로 제거
+                    continue
+                # 해시태그만 포함된 줄인지 확인 (기존 로직 유지)
+                elif line_stripped and all(word.startswith('#') for word in line_stripped.split() if word.strip()):
                     # 해시태그만 포함된 줄이므로 제거
                     continue
                 else:
@@ -4366,7 +4370,7 @@ class SummaryFileGenerator:
                 except:
                     formatted_trading_date = trading_date
             
-            # 제목 설정
+            # 제목 설정 (trading_type 추가 - 아래에서 선언될 변수 사용)
             title = doc.add_heading(f'{formatted_trading_date} {chart_type} 통합 분석 요약 보고서', 0)
             title.alignment = WD_ALIGN_PARAGRAPH.CENTER
             
@@ -4412,6 +4416,9 @@ class SummaryFileGenerator:
             summary_meta = consolidated_result.get("summary_meta", {}) if consolidated_result else {}
             chart_type_from_meta = summary_meta.get("chart_type", chart_type)
             trading_type_from_meta = summary_meta.get("trading_type", "거래대금")
+            
+            # 제목에 trading_type 추가 (기존 제목 수정)
+            title.text = f'{formatted_trading_date} {chart_type} {trading_type_from_meta} 통합 분석 요약 보고서'
             
             overview_desc = f"{formatted_trading_date} {trading_type_from_meta} 기준 상위 50개 종목의 {chart_type_from_meta} 차트를 분석한 결과, 특이사항을 나타낸 종목은 아래와 같습니다. 핵심내용만 요약하여 제공해드리고, 자세한 내용은 첨부파일의 개별 종목별 차트분석 결과를 참고하시기 바랍니다."
             
