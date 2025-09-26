@@ -1,66 +1,40 @@
-# API 키 및 설정 파일
-config.txt
+# Gmail configuration files with sensitive information
+gmail_config.py
+gmail_config.txt
+gmail_sender.py
+token.json
+
+# Environment files
 .env
+.env.local
+.env.*.local
 
-# Python
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Log files
+*.log
+
+# Cache files
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
+*.pyc
+*.pyo
+*.pyd
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
+*.so
 
-# Virtual Environment
-venv/
-env/
-ENV/
-env.bak/
-venv.bak/
-
-# IDE
+# IDE files
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
 
-# OS
+# OS files
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
 Thumbs.db
-
-# Charts and Analysis Results
-daily_charts/
-weekly_charts/
-monthly_charts/
-ai_analysis_results/
-chart_data_json/
-results/
-uploads/
-
-# Logs
-*.log
-logs/
 
 # Temporary files
 *.tmp
-*.temp 
+*.temp
