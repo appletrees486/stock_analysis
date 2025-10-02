@@ -10,13 +10,18 @@ import json
 import threading
 import zipfile
 import logging
+import shutil
+import glob
 from datetime import datetime
 from typing import List, Dict, Any
 import time
 import sys
+from pathlib import Path
 
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+logger = logging.getLogger(__name__)
 
 # Gmail API 모듈 임포트
 try:
@@ -25,8 +30,6 @@ try:
 except ImportError:
     GMAIL_AVAILABLE = False
     logger.warning("Gmail API 모듈을 사용할 수 없습니다. 메일 발송 기능이 비활성화됩니다.")
-
-logger = logging.getLogger(__name__)
 
 class BatchAnalyzer:
     _instance = None
@@ -44,7 +47,7 @@ class BatchAnalyzer:
     
     def __init__(self):
         # 싱글톤이므로 초기화는 한 번만
-        pass
+        self.project_root = Path(__file__).parent.parent  # 프로젝트 루트 경로
     
     def start_batch_analysis(self, stock_list_path: str, chart_type: str, batch_id: str, trading_type: str = '', email_enabled: bool = False, email_address: str = ''):
         """대량 분석 시작"""
@@ -523,6 +526,9 @@ class BatchAnalyzer:
                 else:
                     logger.error(f"❌ 메일 발송용 ZIP 파일을 찾을 수 없습니다: {zip_file}")
             
+            # 배치 완료 후 캐시 정리 (차트 이미지 꼬임 방지)
+            self.clear_batch_cache(batch_id)
+            
             # 메모리 정리
             self.cleanup_batch_memory(batch_id)
             
@@ -530,6 +536,13 @@ class BatchAnalyzer:
             logger.error(f"배치 결과 저장 오류: {e}")
             import traceback
             logger.error(f"상세 오류: {traceback.format_exc()}")
+            
+            # 오류 발생 시에도 캐시 정리 시도
+            try:
+                self.clear_batch_cache(batch_id)
+            except Exception as cache_error:
+                logger.error(f"캐시 정리 중 오류: {cache_error}")
+            
             # 오류 발생 시에도 메모리 정리
             self.cleanup_batch_memory(batch_id)
     
@@ -1993,3 +2006,185 @@ AI 주식 차트 분석 시스템
             import traceback
             logger.error(f"상세 오류: {traceback.format_exc()}")
             return None
+    
+    def _clear_pycache(self):
+        """Python 캐시 파일들 삭제 (서버 재시작 없이)"""
+        try:
+            logger.info("🗑️ Python 캐시 파일 정리 중...")
+            removed_count = 0
+            
+            # 캐시 디렉토리 목록
+            cache_dirs = [
+                '__pycache__',
+                'api/__pycache__',
+                'static/css/__pycache__',
+                'static/js/__pycache__'
+            ]
+            
+            for cache_dir in cache_dirs:
+                cache_path = self.project_root / cache_dir
+                if cache_path.exists():
+                    try:
+                        shutil.rmtree(cache_path)
+                        logger.info(f"   ✅ {cache_dir} 삭제됨")
+                        removed_count += 1
+                    except Exception as e:
+                        logger.warning(f"   ⚠️ {cache_dir} 삭제 실패: {e}")
+            
+            # 모든 __pycache__ 디렉토리 재귀적으로 삭제
+            for pycache in self.project_root.rglob('__pycache__'):
+                try:
+                    shutil.rmtree(pycache)
+                    logger.info(f"   ✅ {pycache.relative_to(self.project_root)} 삭제됨")
+                    removed_count += 1
+                except Exception as e:
+                    logger.warning(f"   ⚠️ {pycache} 삭제 실패: {e}")
+            
+            logger.info(f"   📊 총 {removed_count}개의 Python 캐시 디렉토리 정리됨")
+            
+        except Exception as e:
+            logger.error(f"Python 캐시 정리 중 오류: {e}")
+    
+    def _clear_chart_cache(self):
+        """차트 캐시 삭제 (PNG 파일들)"""
+        try:
+            logger.info("📊 차트 캐시 정리 중...")
+            removed_count = 0
+            
+            chart_dirs = ['daily_charts', 'weekly_charts', 'monthly_charts', 'chart_data_json']
+            
+            for chart_dir in chart_dirs:
+                chart_path = self.project_root / chart_dir
+                if chart_path.exists():
+                    try:
+                        if chart_dir == 'chart_data_json':
+                            # JSON 파일들 삭제
+                            for json_file in chart_path.glob('*.json'):
+                                json_file.unlink()
+                                logger.info(f"   ✅ {json_file.name} 삭제됨")
+                                removed_count += 1
+                        else:
+                            # PNG 파일들만 삭제
+                            for png_file in chart_path.glob('*.png'):
+                                png_file.unlink()
+                                logger.info(f"   ✅ {png_file.name} 삭제됨")
+                                removed_count += 1
+                    except Exception as e:
+                        logger.warning(f"   ⚠️ {chart_dir} 정리 실패: {e}")
+            
+            logger.info(f"   📊 총 {removed_count}개의 차트 파일 정리됨")
+            
+        except Exception as e:
+            logger.error(f"차트 캐시 정리 중 오류: {e}")
+    
+    def _clear_upload_cache(self):
+        """업로드 캐시 삭제"""
+        try:
+            logger.info("📤 업로드 캐시 정리 중...")
+            removed_count = 0
+            
+            upload_dirs = ['uploads/charts', 'uploads/stock_lists']
+            
+            for upload_dir in upload_dirs:
+                upload_path = self.project_root / upload_dir
+                if upload_path.exists():
+                    try:
+                        # 디렉토리 내용만 삭제하고 디렉토리는 유지
+                        for item in upload_path.iterdir():
+                            if item.is_file():
+                                item.unlink()
+                                logger.info(f"   ✅ {item.name} 삭제됨")
+                                removed_count += 1
+                            elif item.is_dir():
+                                shutil.rmtree(item)
+                                logger.info(f"   ✅ {item.name}/ 디렉토리 삭제됨")
+                                removed_count += 1
+                    except Exception as e:
+                        logger.warning(f"   ⚠️ {upload_dir} 정리 실패: {e}")
+            
+            logger.info(f"   📊 총 {removed_count}개의 업로드 파일 정리됨")
+            
+        except Exception as e:
+            logger.error(f"업로드 캐시 정리 중 오류: {e}")
+    
+    def _clear_temp_files(self):
+        """임시 파일들 삭제"""
+        try:
+            logger.info("🗂️ 임시 파일 정리 중...")
+            removed_count = 0
+            
+            temp_patterns = ['*.tmp', '*.temp', '*.cache']
+            
+            for temp_pattern in temp_patterns:
+                temp_files = list(self.project_root.glob(temp_pattern))
+                for temp_file in temp_files:
+                    try:
+                        temp_file.unlink()
+                        logger.info(f"   ✅ {temp_file.name} 삭제됨")
+                        removed_count += 1
+                    except Exception as e:
+                        logger.warning(f"   ⚠️ {temp_file.name} 삭제 실패: {e}")
+            
+            logger.info(f"   📊 총 {removed_count}개의 임시 파일 정리됨")
+            
+        except Exception as e:
+            logger.error(f"임시 파일 정리 중 오류: {e}")
+    
+    def _clear_analysis_cache(self):
+        """분석 관련 캐시 정리 (AI 분석 결과는 유지)"""
+        try:
+            logger.info("🧠 분석 캐시 정리 중...")
+            removed_count = 0
+            
+            # ai_analysis_results 폴더의 임시 파일들만 정리 (JSON은 유지)
+            ai_results_dir = self.project_root / 'ai_analysis_results'
+            if ai_results_dir.exists():
+                try:
+                    # 임시 파일 패턴들
+                    temp_patterns = ['*.tmp', '*.temp', '*.cache', '*_temp.*']
+                    
+                    for pattern in temp_patterns:
+                        for temp_file in ai_results_dir.glob(pattern):
+                            try:
+                                temp_file.unlink()
+                                logger.info(f"   ✅ {temp_file.name} 삭제됨")
+                                removed_count += 1
+                            except Exception as e:
+                                logger.warning(f"   ⚠️ {temp_file.name} 삭제 실패: {e}")
+                                
+                except Exception as e:
+                    logger.warning(f"   ⚠️ AI 분석 결과 폴더 정리 실패: {e}")
+            
+            logger.info(f"   📊 총 {removed_count}개의 분석 임시 파일 정리됨")
+            
+        except Exception as e:
+            logger.error(f"분석 캐시 정리 중 오류: {e}")
+    
+    def clear_batch_cache(self, batch_id: str):
+        """
+        배치 분석 완료 후 캐시 정리 (서버 재시작 없이)
+        차트 이미지 꼬임 방지를 위해 각 배치 완료 후 호출
+        """
+        try:
+            logger.info(f"🧹 배치 {batch_id} 완료 후 캐시 정리 시작...")
+            
+            # 1. Python 캐시 정리
+            self._clear_pycache()
+            
+            # 2. 차트 캐시 정리 (가장 중요 - 차트 이미지 꼬임 방지)
+            self._clear_chart_cache()
+            
+            # 3. 업로드 캐시 정리
+            self._clear_upload_cache()
+            
+            # 4. 임시 파일 정리
+            self._clear_temp_files()
+            
+            # 5. 분석 관련 임시 캐시 정리
+            self._clear_analysis_cache()
+            
+            logger.info(f"✅ 배치 {batch_id} 캐시 정리 완료! 다음 분석이 깨끗한 상태에서 시작됩니다.")
+            
+        except Exception as e:
+            logger.error(f"❌ 배치 {batch_id} 캐시 정리 중 오류: {e}")
+            # 캐시 정리 실패해도 분석은 계속 진행

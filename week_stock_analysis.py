@@ -923,7 +923,7 @@ def create_weekly_stock_chart(hist, stock_code):
         return None, None
     
     # 차트 생성 (6개 패널: 메인차트, 거래량, 스토캐스틱, RSI, MACD, ADX)
-    fig, axes = plt.subplots(6, 1, figsize=(12, 16), height_ratios=[6, 2, 2, 2, 2, 2])
+    fig, axes = plt.subplots(6, 1, figsize=(12, 16), height_ratios=[5, 2, 2, 2, 2, 2])
     
     # 종목명 가져오기 (DB에서) - 차트 제목용
     chart_stock_name = stock_code  # 기본값

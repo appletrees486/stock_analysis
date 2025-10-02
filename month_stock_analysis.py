@@ -47,19 +47,19 @@ for font in font_list:
         font_path = fm.findfont(font)
         if font_path and 'DejaVu' not in font_path:  # DejaVu는 한글 미지원
             available_font = font
-            print(f"✅ 한글 지원 폰트 발견: {font} ({font_path})")
+            print(f"[OK] 한글 지원 폰트 발견: {font} ({font_path})")
             break
     except Exception as e:
-        print(f"⚠️ 폰트 {font} 확인 실패: {e}")
+        print(f"[WARN] 폰트 {font} 확인 실패: {e}")
         continue
 
 if available_font:
     plt.rcParams['font.family'] = available_font
-    print(f"✅ 사용 폰트: {available_font}")
+    print(f"[OK] 사용 폰트: {available_font}")
 else:
     # 기본 폰트 사용
     plt.rcParams['font.family'] = 'DejaVu Sans'
-    print("⚠️ 한글 폰트를 찾을 수 없어 기본 폰트를 사용합니다.")
+    print("[WARN] 한글 폰트를 찾을 수 없어 기본 폰트를 사용합니다.")
 
 plt.rcParams['axes.unicode_minus'] = False
 
@@ -72,24 +72,24 @@ except AttributeError:
 
 def get_monthly_stock_data_from_db(stock_code):
     """DB에서 월봉 데이터 조회 (보조지표 포함)"""
-    print(f"🔍 DB에서 {stock_code} 월봉 데이터 조회 중...")
+    print(f"[SEARCH] DB에서 {stock_code} 월봉 데이터 조회 중...")
     
     try:
         db = DatabaseManager()
         if not db.connect():
-            print("   ❌ 데이터베이스 연결 실패")
+            print("   [ERROR] 데이터베이스 연결 실패")
             return None
         
         # 종목명 조회
         stock_name_query = "SELECT stock_name FROM stocks WHERE stock_code = %s"
         stock_info = db.fetch_one(stock_name_query, (stock_code,))
         if not stock_info:
-            print(f"   ❌ 종목코드 {stock_code}를 찾을 수 없습니다.")
+            print(f"   [ERROR] 종목코드 {stock_code}를 찾을 수 없습니다.")
             db.disconnect()
             return None
         
         stock_name = stock_info['stock_name']
-        print(f"   🏢 종목명: {stock_name}")
+        print(f"   [INFO] 종목명: {stock_name}")
         
         # 최신 월봉 데이터 기준으로 기간 설정
         latest_date_query = "SELECT MAX(month_start) as latest_date FROM monthly_data WHERE stock_code = %s"
@@ -98,11 +98,11 @@ def get_monthly_stock_data_from_db(stock_code):
         if latest_date_result and latest_date_result['latest_date']:
             end_date = latest_date_result['latest_date']
             start_date = end_date - timedelta(days=3650)  # 10년 전
-            print(f"   📅 DB 최신 월봉: {end_date}")
-            print(f"   📅 조회 시작일: {start_date}")
+            print(f"   [INFO] DB 최신 월봉: {end_date}")
+            print(f"   [INFO] 조회 시작일: {start_date}")
         else:
             # 월봉 데이터가 없으면 일봉 데이터에서 생성
-            print(f"   ⚠️ DB에 월봉 데이터가 없습니다. 일봉 데이터에서 생성합니다...")
+            print(f"   [WARN] DB에 월봉 데이터가 없습니다. 일봉 데이터에서 생성합니다...")
             db.disconnect()
             return generate_monthly_from_daily(stock_code)
         
@@ -135,35 +135,35 @@ def get_monthly_stock_data_from_db(stock_code):
                          'MA5', 'MA20', 'MA60', 'MA6', 'MA12', 'MA24', 'CCI', 'ADX', 'Plus_DI', 'Minus_DI',
                          'BB_Upper', 'BB_Middle', 'BB_Lower', 'MACD', 'MACD_Signal', 'MACD_Histogram', 'RSI']
             
-            print(f"   ✅ DB에서 월봉 데이터 {len(df)}개월 조회 완료")
-            print(f"   📅 데이터 기간: {df.index[0].strftime('%Y-%m')} ~ {df.index[-1].strftime('%Y-%m')}")
+            print(f"   [OK] DB에서 월봉 데이터 {len(df)}개월 조회 완료")
+            print(f"   [INFO] 데이터 기간: {df.index[0].strftime('%Y-%m')} ~ {df.index[-1].strftime('%Y-%m')}")
             
             # 최근 데이터 확인
             latest_monthly_date = df.index[-1]
             current_date = datetime.now()
             days_diff = (current_date - latest_monthly_date).days
             
-            print(f"   📅 최신 월봉: {latest_monthly_date.strftime('%Y-%m-%d')}")
-            print(f"   📅 현재 날짜: {current_date.strftime('%Y-%m-%d')}")
-            print(f"   📅 데이터 차이: {days_diff}일")
+            print(f"   [INFO] 최신 월봉: {latest_monthly_date.strftime('%Y-%m-%d')}")
+            print(f"   [INFO] 현재 날짜: {current_date.strftime('%Y-%m-%d')}")
+            print(f"   [INFO] 데이터 차이: {days_diff}일")
             
             # 30일 이상 차이나면 일봉 데이터로 최신 월봉 보완
             if days_diff > 30:
-                print(f"   ⚠️ 월봉 데이터가 {days_diff}일 전 데이터입니다.")
-                print(f"   🔄 일봉 데이터로 최신 월봉을 보완합니다...")
+                print(f"   [WARN] 월봉 데이터가 {days_diff}일 전 데이터입니다.")
+                print(f"   [INFO] 일봉 데이터로 최신 월봉을 보완합니다...")
                 
                 enhanced_df = enhance_monthly_with_daily(stock_code, df)
                 if enhanced_df is not None:
-                    print(f"   ✅ 일봉 데이터로 월봉을 보완했습니다!")
+                    print(f"   [OK] 일봉 데이터로 월봉을 보완했습니다!")
                     return enhanced_df
             
             return df
         else:
-            print(f"   ⚠️ DB에 월봉 데이터가 없습니다.")
+            print(f"   [WARN] DB에 월봉 데이터가 없습니다.")
             return None
             
     except Exception as e:
-        print(f"   ❌ DB에서 월봉 데이터 조회 실패: {str(e)}")
+        print(f"   [ERROR] DB에서 월봉 데이터 조회 실패: {str(e)}")
         try:
             db.disconnect()
         except:
@@ -532,7 +532,7 @@ def calculate_technical_indicators(df, stock_code=None):
     """기술적 지표 계산 - 월봉 기준 (10년/120개월+ 설정)"""
     
     try:
-        print(f"   🔧 월봉 기술적 지표 계산 시작 (데이터 수: {len(df)}개월)")
+        print(f"   [CALC] 월봉 기술적 지표 계산 시작 (데이터 수: {len(df)}개월)")
         
         # 데이터 타입을 float로 변환 (decimal 타입 문제 해결)
         try:
@@ -540,9 +540,9 @@ def calculate_technical_indicators(df, stock_code=None):
             for col in numeric_columns:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce').astype(float)
-            print(f"   ✅ 데이터 타입 변환 완료: float64")
+            print(f"   [OK] 데이터 타입 변환 완료: float64")
         except Exception as e:
-            print(f"   ⚠️ 데이터 타입 변환 중 오류: {e}")
+            print(f"   [WARN] 데이터 타입 변환 중 오류: {e}")
         
         # 이동평균선 (월간 기준) - 6/12/24개월만 사용 (차트 표시용)
         df['MA6'] = df['Close'].rolling(window=6).mean()   # DB 저장용
@@ -555,7 +555,7 @@ def calculate_technical_indicators(df, stock_code=None):
         df['MA20'] = df['Close'].rolling(window=20).mean() # DB 저장용
         df['MA60'] = df['Close'].rolling(window=60).mean() # DB 저장용 장기 추세
         
-        # 🔥 개선된 볼린저 밴드 계산 (20개월,2) - 로그 스케일 최적화
+        # 개선된 볼린저 밴드 계산 (20개월,2) - 로그 스케일 최적화
         df['BB_Middle'] = df['Close'].rolling(window=20).mean()
         bb_std = df['Close'].rolling(window=20).std()
         
@@ -563,7 +563,7 @@ def calculate_technical_indicators(df, stock_code=None):
         df['BB_Upper'] = df['BB_Middle'] + (bb_std * 2)
         df['BB_Lower'] = df['BB_Middle'] - (bb_std * 2)
         
-        # 🔥 로그 스케일용 볼린저 밴드 하한선 개선 (간단하고 효율적인 방법)
+        # 로그 스케일용 볼린저 밴드 하한선 개선 (간단하고 효율적인 방법)
         # 1. 최소값을 1원으로 설정
         df['BB_Lower'] = df['BB_Lower'].clip(lower=1.0)
         
@@ -585,10 +585,10 @@ def calculate_technical_indicators(df, stock_code=None):
         df['BB_Lower'] = df['BB_Lower'].clip(lower=1.0)  # 최소 1원 보장
         
         # 볼린저 밴드 데이터 검증
-        print(f"   📊 볼린저 밴드 계산 완료:")
-        print(f"   📊 BB_Upper 범위: {df['BB_Upper'].min():.0f} ~ {df['BB_Upper'].max():.0f}")
-        print(f"   📊 BB_Lower 범위: {df['BB_Lower'].min():.0f} ~ {df['BB_Lower'].max():.0f}")
-        print(f"   📊 BB_Middle 범위: {df['BB_Middle'].min():.0f} ~ {df['BB_Middle'].max():.0f}")
+        print(f"   [INFO] 볼린저 밴드 계산 완료:")
+        print(f"   [INFO] BB_Upper 범위: {df['BB_Upper'].min():.0f} ~ {df['BB_Upper'].max():.0f}")
+        print(f"   [INFO] BB_Lower 범위: {df['BB_Lower'].min():.0f} ~ {df['BB_Lower'].max():.0f}")
+        print(f"   [INFO] BB_Middle 범위: {df['BB_Middle'].min():.0f} ~ {df['BB_Middle'].max():.0f}")
         
         # 거래량 + 12개월 이동평균 거래량
         df['Volume_MA12'] = df['Volume'].rolling(window=12).mean()
@@ -607,7 +607,7 @@ def calculate_technical_indicators(df, stock_code=None):
         rs = gain / loss.replace(0, np.nan)
         df['RSI'] = 100 - (100 / (1 + rs))
         df['RSI'] = df['RSI'].fillna(50)  # NaN 값은 중립값 50으로 설정
-        print(f"   ✅ RSI 계산 완료")
+        print(f"   [OK] RSI 계산 완료")
         
         # CCI (Commodity Channel Index) 계산
         try:
@@ -619,13 +619,13 @@ def calculate_technical_indicators(df, stock_code=None):
             # Mean Deviation 계산
             mean_deviation = typical_price.rolling(window=20).apply(lambda x: np.mean(np.abs(x - x.mean())))
             df['CCI'] = (typical_price - sma_tp) / (0.015 * mean_deviation)
-            print(f"   ✅ CCI 계산 완료")
+            print(f"   [OK] CCI 계산 완료")
         except Exception as e:
-            print(f"   ⚠️ CCI 계산 실패: {e}")
+            print(f"   [WARN] CCI 계산 실패: {e}")
             df['CCI'] = 0.0
         
         # ADX (Average Directional Index) 계산
-        print(f"   📊 ADX 계산 시작 (기간: {min(14, len(df) // 2)}개월)")
+        print(f"   [INFO] ADX 계산 시작 (기간: {min(14, len(df) // 2)}개월)")
         
         # +DM, -DM 계산
         high_diff = df['High'].diff()
@@ -643,9 +643,9 @@ def calculate_technical_indicators(df, stock_code=None):
             true_range_df = pd.concat([tr1, tr2, tr3], axis=1)
             true_range_df = true_range_df.fillna(0)  # NaN 값을 0으로 채움
             true_range = true_range_df.max(axis=1)
-            print(f"   ✅ True Range 계산 완료")
+            print(f"   [OK] True Range 계산 완료")
         except Exception as e:
-            print(f"   ❌ True Range 계산 실패: {e}")
+            print(f"   [ERROR] True Range 계산 실패: {e}")
             # 기본값으로 설정
             true_range = pd.Series(0.0, index=df.index)
         
@@ -654,7 +654,7 @@ def calculate_technical_indicators(df, stock_code=None):
         if period < 5:
             period = 5  # 최소 5기간 보장
         
-        print(f"   📊 ADX 계산 기간: {period}개월")
+        print(f"   [INFO] ADX 계산 기간: {period}개월")
         
         # ATR 계산 (0으로 나누기 방지)
         atr = true_range.rolling(window=period).mean()
@@ -699,13 +699,13 @@ def calculate_technical_indicators(df, stock_code=None):
         
         # ADX 계산 결과 확인
         valid_adx_count = df['ADX'].notna().sum()
-        print(f"   ✅ ADX 계산 완료: {valid_adx_count}/{len(df)}개월 유효한 값")
+        print(f"   [OK] ADX 계산 완료: {valid_adx_count}/{len(df)}개월 유효한 값")
         if valid_adx_count > 0:
-            print(f"   📊 최근 ADX 값: {df['ADX'].iloc[-1]:.1f}")
-            print(f"   📊 최근 +DI 값: {df['Plus_DI'].iloc[-1]:.1f}")
-            print(f"   📊 최근 -DI 값: {df['Minus_DI'].iloc[-1]:.1f}")
+            print(f"   [INFO] 최근 ADX 값: {df['ADX'].iloc[-1]:.1f}")
+            print(f"   [INFO] 최근 +DI 값: {df['Plus_DI'].iloc[-1]:.1f}")
+            print(f"   [INFO] 최근 -DI 값: {df['Minus_DI'].iloc[-1]:.1f}")
         else:
-            print(f"   ⚠️ ADX 계산 실패: 모든 값이 NaN입니다")
+            print(f"   [WARN] ADX 계산 실패: 모든 값이 NaN입니다")
         
         # 피봇 지지·저항 계산 (연간 기준)
         try:
@@ -724,21 +724,21 @@ def calculate_technical_indicators(df, stock_code=None):
             df['Pivot_Resistance'] = pivot_resistance
             df['Pivot_Support'] = pivot_support
             
-            print(f"   ✅ 피봇 지지·저항 계산 완료")
-            print(f"   📊 피봇 저항선: {pivot_resistance:,.0f}원")
-            print(f"   📊 피봇 지지선: {pivot_support:,.0f}원")
+            print(f"   [OK] 피봇 지지·저항 계산 완료")
+            print(f"   [INFO] 피봇 저항선: {pivot_resistance:,.0f}원")
+            print(f"   [INFO] 피봇 지지선: {pivot_support:,.0f}원")
         except Exception as e:
-            print(f"   ⚠️ 피봇 지지·저항 계산 실패: {e}")
+            print(f"   [WARN] 피봇 지지·저항 계산 실패: {e}")
             df['Pivot_Point'] = df['Close']
             df['Pivot_Resistance'] = df['High'].rolling(window=12).max()
             df['Pivot_Support'] = df['Low'].rolling(window=12).min()
         
-        print(f"   ✅ 월봉 기술적 지표 계산 완료")
-        print(f"   📊 계산된 지표: MA3/6/12/24, 볼린저밴드, MACD, RSI, CCI, ADX, 피봇 지지·저항")
+        print(f"   [OK] 월봉 기술적 지표 계산 완료")
+        print(f"   [INFO] 계산된 지표: MA3/6/12/24, 볼린저밴드, MACD, RSI, CCI, ADX, 피봇 지지·저항")
         return df
     
     except Exception as e:
-        print(f"   ❌ calculate_technical_indicators 함수에서 오류 발생: {e}")
+        print(f"   [ERROR] calculate_technical_indicators 함수에서 오류 발생: {e}")
         import traceback
         traceback.print_exc()
         # 오류 발생 시 기본 DataFrame 반환
@@ -977,15 +977,54 @@ def analyze_monthly_stock_data(hist, stock_code):
     # 특이신호 감지
     detect_special_signals(df_with_indicators, stock_code)
 
+def calculate_x_positions(df, sparse_threshold=20):
+    """
+    X축 위치를 계산하는 함수 - 데이터가 적을 때 오른쪽 정렬 (날짜 겹침 방지)
+    
+    Args:
+        df: 차트 데이터 DataFrame
+        sparse_threshold: 데이터가 적다고 판단하는 임계값 (기본 20개)
+    
+    Returns:
+        x_positions: X축 위치 배열
+        start_offset: 시작 오프셋 값
+        min_spacing: 캔들 간 최소 간격 (날짜 겹침 방지)
+    """
+    data_count = len(df)
+    
+    if data_count <= sparse_threshold:
+        # 데이터가 적을 때: 오른쪽 정렬 + 날짜 겹침 방지를 위한 최소 간격 보장
+        # 캔들 간 최소 간격을 3으로 설정 (기존 8의 1/3, 여전히 날짜 레이블 겹침 방지)
+        min_spacing = 3
+        max_positions = max(data_count * min_spacing, 40)
+        start_offset = max_positions - (data_count * min_spacing)
+        
+        # 캔들 간격을 고려한 X축 위치 계산
+        x_positions = []
+        for i in range(data_count):
+            x_positions.append(start_offset + i * min_spacing)
+        
+        print(f"   [INFO] 데이터가 적음 ({data_count}개): 오른쪽 정렬 적용 (시작 위치: {start_offset}, 간격: {min_spacing})")
+        print(f"   [INFO] X축 범위: 0 ~ {max_positions} (날짜 겹침 방지, 실제 최대 위치: {max_positions-1})")
+    else:
+        # 데이터가 많을 때: 기존 방식 (0부터 시작, 간격 1)
+        start_offset = 0
+        min_spacing = 1
+        x_positions = list(range(data_count))
+        max_positions = data_count
+        print(f"   [INFO] 데이터가 충분함 ({data_count}개): 기본 정렬 적용")
+    
+    return x_positions, start_offset, min_spacing
+
 def create_monthly_stock_chart(hist, stock_code):
     """주식 월봉 차트 생성 (캔들차트 + 보조지표) - test_overlay_chart.py 스타일 적용"""
     if hist is None or hist.empty:
         return None, None
     
-    print(f"\n📈 월봉 캔들차트를 생성합니다...")
+    print(f"\n[CHART] 월봉 캔들차트를 생성합니다...")
     
     # 중복 데이터 제거 (같은 월의 여러 데이터가 있으면 최신 데이터만 유지)
-    print(f"   🔍 중복 데이터 확인 중...")
+    print(f"   [CHECK] 중복 데이터 확인 중...")
     original_count = len(hist)
     
     # 월별로 그룹화하여 중복 제거
@@ -1001,22 +1040,37 @@ def create_monthly_stock_chart(hist, stock_code):
     
     removed_count = original_count - len(hist_clean)
     if removed_count > 0:
-        print(f"   ✅ 중복 데이터 {removed_count}개 제거 완료 (원본: {original_count}개 → 정리: {len(hist_clean)}개)")
+        print(f"   [OK] 중복 데이터 {removed_count}개 제거 완료 (원본: {original_count}개 → 정리: {len(hist_clean)}개)")
     else:
-        print(f"   ✅ 중복 데이터 없음 (총 {len(hist_clean)}개)")
+        print(f"   [OK] 중복 데이터 없음 (총 {len(hist_clean)}개)")
     
     # 기술적 지표 계산
     try:
         df = calculate_technical_indicators(hist_clean.copy(), stock_code)
         df.index.name = 'Date'
     except Exception as e:
-        print(f"   ❌ 기술적 지표 계산 중 오류 발생: {e}")
+        print(f"   [ERROR] 기술적 지표 계산 중 오류 발생: {e}")
         import traceback
         traceback.print_exc()
         return None, None
     
+    # X축 위치 계산 (데이터가 적을 때 오른쪽 정렬 + 날짜 겹침 방지)
+    x_positions, start_offset, min_spacing = calculate_x_positions(df)
+    
+    # X축 범위 설정 (오른쪽 정렬 + 최신 데이터 오른쪽 끝 정렬)
+    if len(df) <= 20:
+        # 데이터가 적을 때: 오른쪽 끝에 여백 없이 데이터가 끝나도록 설정
+        # 최대 X축 범위를 실제 데이터의 최대 위치로 설정
+        max_data_position = max(x_positions)
+        x_min, x_max = 0, max_data_position + 1  # +1은 오른쪽 끝 여백 제거를 위해
+        print(f"   [INFO] 실제 X축 범위 설정: {x_min} ~ {x_max} (최대 데이터 위치: {max_data_position})")
+    else:
+        # 데이터가 많을 때: 데이터 범위에 맞춰 설정
+        x_min, x_max = 0, len(df)
+        print(f"   [INFO] 실제 X축 범위 설정: {x_min} ~ {x_max}")
+    
     # 차트 생성 (4개 패널: 메인차트, 거래량, MACD, RSI)
-    fig, axes = plt.subplots(4, 1, figsize=(12, 12), height_ratios=[6, 2, 2, 2])
+    fig, axes = plt.subplots(4, 1, figsize=(12, 12), height_ratios=[5, 2, 2, 2])
     
     # 종목명 가져오기 (DB에서) - 차트 제목용
     chart_stock_name = stock_code  # 기본값
@@ -1027,12 +1081,12 @@ def create_monthly_stock_chart(hist, stock_code):
             stock_info = db.fetch_one(stock_name_query, (stock_code,))
             if stock_info and stock_info.get('stock_name'):
                 chart_stock_name = stock_info['stock_name']
-                print(f"✅ DB에서 종목명 조회 성공: {stock_code} -> {chart_stock_name}")
+                print(f"[OK] DB에서 종목명 조회 성공: {stock_code} -> {chart_stock_name}")
             else:
-                print(f"⚠️ DB에서 종목명을 찾을 수 없음: {stock_code}")
+                print(f"[WARN] DB에서 종목명을 찾을 수 없음: {stock_code}")
             db.disconnect()
     except Exception as e:
-        print(f"⚠️ DB 조회 중 오류: {e}, 종목코드를 종목명으로 사용: {stock_code}")
+        print(f"[WARN] DB 조회 중 오류: {e}, 종목코드를 종목명으로 사용: {stock_code}")
         # 실패시 기본값 사용
         pass
     
@@ -1042,15 +1096,15 @@ def create_monthly_stock_chart(hist, stock_code):
     ax1 = axes[0]
     
     # 볼린저 밴드 영역 채우기 (기존 차트와 동일한 스타일 - 옅은 주황색)
-    ax1.fill_between(range(len(df)), df['BB_Upper'], df['BB_Lower'], 
+    ax1.fill_between(x_positions, df['BB_Upper'], df['BB_Lower'], 
                      alpha=0.1, color='#FFA500', label='Bollinger Bands')
     
     # 볼린저 밴드 상단과 하단을 옅은 주황색으로 표시 (기존 차트와 동일)
-    ax1.plot(range(len(df)), df['BB_Upper'], color='#FF8C00', alpha=0.6, linewidth=1.0, label='_nolegend_', marker='None', linestyle='-')
-    ax1.plot(range(len(df)), df['BB_Lower'], color='#FF8C00', alpha=0.6, linewidth=1.0, label='_nolegend_', marker='None', linestyle='-')
+    ax1.plot(x_positions, df['BB_Upper'], color='#FF8C00', alpha=0.6, linewidth=1.0, label='_nolegend_', marker='None', linestyle='-')
+    ax1.plot(x_positions, df['BB_Lower'], color='#FF8C00', alpha=0.6, linewidth=1.0, label='_nolegend_', marker='None', linestyle='-')
     
     # 캔들차트 그리기 (기존 차트와 동일한 스타일)
-    print(f"   📊 캔들차트 그리기 시작: {len(df)}개월 데이터")
+    print(f"   [CHART] 캔들차트 그리기 시작: {len(df)}개월 데이터")
     drawn_candles = 0
     
     for i, (date, row) in enumerate(df.iterrows()):
@@ -1062,27 +1116,28 @@ def create_monthly_stock_chart(hist, stock_code):
             # 아무것도 그리지 않음 - 거래정지 기간은 시각적으로 표시하지 않음
             pass
         else:
-            # 일반 거래일: 기존 차트와 동일한 캔들 스타일
+            # 일반 거래일: 기존 차트와 동일한 캔들 스타일 (새로운 X축 위치 사용)
+            x_pos = x_positions[i]
             if row['Close'] >= row['Open']:  # 상승
                 color = '#FF4444'  # 빨간색
                 # 상승 캔들: 몸통을 더 두껍게, 꼬리를 얇게
-                ax1.plot([i, i], [row['Low'], row['High']], color=color, linewidth=0.8, marker='None', linestyle='-')
-                ax1.plot([i, i], [row['Open'], row['Close']], color=color, linewidth=4.0, marker='None', linestyle='-')
+                ax1.plot([x_pos, x_pos], [row['Low'], row['High']], color=color, linewidth=0.8, marker='None', linestyle='-')
+                ax1.plot([x_pos, x_pos], [row['Open'], row['Close']], color=color, linewidth=4.0, marker='None', linestyle='-')
             else:  # 하락
                 color = '#4444FF'  # 파란색
                 # 하락 캔들: 몸통을 더 두껍게, 꼬리를 얇게
-                ax1.plot([i, i], [row['Low'], row['High']], color=color, linewidth=0.8, marker='None', linestyle='-')
-                ax1.plot([i, i], [row['Open'], row['Close']], color=color, linewidth=4.0, marker='None', linestyle='-')
+                ax1.plot([x_pos, x_pos], [row['Low'], row['High']], color=color, linewidth=0.8, marker='None', linestyle='-')
+                ax1.plot([x_pos, x_pos], [row['Open'], row['Close']], color=color, linewidth=4.0, marker='None', linestyle='-')
             drawn_candles += 1
     
-    print(f"   ✅ 캔들차트 그리기 완료: {drawn_candles}개 캔들 표시")
+    print(f"   [OK] 캔들차트 그리기 완료: {drawn_candles}개 캔들 표시")
     
     # 이동평균선 추가 (6, 12, 24개월선만 표시) - 기존 차트와 동일한 색상
-    ax1.plot(range(len(df)), df['MA6'], color='#8B5CF6', linewidth=2.0, alpha=0.9, label='6개월선', marker='None', linestyle='-')
-    ax1.plot(range(len(df)), df['MA12'], color='#F59E0B', linewidth=2.0, alpha=0.9, label='12개월선', marker='None', linestyle='-')
-    ax1.plot(range(len(df)), df['MA24'], color='#06B6D4', linewidth=2.0, alpha=0.9, label='24개월선', marker='None', linestyle='-')
+    ax1.plot(x_positions, df['MA6'], color='#8B5CF6', linewidth=2.0, alpha=0.9, label='6개월선', marker='None', linestyle='-')
+    ax1.plot(x_positions, df['MA12'], color='#F59E0B', linewidth=2.0, alpha=0.9, label='12개월선', marker='None', linestyle='-')
+    ax1.plot(x_positions, df['MA24'], color='#06B6D4', linewidth=2.0, alpha=0.9, label='24개월선', marker='None', linestyle='-')
     
-    # 🔥 개선된 Y축 설정 - 기존 차트와 동일한 스타일
+    # 개선된 Y축 설정 - 기존 차트와 동일한 스타일
     # 데이터의 실제 최고가/최저가를 반영 (볼린저 밴드 포함)
     price_data = df[['High', 'Low', 'Close', 'Open']].values.flatten()
     bb_data = df[['BB_Upper', 'BB_Lower']].values.flatten()
@@ -1096,7 +1151,7 @@ def create_monthly_stock_chart(hist, stock_code):
         min_price = np.min(all_price_data)
         max_price = np.max(all_price_data)
         
-        # 🔥 Y축 동적 눈금 개수 조정 (가격 범위에 따라 5~20개 눈금 자동 선택)
+        # Y축 동적 눈금 개수 조정 (가격 범위에 따라 5~20개 눈금 자동 선택)
         y_min = 0  # 0부터 시작
         
         # 가격 범위 계산
@@ -1121,8 +1176,8 @@ def create_monthly_stock_chart(hist, stock_code):
         # Y축 최대값을 적절히 설정 (10% 여유분)
         y_max = int(max_price * 1.1)
         
-        print(f"   📊 가격 범위: {min_price:,.0f}원 ~ {max_price:,.0f}원 (차이: {price_range:,.0f}원)")
-        print(f"   📊 Y축 범위: {y_min:,.0f}원 ~ {y_max:,.0f}원 ({tick_count}개 눈금)")
+        print(f"   [INFO] 가격 범위: {min_price:,.0f}원 ~ {max_price:,.0f}원 (차이: {price_range:,.0f}원)")
+        print(f"   [INFO] Y축 범위: {y_min:,.0f}원 ~ {y_max:,.0f}원 ({tick_count}개 눈금)")
         
         # 선형 스케일 적용 (균등한 간격)
         ax1.set_yscale('linear')
@@ -1138,9 +1193,9 @@ def create_monthly_stock_chart(hist, stock_code):
         for label in ax1.get_yticklabels():
             label.set_fontweight('bold')
         
-        print(f"   ✅ 선형 스케일 적용 완료 (균등한 간격)")
+        print(f"   [OK] 선형 스케일 적용 완료 (균등한 간격)")
     else:
-        print(f"   ⚠️ 가격 데이터가 없어 기본 설정을 사용합니다.")
+        print(f"   [WARN] 가격 데이터가 없어 기본 설정을 사용합니다.")
     
     # 메인 차트 설정
     #ax1.set_title('이동평균선이 포함된 가격 차트', fontsize=14, fontweight='bold')
@@ -1151,6 +1206,9 @@ def create_monthly_stock_chart(hist, stock_code):
     # Y축을 오른쪽으로 이동
     ax1.yaxis.set_label_position('right')
     ax1.yaxis.tick_right()
+    
+    # X축 범위 설정 (오른쪽 정렬을 위해)
+    ax1.set_xlim(x_min, x_max)
     
     # 2. 거래량 차트 (두 번째 패널) - 웹 트레이딩 스타일 유지
     ax2 = axes[1]
@@ -1174,9 +1232,9 @@ def create_monthly_stock_chart(hist, stock_code):
                 colors.append('#4444FF')  # 파란색
             volumes.append(row['Volume'])
     
-    ax2.bar(range(len(df)), volumes, color=colors, alpha=0.7, width=0.8)
+    ax2.bar(x_positions, volumes, color=colors, alpha=0.7, width=0.8)
     # 거래량 이동평균선 추가
-    ax2.plot(range(len(df)), df['Volume_MA12'], color='#F59E0B', linewidth=2.0, alpha=0.9, label='거래량 MA12', marker='None', linestyle='-')
+    ax2.plot(x_positions, df['Volume_MA12'], color='#F59E0B', linewidth=2.0, alpha=0.9, label='거래량 MA12', marker='None', linestyle='-')
     ax2.set_title('12개월 이동평균이 포함된 거래량', fontsize=12, fontweight='bold')
     # ax2.set_ylabel('Volume', fontsize=10, fontweight='bold')  # 차트명 삭제
     ax2.legend(loc='upper right', fontsize=9, framealpha=0.9)
@@ -1186,11 +1244,14 @@ def create_monthly_stock_chart(hist, stock_code):
     ax2.yaxis.set_label_position('right')
     ax2.yaxis.tick_right()
     
+    # X축 범위 설정 (오른쪽 정렬을 위해)
+    ax2.set_xlim(x_min, x_max)
+    
     # 3. MACD 차트 (세 번째 패널) - 웹 트레이딩 스타일 유지
     ax3 = axes[2]
-    ax3.plot(range(len(df)), df['MACD'], color='#3B82F6', linewidth=2.0, label='MACD', marker='None', linestyle='-')
-    ax3.plot(range(len(df)), df['MACD_Signal'], color='#EF4444', linewidth=2.0, alpha=0.8, label='Signal', marker='None', linestyle='-')
-    ax3.bar(range(len(df)), df['MACD_Histogram'], color='#10B981', alpha=0.6, width=0.8, label='Histogram')
+    ax3.plot(x_positions, df['MACD'], color='#3B82F6', linewidth=2.0, label='MACD', marker='None', linestyle='-')
+    ax3.plot(x_positions, df['MACD_Signal'], color='#EF4444', linewidth=2.0, alpha=0.8, label='Signal', marker='None', linestyle='-')
+    ax3.bar(x_positions, df['MACD_Histogram'], color='#10B981', alpha=0.6, width=0.8, label='Histogram')
     ax3.axhline(y=0, color='#6B7280', linestyle='-', alpha=0.6, linewidth=1.0, label='제로선')
     ax3.set_title('MACD (이동평균수렴확산)', fontsize=12, fontweight='bold')
     # ax3.set_ylabel('MACD', fontsize=10, fontweight='bold')  # 차트명 삭제
@@ -1201,14 +1262,17 @@ def create_monthly_stock_chart(hist, stock_code):
     ax3.yaxis.set_label_position('right')
     ax3.yaxis.tick_right()
     
+    # X축 범위 설정 (오른쪽 정렬을 위해)
+    ax3.set_xlim(x_min, x_max)
+    
     # 4. RSI 차트 (네 번째 패널) - 웹 트레이딩 스타일 유지
     ax4 = axes[3]
-    ax4.plot(range(len(df)), df['RSI'], color='#8B5CF6', linewidth=2.0, label='RSI', marker='None', linestyle='-')
+    ax4.plot(x_positions, df['RSI'], color='#8B5CF6', linewidth=2.0, label='RSI', marker='None', linestyle='-')
     ax4.axhline(y=70, color='#EF4444', linestyle='--', alpha=0.8, linewidth=1.5, label='과매수')
     ax4.axhline(y=30, color='#10B981', linestyle='--', alpha=0.8, linewidth=1.5, label='과매도')
     ax4.axhline(y=50, color='#6B7280', linestyle='-', alpha=0.6, linewidth=1.0, label='중립')
-    ax4.fill_between(range(len(df)), 70, 100, alpha=0.1, color='#EF4444', label='과매수 구간')
-    ax4.fill_between(range(len(df)), 0, 30, alpha=0.1, color='#10B981', label='과매도 구간')
+    ax4.fill_between(x_positions, 70, 100, alpha=0.1, color='#EF4444', label='과매수 구간')
+    ax4.fill_between(x_positions, 0, 30, alpha=0.1, color='#10B981', label='과매도 구간')
     ax4.set_title('RSI (상대강도지수)', fontsize=12, fontweight='bold')
     # ax4.set_ylabel('RSI', fontsize=10, fontweight='bold')  # 차트명 삭제
     ax4.legend(loc='upper left', fontsize=10, framealpha=0.9)
@@ -1219,18 +1283,47 @@ def create_monthly_stock_chart(hist, stock_code):
     ax4.yaxis.set_label_position('right')
     ax4.yaxis.tick_right()
     
-    # X축 날짜 설정 - 하단에만 표시 (스타일 변경: 글자 크기 50% 증가, 가로 표시)
+    # X축 범위 설정 (오른쪽 정렬을 위해)
+    ax4.set_xlim(x_min, x_max)
+    
+    # X축 날짜 설정 - 하단에만 표시 (날짜 겹침 방지)
     for i, ax in enumerate(axes):
         if i == len(axes) - 1:  # 마지막 패널에만 날짜 표시
-            ax.set_xticks([0, len(df)//4, len(df)//2, 3*len(df)//4, len(df)-1])
-            # 글자 크기 50% 증가 (기본 10에서 15로), 대각선에서 가로로 변경 (rotation=0)
-            ax.set_xticklabels([
-                df.index[0].strftime('%Y-%m'),
-                df.index[len(df)//4].strftime('%Y-%m'),
-                df.index[len(df)//2].strftime('%Y-%m'),
-                df.index[3*len(df)//4].strftime('%Y-%m'),
-                df.index[-1].strftime('%Y-%m')
-            ], rotation=0, ha='center', fontweight='bold', fontsize=15)
+            if len(df) <= 20:  # 데이터가 적을 때 (오른쪽 정렬된 경우)
+                # 데이터 개수에 따라 레이블 개수 동적 조정 (날짜 겹침 방지)
+                tick_positions = []
+                tick_labels = []
+                
+                if len(df) <= 2:
+                    # 2개 이하: 모든 데이터 표시
+                    for idx in range(len(df)):
+                        tick_positions.append(x_positions[idx])
+                        tick_labels.append(df.index[idx].strftime('%Y-%m'))
+                elif len(df) <= 5:
+                    # 3-5개: 시작, 중간, 끝만 표시
+                    indices = [0, len(df)//2, len(df)-1]
+                    for idx in indices:
+                        tick_positions.append(x_positions[idx])
+                        tick_labels.append(df.index[idx].strftime('%Y-%m'))
+                else:
+                    # 6-20개: 5개 지점 표시
+                    indices = [0, len(df)//4, len(df)//2, 3*len(df)//4, len(df)-1]
+                    for idx in indices:
+                        tick_positions.append(x_positions[idx])
+                        tick_labels.append(df.index[idx].strftime('%Y-%m'))
+                
+                ax.set_xticks(tick_positions)
+                ax.set_xticklabels(tick_labels, rotation=0, ha='center', fontweight='bold', fontsize=15)
+            else:  # 데이터가 많을 때 (기본 정렬)
+                # 기존 방식 사용
+                ax.set_xticks([0, len(df)//4, len(df)//2, 3*len(df)//4, len(df)-1])
+                ax.set_xticklabels([
+                    df.index[0].strftime('%Y-%m'),
+                    df.index[len(df)//4].strftime('%Y-%m'),
+                    df.index[len(df)//2].strftime('%Y-%m'),
+                    df.index[3*len(df)//4].strftime('%Y-%m'),
+                    df.index[-1].strftime('%Y-%m')
+                ], rotation=0, ha='center', fontweight='bold', fontsize=15)
         else:
             ax.set_xticks([])  # 다른 패널은 X축 눈금 숨김
     
@@ -1267,7 +1360,7 @@ def create_monthly_stock_chart(hist, stock_code):
     
     # 차트 저장
     plt.savefig(filepath, dpi=100, bbox_inches='tight')
-    print(f"💾 차트가 저장되었습니다: {filepath}")
+    print(f"[SAVE] 차트가 저장되었습니다: {filepath}")
     
     # 차트 뷰어를 띄우지 않고 차트 닫기
     plt.close(fig)  # 특정 figure 닫기
@@ -1278,7 +1371,7 @@ def create_monthly_stock_chart(hist, stock_code):
     gc.collect()
     
     # 차트 데이터 반환 (보조지표 포함) - 일봉 분석과 동일한 패턴
-    print(f"🔍 월봉 차트 생성 완료 - filepath: {filepath}, stock_name: {chart_stock_name}, df 크기: {len(df) if df is not None else 'None'}")
+    print(f"[COMPLETE] 월봉 차트 생성 완료 - filepath: {filepath}, stock_name: {chart_stock_name}, df 크기: {len(df) if df is not None else 'None'}")
     return filepath, chart_stock_name, df
 
 def get_stock_name(stock_code):
@@ -1328,11 +1421,11 @@ def get_stock_name(stock_code):
 def save_chart_data_to_json(chart_data, stock_code, stock_name, trading_type="거래량"):
     """차트 데이터를 JSON으로 저장 - Gemini AI 최적화"""
     if chart_data is None or chart_data.empty:
-        print("❌ 저장할 차트 데이터가 없습니다.")
+        print("[ERROR] 저장할 차트 데이터가 없습니다.")
         return None
     
     try:
-        print(f"\n📊 차트 데이터를 JSON으로 저장합니다...")
+        print(f"\n[JSON] 차트 데이터를 JSON으로 저장합니다...")
         
         # 시간대 정보 제거 및 인덱스 타입 처리
         chart_data_clean = chart_data.copy()
@@ -1474,8 +1567,8 @@ def save_chart_data_to_json(chart_data, stock_code, stock_name, trading_type="�
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(json_data, f, ensure_ascii=False, indent=2)
         
-        print(f"💾 JSON 파일이 저장되었습니다: {filepath}")
-        print(f"📊 데이터 구조:")
+        print(f"[SAVE] JSON 파일이 저장되었습니다: {filepath}")
+        print(f"[INFO] 데이터 구조:")
         print(f"   - 메타데이터: 종목 정보, 생성일시, 데이터 기간")
         print(f"   - 요약 정보: 최근 가격, 변동률, 거래량 통계")
         print(f"   - 기술적 지표: 최신 보조지표 값들")
@@ -1484,7 +1577,7 @@ def save_chart_data_to_json(chart_data, stock_code, stock_name, trading_type="�
         return filepath
         
     except Exception as e:
-        print(f"❌ JSON 파일 저장 중 오류: {e}")
+        print(f"[ERROR] JSON 파일 저장 중 오류: {e}")
         return None
 
 def save_chart_data_to_csv(chart_data, stock_code, stock_name):
@@ -1757,20 +1850,20 @@ def save_chart_data_to_excel(chart_data, stock_code, stock_name):
 
 def get_monthly_stock_data(stock_code):
     """국내 주식 월봉 데이터 조회 (10년/120개월+) - DB에서 조회"""
-    print(f"🔍 {stock_code} 10년(120개월+) 월봉 시세 조회 중...")
-    print("   📅 월봉 데이터는 거래일 기준으로 제공되며, 월말 기준으로 집계됩니다.")
+    print(f"[SEARCH] {stock_code} 10년(120개월+) 월봉 시세 조회 중...")
+    print("   [INFO] 월봉 데이터는 거래일 기준으로 제공되며, 월말 기준으로 집계됩니다.")
     
     # DB에서 월봉 데이터 조회 시도
     db_monthly_data = get_monthly_stock_data_from_db(stock_code)
     if db_monthly_data is not None and not db_monthly_data.empty:
-        print(f"   ✅ DB에서 월봉 데이터 조회 완료")
+        print(f"   [OK] DB에서 월봉 데이터 조회 완료")
         return db_monthly_data
     
     # DB에서 실패한 경우 오류 메시지 출력
-    print(f"   ⚠️ DB에서 월봉 데이터 조회 실패")
+    print(f"   [WARN] DB에서 월봉 데이터 조회 실패")
     
     # 네이버 금융 데이터 조회 (우선)
-    print("   🔄 네이버 금융에서 실시간 데이터 확인 중...")
+    print("   [INFO] 네이버 금융에서 실시간 데이터 확인 중...")
     try:
         # from naver_data_module import get_naver_stock_data, get_naver_historical_data
         
@@ -1780,13 +1873,13 @@ def get_monthly_stock_data(stock_code):
         #     print(f"   📈 현재가: {naver_result['current_price']:,.0f}원")
         #     print(f"   📊 변동: {naver_result['change_direction']} {naver_result['change_amount']:+,}원")
         #     print(f"   ⏰ 조회시간: {naver_result['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}")
-        print("   ⚠️ 네이버 금융 모듈이 비활성화되었습니다.")
+        print("   [WARN] 네이버 금융 모듈이 비활성화되었습니다.")
     except ImportError:
-        print("   ⚠️ 네이버 금융 모듈을 불러올 수 없습니다.")
+        print("   [WARN] 네이버 금융 모듈을 불러올 수 없습니다.")
     
     # 모든 소스에서 실패
-    print("❌ 월봉 데이터 조회에 실패했습니다.")
-    print("💡 가능한 원인:")
+    print("[ERROR] 월봉 데이터 조회에 실패했습니다.")
+    print("[INFO] 가능한 원인:")
     print("   - 종목코드가 잘못되었습니다")
     print("   - 해당 종목이 상장폐지되었습니다")
     print("   - DB에 월봉 데이터가 수집되지 않았습니다")

@@ -929,7 +929,7 @@ def create_stock_chart(hist, stock_code):
         return None
     
     # 차트 생성 (4개 패널: 메인차트, 거래량, RSI, MACD)
-    fig, axes = plt.subplots(4, 1, figsize=(12, 13), height_ratios=[8, 2, 2, 2])
+    fig, axes = plt.subplots(4, 1, figsize=(12, 13), height_ratios=[5, 2, 2, 2])
     
     # 종목명 가져오기 (DB에서) - 차트 제목용
     chart_stock_name = stock_code  # 기본값

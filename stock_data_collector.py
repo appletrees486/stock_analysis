@@ -450,44 +450,9 @@ class StockDataCollector:
             return True  # 오류 시 기본적으로 진행
 
     def get_incremental_data(self, stock_code, stock_name, start_date):
-        """특정 날짜 이후의 증분 데이터만 조회 - 개선된 티커 매핑"""
-        try:
-            logging.info(f"🔄 {stock_code} ({stock_name}) 증분 데이터 조회 중... (시작일: {start_date})")
-            
-            # 개선된 티커 심볼 형식 시도 (우선주 및 특수 종목코드 대응)
-            ticker_symbols = self._get_optimized_ticker_symbols(stock_code, stock_name)
-            
-            hist_data = None
-            
-            for ticker_symbol in ticker_symbols:
-                try:
-                    logging.info(f"   🔄 {ticker_symbol} 형식으로 증분 데이터 시도 중...")
-                    ticker = yf.Ticker(ticker_symbol)
-                    
-                    # start_date 이후 데이터만 조회
-                    hist = ticker.history(start=start_date)
-                    
-                    if not hist.empty:
-                        logging.info(f"✅ {stock_code} ({stock_name}): {ticker_symbol} 형식으로 {len(hist)}일의 증분 데이터 조회 완료")
-                        logging.info(f"   📅 기간: {hist.index[0].strftime('%Y-%m-%d')} ~ {hist.index[-1].strftime('%Y-%m-%d')}")
-                        hist_data = hist
-                        break
-                    else:
-                        logging.warning(f"   ⚠️ {ticker_symbol} 형식: 증분 데이터가 없습니다")
-                        
-                except Exception as e:
-                    logging.warning(f"   ⚠️ {ticker_symbol} 형식 증분 데이터 시도 실패: {e}")
-                    continue
-            
-            if hist_data is not None:
-                return hist_data
-            else:
-                logging.warning(f"⚠️ {stock_code} ({stock_name}): 증분 데이터를 찾을 수 없습니다")
-                return None
-                
-        except Exception as e:
-            logging.error(f"{stock_code} ({stock_name}) 증분 데이터 조회 실패: {e}")
-            return None
+        """PyKrx 기반으로 대체되어 더 이상 사용하지 않음 - 제거 예정"""
+        logging.warning(f"⚠️ {stock_code}: get_incremental_data 함수는 더 이상 사용되지 않습니다. PyKrx 기반으로 대체되었습니다.")
+        return None
 
     def get_stock_data(self, stock_code, stock_name, years=10):
         """주식 데이터 조회 (PyKrx 기반) - 전일 데이터 품질 검증 포함"""
@@ -1523,6 +1488,15 @@ class StockDataCollector:
             logging.info(f"✅ 성공: {success_count}개, ❌ 실패: {failed_count}개, ⏭️ 건너뜀: {skipped_count}개")
             logging.info("="*60)
             
+            # 마지막 배치에서만 기술지표 검증 실행
+            if batch_num == total_batches and success_count > 0:
+                logging.info("\n🔍 마지막 배치 완료 - 기술지표 검증 및 수정 시작...")
+                validation_success = self.validate_and_fix_technical_indicators()
+                if validation_success:
+                    logging.info("✅ 기술지표 검증 및 수정 완료")
+                else:
+                    logging.warning("⚠️ 기술지표 검증 및 수정에 문제가 있습니다. 로그를 확인해주세요.")
+            
             # 진행률 및 통계 업데이트 콜백 호출 (DB 연결 없이)
             try:
                 # 전체 진행률 업데이트 (실제 데이터로 계산)
@@ -1926,6 +1900,15 @@ class StockDataCollector:
         logging.info(f"✅ 총 성공: {total_success}개")
         logging.info(f"❌ 총 실패: {total_failed}개")
         logging.info(f"📊 성공률: {(total_success / total_stocks * 100):.1f}%")
+        
+        # 기술지표 검증 및 수정 실행
+        if total_success > 0:
+            logging.info("\n🔍 기술지표 검증 및 수정 시작...")
+            validation_success = self.validate_and_fix_technical_indicators()
+            if validation_success:
+                logging.info("✅ 기술지표 검증 및 수정 완료")
+            else:
+                logging.warning("⚠️ 기술지표 검증 및 수정에 문제가 있습니다. 로그를 확인해주세요.")
         
         return total_success, total_failed
 
@@ -2623,6 +2606,180 @@ class StockDataCollector:
             
         except Exception as e:
             logging.error(f"❌ {stock_code} 과거 유통주식수 데이터 수집 중 오류: {e}")
+            return False
+    
+    def check_technical_indicators_null_ratio(self):
+        """기술지표 NULL 값 비율 검사"""
+        try:
+            if not self.db.is_connected():
+                if not self.db.connect():
+                    logging.error("❌ 데이터베이스 연결 실패")
+                    return {'null_ratio': 1.0, 'failed_stocks': []}
+            
+            # 전체 기술지표 NULL 값 통계 조회
+            query = """
+            SELECT 
+                COUNT(*) as total_records,
+                SUM(CASE WHEN ma5 IS NULL THEN 1 ELSE 0 END) as ma5_null,
+                SUM(CASE WHEN ma20 IS NULL THEN 1 ELSE 0 END) as ma20_null,
+                SUM(CASE WHEN ma60 IS NULL THEN 1 ELSE 0 END) as ma60_null,
+                SUM(CASE WHEN ma120 IS NULL THEN 1 ELSE 0 END) as ma120_null,
+                SUM(CASE WHEN rsi IS NULL THEN 1 ELSE 0 END) as rsi_null,
+                SUM(CASE WHEN macd IS NULL THEN 1 ELSE 0 END) as macd_null,
+                SUM(CASE WHEN bb_upper IS NULL THEN 1 ELSE 0 END) as bb_upper_null
+            FROM technical_indicators
+            """
+            
+            result = self.db.fetch_one(query)
+            
+            if not result or result['total_records'] == 0:
+                logging.warning("⚠️ 기술지표 데이터가 없습니다.")
+                return {'null_ratio': 0.0, 'failed_stocks': []}
+            
+            total_records = result['total_records']
+            null_counts = [
+                result['ma5_null'], result['ma20_null'], result['ma60_null'], 
+                result['ma120_null'], result['rsi_null'], result['macd_null'], 
+                result['bb_upper_null']
+            ]
+            
+            # 가장 많은 NULL 값을 가진 지표의 비율 계산
+            max_null_count = max(null_counts)
+            null_ratio = max_null_count / total_records
+            
+            # NULL 값이 있는 종목들 조회
+            failed_stocks_query = """
+            SELECT DISTINCT stock_code 
+            FROM technical_indicators 
+            WHERE ma5 IS NULL OR ma20 IS NULL OR ma60 IS NULL OR ma120 IS NULL 
+               OR rsi IS NULL OR macd IS NULL OR bb_upper IS NULL
+            """
+            failed_stocks_result = self.db.fetch_all(failed_stocks_query)
+            failed_stocks = [row['stock_code'] for row in failed_stocks_result] if failed_stocks_result else []
+            
+            logging.info(f"📊 기술지표 NULL 값 검사 결과:")
+            logging.info(f"   총 레코드: {total_records:,}개")
+            logging.info(f"   MA5 NULL: {result['ma5_null']:,}개 ({result['ma5_null']/total_records*100:.1f}%)")
+            logging.info(f"   MA20 NULL: {result['ma20_null']:,}개 ({result['ma20_null']/total_records*100:.1f}%)")
+            logging.info(f"   MA60 NULL: {result['ma60_null']:,}개 ({result['ma60_null']/total_records*100:.1f}%)")
+            logging.info(f"   MA120 NULL: {result['ma120_null']:,}개 ({result['ma120_null']/total_records*100:.1f}%)")
+            logging.info(f"   RSI NULL: {result['rsi_null']:,}개 ({result['rsi_null']/total_records*100:.1f}%)")
+            logging.info(f"   MACD NULL: {result['macd_null']:,}개 ({result['macd_null']/total_records*100:.1f}%)")
+            logging.info(f"   BB_UPPER NULL: {result['bb_upper_null']:,}개 ({result['bb_upper_null']/total_records*100:.1f}%)")
+            logging.info(f"   최대 NULL 비율: {null_ratio:.2%}")
+            logging.info(f"   문제 종목 수: {len(failed_stocks)}개")
+            
+            return {
+                'null_ratio': null_ratio,
+                'failed_stocks': failed_stocks,
+                'total_records': total_records,
+                'null_counts': {
+                    'ma5': result['ma5_null'],
+                    'ma20': result['ma20_null'],
+                    'ma60': result['ma60_null'],
+                    'ma120': result['ma120_null'],
+                    'rsi': result['rsi_null'],
+                    'macd': result['macd_null'],
+                    'bb_upper': result['bb_upper_null']
+                }
+            }
+            
+        except Exception as e:
+            logging.error(f"❌ 기술지표 NULL 값 검사 실패: {e}")
+            return {'null_ratio': 1.0, 'failed_stocks': []}
+    
+    def fix_technical_indicators_for_failed_stocks(self, failed_stocks):
+        """실패한 종목들의 기술지표 재수집"""
+        try:
+            if not failed_stocks:
+                logging.info("✅ 재수집할 종목이 없습니다.")
+                return True
+            
+            logging.info(f"🔄 {len(failed_stocks)}개 종목의 기술지표 재수집 시작")
+            
+            # technical_indicators_recollector 모듈 import
+            try:
+                from technical_indicators_recollector import TechnicalIndicatorsRecollector
+                recollector = TechnicalIndicatorsRecollector()
+                
+                # 특정 종목들만 재수집
+                success, failed = recollector.recollect_all_technical_indicators(specific_codes=failed_stocks)
+                
+                logging.info(f"✅ 기술지표 재수집 완료: 성공 {success}개, 실패 {failed}개")
+                return success > 0
+                
+            except ImportError as e:
+                logging.error(f"❌ technical_indicators_recollector 모듈 import 실패: {e}")
+                return False
+            except Exception as e:
+                logging.error(f"❌ 기술지표 재수집 중 오류: {e}")
+                return False
+                
+        except Exception as e:
+            logging.error(f"❌ 기술지표 재수집 실패: {e}")
+            return False
+    
+    def save_failed_stocks_report(self, failed_stocks):
+        """실패한 종목 리스트를 파일로 저장"""
+        try:
+            if not failed_stocks:
+                return
+            
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"failed_technical_indicators_{timestamp}.txt"
+            
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write(f"기술지표 수집 실패 종목 리스트\n")
+                f.write(f"생성 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"총 {len(failed_stocks)}개 종목\n")
+                f.write("="*50 + "\n")
+                for stock_code in failed_stocks:
+                    f.write(f"{stock_code}\n")
+            
+            logging.info(f"📄 실패 종목 리스트 저장: {filename}")
+            
+        except Exception as e:
+            logging.error(f"❌ 실패 종목 리스트 저장 실패: {e}")
+    
+    def validate_and_fix_technical_indicators(self, max_retries=3, null_threshold=0.05):
+        """기술지표 검증 및 수정 (최대 3회 재시도, 5% 임계치)"""
+        try:
+            logging.info("🔍 기술지표 검증 및 수정 시작")
+            logging.info(f"   최대 재시도: {max_retries}회")
+            logging.info(f"   NULL 임계치: {null_threshold:.1%}")
+            
+            for attempt in range(max_retries):
+                logging.info(f"🔄 {attempt + 1}차 검증 시도")
+                
+                # 1. NULL 값 검사
+                null_stats = self.check_technical_indicators_null_ratio()
+                
+                # 2. 임계치 이하면 성공으로 간주
+                if null_stats['null_ratio'] < null_threshold:
+                    logging.info(f"✅ 기술지표 검증 완료 (NULL 비율: {null_stats['null_ratio']:.2%})")
+                    return True
+                
+                # 3. 재시도 필요
+                if attempt < max_retries - 1:
+                    logging.warning(f"⚠️ 기술지표 NULL 값 {null_stats['null_ratio']:.2%} 발견 - {attempt + 1}차 재시도")
+                    if self.fix_technical_indicators_for_failed_stocks(null_stats['failed_stocks']):
+                        logging.info(f"✅ {attempt + 1}차 재수집 완료")
+                    else:
+                        logging.error(f"❌ {attempt + 1}차 재수집 실패")
+                else:
+                    # 최종 실패
+                    logging.error(f"❌ {max_retries}회 재시도 후에도 기술지표 문제 지속")
+                    logging.error(f"   최종 NULL 비율: {null_stats['null_ratio']:.2%}")
+                    logging.error(f"   문제 종목 수: {len(null_stats['failed_stocks'])}개")
+                    
+                    # 실패한 종목 리스트 저장
+                    self.save_failed_stocks_report(null_stats['failed_stocks'])
+                    return False
+            
+            return False
+            
+        except Exception as e:
+            logging.error(f"❌ 기술지표 검증 및 수정 중 오류: {e}")
             return False
 
 
