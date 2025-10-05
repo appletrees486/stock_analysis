@@ -128,9 +128,9 @@ class WeekMonthDataGenerator:
                 week_year = week_start_date.year
                 week_week = week_start_date.isocalendar()[1]  # ISO 주차
                 
-                # 현재 주이거나 미래 주인 경우 제외
-                if week_year > current_year or (week_year == current_year and week_week >= current_week):
-                    logging.info(f"미완성 주 제외: {week_year}년 {week_week}주차")
+                # 미래 주인 경우만 제외 (현재 주는 포함)
+                if week_year > current_year or (week_year == current_year and week_week > current_week):
+                    logging.info(f"미래 주 제외: {week_year}년 {week_week}주차")
                     continue
                 
                 # 주봉 OHLCV 계산
@@ -140,8 +140,8 @@ class WeekMonthDataGenerator:
                 week_close = week_group.iloc[-1]['close']
                 week_volume = week_group['volume'].sum()
                 
-                # 거래일 수 확인 (최소 3일 이상 거래된 주만 포함)
-                if len(week_group) >= 3:
+                # 거래일 수 확인 (최소 4일 이상 거래된 주만 포함)
+                if len(week_group) >= 4:
                     weekly_data.append({
                         'trade_date': week_start,
                         'open': week_open,

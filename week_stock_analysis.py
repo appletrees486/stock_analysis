@@ -249,10 +249,15 @@ def convert_daily_to_weekly(daily_data, stock_code):
             next_date = daily_data_copy.index[daily_data_copy.index.get_loc(date) + 1] if daily_data_copy.index.get_loc(date) + 1 < len(daily_data_copy) else None
             
             if next_date is None or _is_new_trading_week(current_week_start, next_date, holiday_manager):
-                # ✅ 완성된 주인지 확인 - 미완성 주는 제외
+                # ✅ 완성된 주인지 확인 - 4일 이상 거래된 주는 완성된 주로 간주
                 if current_week_data and not is_complete_week(current_week_start, daily_data_copy.index[-1]):
-                    print(f"   ⚠️ 미완성 주 제외: {current_week_start.strftime('%Y-%m-%d')} 주")
-                    break  # 미완성 주는 생성하지 않고 루프 종료
+                    # 최소 4일 이상 거래된 주는 완성된 주로 간주
+                    if len(current_week_data) >= 4:
+                        print(f"   ✅ 4일 이상 거래된 주로 완성된 주로 간주: {current_week_start.strftime('%Y-%m-%d')} 주")
+                        # 주봉 생성 로직 계속 진행 (break 제거)
+                    else:
+                        print(f"   ⚠️ 미완성 주 제외: {current_week_start.strftime('%Y-%m-%d')} 주 (거래일 부족: {len(current_week_data)}일)")
+                        break  # 거래일이 부족한 경우만 제외
                 
                 # 현재 주 완성 - 주봉 데이터 생성 (완성된 주만)
                 if current_week_data:
@@ -305,7 +310,7 @@ def convert_daily_to_weekly(daily_data, stock_code):
         return None
 
 def is_complete_week(week_start_date, current_date):
-    """해당 주가 완성되었는지 확인 (거래일 기준으로 주의 마지막 거래일이 지났는지 확인)"""
+    """해당 주가 완성되었는지 확인 (공휴일을 고려한 주 완성도 확인)"""
     try:
         # week_start_date를 date 객체로 변환
         if hasattr(week_start_date, 'date'):
@@ -319,8 +324,10 @@ def is_complete_week(week_start_date, current_date):
         else:
             current = current_date
         
+        # 한국 공휴일 관리자로 금요일이 휴장일인지 확인
+        holiday_manager = KoreanHolidayManager()
+        
         # 주의 마지막 거래일 계산 (금요일)
-        # 월요일(0)부터 시작해서 금요일(4)까지가 한 주
         if week_start.weekday() == 0:  # 월요일 시작
             week_end_friday = week_start + timedelta(days=4)  # 금요일
         else:
@@ -328,14 +335,23 @@ def is_complete_week(week_start_date, current_date):
             days_to_friday = (4 - week_start.weekday()) % 7
             week_end_friday = week_start + timedelta(days=days_to_friday)
         
-        # 현재 날짜가 금요일 이후인지 확인 (거래일 기준)
-        # 금요일 당일도 완성된 주로 간주
-        is_complete = current >= week_end_friday
+        # 금요일이 휴장일인지 확인
+        if not holiday_manager.is_trading_day(week_end_friday):
+            # 금요일이 휴장일이면 목요일까지 완성으로 간주
+            week_end_thursday = week_start + timedelta(days=3)
+            is_complete = current >= week_end_thursday
+            end_day = week_end_thursday
+            reason = "목요일 (금요일 휴장)"
+        else:
+            # 금요일이 거래일이면 금요일까지 완성으로 간주
+            is_complete = current >= week_end_friday
+            end_day = week_end_friday
+            reason = "금요일 (정상 거래일)"
         
         if not is_complete:
-            print(f"   ⚠️ 미완성 주 감지: {week_start} ~ {week_end_friday} (현재: {current})")
+            print(f"   ⚠️ 미완성 주 감지: {week_start} ~ {end_day} (현재: {current}) - {reason}")
         else:
-            print(f"   ✅ 완성된 주 확인: {week_start} ~ {week_end_friday} (현재: {current})")
+            print(f"   ✅ 완성된 주 확인: {week_start} ~ {end_day} (현재: {current}) - {reason}")
         
         return is_complete
         
@@ -905,6 +921,45 @@ def analyze_weekly_stock_data(hist, stock_code):
     # 특이신호 감지
     detect_special_signals(df_with_indicators, stock_code)
 
+def calculate_x_positions(df, sparse_threshold=30):
+    """
+    X축 위치를 계산하는 함수 - 데이터가 적을 때 오른쪽 정렬 (날짜 겹침 방지)
+    
+    Args:
+        df: 차트 데이터 DataFrame
+        sparse_threshold: 데이터가 적다고 판단하는 임계값 (기본 30개)
+    
+    Returns:
+        x_positions: X축 위치 배열
+        start_offset: 시작 오프셋 값
+        min_spacing: 캔들 간 최소 간격 (날짜 겹침 방지)
+    """
+    data_count = len(df)
+    
+    if data_count <= sparse_threshold:
+        # 데이터가 적을 때: 오른쪽 정렬 + 날짜 겹침 방지를 위한 최소 간격 보장
+        # 캔들 간 최소 간격을 3으로 설정 (기존 8의 1/3, 여전히 날짜 레이블 겹침 방지)
+        min_spacing = 3
+        max_positions = max(data_count * min_spacing, 40)
+        start_offset = max_positions - (data_count * min_spacing)
+        
+        # 캔들 간격을 고려한 X축 위치 계산
+        x_positions = []
+        for i in range(data_count):
+            x_positions.append(start_offset + i * min_spacing)
+        
+        print(f"   [INFO] 데이터가 적음 ({data_count}개): 오른쪽 정렬 적용 (시작 위치: {start_offset}, 간격: {min_spacing})")
+        print(f"   [INFO] X축 범위: 0 ~ {max_positions} (날짜 겹침 방지, 실제 최대 위치: {max_positions-1})")
+    else:
+        # 데이터가 많을 때: 기존 방식 (0부터 시작, 간격 1)
+        start_offset = 0
+        min_spacing = 1
+        x_positions = list(range(data_count))
+        max_positions = data_count
+        print(f"   [INFO] 데이터가 충분함 ({data_count}개): 기본 정렬 적용")
+    
+    return x_positions, start_offset, min_spacing
+
 def create_weekly_stock_chart(hist, stock_code):
     """주식 주봉 차트 생성 (캔들차트 + 보조지표) - test_overlay_chart.py 스타일 적용"""
     if hist is None or hist.empty:
@@ -923,7 +978,7 @@ def create_weekly_stock_chart(hist, stock_code):
         return None, None
     
     # 차트 생성 (6개 패널: 메인차트, 거래량, 스토캐스틱, RSI, MACD, ADX)
-    fig, axes = plt.subplots(6, 1, figsize=(12, 16), height_ratios=[5, 2, 2, 2, 2, 2])
+    fig, axes = plt.subplots(6, 1, figsize=(12, 16), height_ratios=[3, 2, 2, 2, 2, 2])
     
     # 종목명 가져오기 (DB에서) - 차트 제목용
     chart_stock_name = stock_code  # 기본값
@@ -952,18 +1007,36 @@ def create_weekly_stock_chart(hist, stock_code):
     fig.suptitle(f'{chart_stock_name} ({stock_code}) 주봉 차트 분석\n{start_date} ~ {end_date} ({last_week_info})', 
                  fontsize=16, fontweight='bold')
     
+    # X축 위치 계산 (데이터가 적을 때 오른쪽 정렬 + 날짜 겹침 방지)
+    x_positions, start_offset, min_spacing = calculate_x_positions(df)
+    
+    # X축 범위 설정 (오른쪽 정렬 + 최신 데이터 오른쪽 끝 정렬)
+    if len(df) <= 30:  # sparse_threshold와 동일하게 설정
+        # 데이터가 적을 때: 오른쪽 끝에 여백 없이 데이터가 끝나도록 설정
+        # 최대 X축 범위를 실제 데이터의 최대 위치로 설정
+        max_data_position = max(x_positions)
+        x_min, x_max = 0, max_data_position + 1  # +1은 오른쪽 끝 여백 제거를 위해
+        print(f"   [INFO] 실제 X축 범위 설정: {x_min} ~ {x_max} (최대 데이터 위치: {max_data_position})")
+    else:
+        # 데이터가 많을 때: 데이터 범위에 맞춰 설정
+        x_min, x_max = 0, len(df) - 1
+        print(f"   [INFO] 기본 X축 범위 설정: {x_min} ~ {x_max}")
+    
     # 1. 메인 차트 (캔들차트 + 보조지표 오버레이)
     ax1 = axes[0]
     
     # 볼린저 밴드 영역 채우기 (이미지 참고 - 오렌지/베이지 스타일)
-    ax1.fill_between(df.index, df['BB_Upper'], df['BB_Lower'], 
+    ax1.fill_between(x_positions, df['BB_Upper'], df['BB_Lower'], 
                      alpha=0.15, color='#FFE4B5', label='Bollinger Bands')
     
     # 볼린저 밴드 상단과 하단을 오렌지/베이지 색으로 표시 (범례에 표시하지 않음)
-    ax1.plot(df.index, df['BB_Upper'], color='#FFCE89', alpha=0.8, linewidth=1.5, label='_nolegend_', marker='None', linestyle='-')
-    ax1.plot(df.index, df['BB_Lower'], color='#FFCE89', alpha=0.8, linewidth=1.5, label='_nolegend_', marker='None', linestyle='-')
+    ax1.plot(x_positions, df['BB_Upper'], color='#FFCE89', alpha=0.8, linewidth=1.5, label='_nolegend_', marker='None', linestyle='-')
+    ax1.plot(x_positions, df['BB_Lower'], color='#FFCE89', alpha=0.8, linewidth=1.5, label='_nolegend_', marker='None', linestyle='-')
     
     # 캔들차트 그리기 (이미지 참고 - 빨간색/파란색)
+    print(f"   [CHART] 캔들차트 그리기 시작: {len(df)}주 데이터")
+    drawn_candles = 0
+    
     for i, (date, row) in enumerate(df.iterrows()):
         # 거래정지 기간 감지
         is_trading_suspension = detect_trading_suspension(row, df)
@@ -973,25 +1046,32 @@ def create_weekly_stock_chart(hist, stock_code):
             # 아무것도 그리지 않음 - 거래정지 기간은 시각적으로 표시하지 않음
             pass
         else:
-            # 일반 거래일: 기존 캔들차트 방식
+            # 일반 거래일: 기존 캔들차트 방식 (새로운 X축 위치 사용)
+            x_pos = x_positions[i]
             if row['Close'] >= row['Open']:  # 상승
                 color = '#FF4444'  # 빨간색
             else:  # 하락
                 color = '#4444FF'  # 파란색
             
-            ax1.plot([date, date], [row['Low'], row['High']], color=color, linewidth=1.0, marker='None', linestyle='-')
-            ax1.plot([date, date], [row['Open'], row['Close']], color=color, linewidth=3.0, marker='None', linestyle='-')
+            ax1.plot([x_pos, x_pos], [row['Low'], row['High']], color=color, linewidth=1.0, marker='None', linestyle='-')
+            ax1.plot([x_pos, x_pos], [row['Open'], row['Close']], color=color, linewidth=3.0, marker='None', linestyle='-')
+            drawn_candles += 1
+    
+    print(f"   [OK] 캔들차트 그리기 완료: {drawn_candles}개 캔들 표시")
     
     # 이동평균선 추가 (웹 트레이딩 스타일 유지) - 주봉 차트 설정
-    ax1.plot(df.index, df['MA4'], color='#F59E0B', linewidth=2.0, alpha=0.9, label='4주선', marker='None', linestyle='-')
-    ax1.plot(df.index, df['MA10'], color='#8B5CF6', linewidth=2.0, alpha=0.9, label='10주선', marker='None', linestyle='-')
-    ax1.plot(df.index, df['MA20'], color='#06B6D4', linewidth=2.0, alpha=0.9, label='20주선', marker='None', linestyle='-')
+    ax1.plot(x_positions, df['MA4'], color='#F59E0B', linewidth=2.0, alpha=0.9, label='4주선', marker='None', linestyle='-')
+    ax1.plot(x_positions, df['MA10'], color='#8B5CF6', linewidth=2.0, alpha=0.9, label='10주선', marker='None', linestyle='-')
+    ax1.plot(x_positions, df['MA20'], color='#06B6D4', linewidth=2.0, alpha=0.9, label='20주선', marker='None', linestyle='-')
     
     # 메인 차트 설정
     #ax1.set_title('볼린저 밴드와 이동평균선이 포함된 가격 차트', fontsize=14, fontweight='bold')
     # ax1.set_ylabel('Price (KRW)', fontsize=12, fontweight='bold')  # 차트명 삭제
     ax1.legend(loc='upper left', fontsize=10, framealpha=0.9)
     ax1.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+    
+    # X축 범위 설정 (오른쪽 정렬 적용)
+    ax1.set_xlim(x_min, x_max)
     
     # Y축을 오른쪽으로 이동
     ax1.yaxis.set_label_position('right')
@@ -1004,7 +1084,7 @@ def create_weekly_stock_chart(hist, stock_code):
     # 거래량 차트 그리기 (거래정지 기간 처리)
     colors = []
     volumes = []
-    for date, row in df.iterrows():
+    for i, (date, row) in enumerate(df.iterrows()):
         # 거래정지 기간 감지
         is_trading_suspension = detect_trading_suspension(row, df)
         
@@ -1020,13 +1100,16 @@ def create_weekly_stock_chart(hist, stock_code):
                 colors.append('#4444FF')  # 파란색
             volumes.append(row['Volume'])
     
-    ax2.bar(df.index, volumes, color=colors, alpha=0.7, width=0.8)
+    ax2.bar(x_positions, volumes, color=colors, alpha=0.7, width=0.8)
     # 거래량 이동평균선 추가
-    ax2.plot(df.index, df['Volume_MA20'], color='#F59E0B', linewidth=2.0, alpha=0.9, label='거래량 MA20', marker='None', linestyle='-')
+    ax2.plot(x_positions, df['Volume_MA20'], color='#F59E0B', linewidth=2.0, alpha=0.9, label='거래량 MA20', marker='None', linestyle='-')
     ax2.set_title('20주 이동평균이 포함된 거래량', fontsize=12, fontweight='bold')
     # ax2.set_ylabel('Volume', fontsize=10, fontweight='bold')  # 차트명 삭제
     ax2.legend(loc='upper right', fontsize=9, framealpha=0.9)
     ax2.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+    
+    # X축 범위 설정 (오른쪽 정렬 적용)
+    ax2.set_xlim(x_min, x_max)
     
     # Y축을 오른쪽으로 이동
     ax2.yaxis.set_label_position('right')
@@ -1034,8 +1117,8 @@ def create_weekly_stock_chart(hist, stock_code):
     
     # 3. 스토캐스틱 차트 (세 번째 패널) - 웹 트레이딩 스타일 유지
     ax3 = axes[2]
-    ax3.plot(df.index, df['Stoch_K'], color='#3B82F6', linewidth=2.0, label='%K', marker='None', linestyle='-')
-    ax3.plot(df.index, df['Stoch_D'], color='#F59E0B', linewidth=2.0, label='%D', marker='None', linestyle='-')
+    ax3.plot(x_positions, df['Stoch_K'], color='#3B82F6', linewidth=2.0, label='%K', marker='None', linestyle='-')
+    ax3.plot(x_positions, df['Stoch_D'], color='#F59E0B', linewidth=2.0, label='%D', marker='None', linestyle='-')
     ax3.axhline(y=80, color='#EF4444', linestyle='--', alpha=0.8, linewidth=1.5, label='과매수')
     ax3.axhline(y=20, color='#10B981', linestyle='--', alpha=0.8, linewidth=1.5, label='과매도')
     ax3.set_ylim(0, 100)
@@ -1044,13 +1127,16 @@ def create_weekly_stock_chart(hist, stock_code):
     ax3.legend(loc='upper left', fontsize=10, framealpha=0.9)  # 왼쪽 정렬로 변경
     ax3.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
     
+    # X축 범위 설정 (오른쪽 정렬 적용)
+    ax3.set_xlim(x_min, x_max)
+    
     # Y축을 오른쪽으로 이동
     ax3.yaxis.set_label_position('right')
     ax3.yaxis.tick_right()
     
     # 4. RSI 차트 (네 번째 패널)
     ax4 = axes[3]
-    ax4.plot(df.index, df['RSI'], color='#8B5CF6', linewidth=2.0, label='RSI', marker='None', linestyle='-')
+    ax4.plot(x_positions, df['RSI'], color='#8B5CF6', linewidth=2.0, label='RSI', marker='None', linestyle='-')
     ax4.axhline(y=70, color='#EF4444', linestyle='--', alpha=0.8, linewidth=1.5, label='과매수')
     ax4.axhline(y=30, color='#10B981', linestyle='--', alpha=0.8, linewidth=1.5, label='과매도')
     ax4.axhline(y=50, color='#6B7280', linestyle='-', alpha=0.5, linewidth=1.0, label='중립')
@@ -1058,50 +1144,74 @@ def create_weekly_stock_chart(hist, stock_code):
     ax4.set_title('RSI (Relative Strength Index)', fontsize=12, fontweight='bold')
     ax4.legend(loc='upper left', fontsize=10, framealpha=0.9)
     ax4.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+    
+    # X축 범위 설정 (오른쪽 정렬 적용)
+    ax4.set_xlim(x_min, x_max)
+    
     ax4.yaxis.set_label_position('right')
     ax4.yaxis.tick_right()
     
     # 5. MACD 차트 (다섯 번째 패널)
     ax5 = axes[4]
-    ax5.plot(df.index, df['MACD'], color='#3B82F6', linewidth=2.0, label='MACD', marker='None', linestyle='-')
-    ax5.plot(df.index, df['MACD_Signal'], color='#F59E0B', linewidth=2.0, label='Signal', marker='None', linestyle='-')
-    ax5.bar(df.index, df['MACD_Histogram'], color=np.where(df['MACD_Histogram'] >= 0, '#10B981', '#EF4444'), 
+    ax5.plot(x_positions, df['MACD'], color='#3B82F6', linewidth=2.0, label='MACD', marker='None', linestyle='-')
+    ax5.plot(x_positions, df['MACD_Signal'], color='#F59E0B', linewidth=2.0, label='Signal', marker='None', linestyle='-')
+    ax5.bar(x_positions, df['MACD_Histogram'], color=np.where(df['MACD_Histogram'] >= 0, '#10B981', '#EF4444'), 
             alpha=0.7, width=0.8, label='Histogram')
     ax5.axhline(y=0, color='#6B7280', linestyle='-', alpha=0.5, linewidth=1.0)
     ax5.set_title('MACD (Moving Average Convergence Divergence)', fontsize=12, fontweight='bold')
     ax5.legend(loc='upper left', fontsize=10, framealpha=0.9)
     ax5.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+    
+    # X축 범위 설정 (오른쪽 정렬 적용)
+    ax5.set_xlim(x_min, x_max)
+    
     ax5.yaxis.set_label_position('right')
     ax5.yaxis.tick_right()
     
     # 6. ADX 차트 (여섯 번째 패널)
     ax6 = axes[5]
-    ax6.plot(df.index, df['ADX'], color='#DC2626', linewidth=2.0, label='ADX', marker='None', linestyle='-')
-    ax6.plot(df.index, df['Plus_DI'], color='#10B981', linewidth=2.0, label='+DI', marker='None', linestyle='-')
-    ax6.plot(df.index, df['Minus_DI'], color='#EF4444', linewidth=2.0, label='-DI', marker='None', linestyle='-')
+    ax6.plot(x_positions, df['ADX'], color='#DC2626', linewidth=2.0, label='ADX', marker='None', linestyle='-')
+    ax6.plot(x_positions, df['Plus_DI'], color='#10B981', linewidth=2.0, label='+DI', marker='None', linestyle='-')
+    ax6.plot(x_positions, df['Minus_DI'], color='#EF4444', linewidth=2.0, label='-DI', marker='None', linestyle='-')
     ax6.axhline(y=25, color='#6B7280', linestyle='--', alpha=0.8, linewidth=1.5, label='강한 추세')
     ax6.set_ylim(0, 100)
     ax6.set_title('ADX (Average Directional Index)', fontsize=12, fontweight='bold')
     ax6.legend(loc='upper left', fontsize=10, framealpha=0.9)
     ax6.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+    
+    # X축 범위 설정 (오른쪽 정렬 적용)
+    ax6.set_xlim(x_min, x_max)
+    
     ax6.yaxis.set_label_position('right')
     ax6.yaxis.tick_right()
     
-    # X축 날짜 설정 - 하단에만 표시 (스타일 변경: 글자 크기 50% 증가, 가로 표시)
+    # X축 날짜 설정 - 하단에만 표시 (스타일 변경: 글자 크기 조정, 가로 표시)
     for i, ax in enumerate(axes):
         if i == len(axes) - 1:  # 마지막 패널에만 날짜 표시
-            # 주간 차트이므로 적절한 간격으로 날짜 선택
+            # 주간 차트이므로 적절한 간격으로 날짜 선택 (x_positions 기반)
             date_indices = [df.index[0], df.index[len(df)//4], df.index[len(df)//2], 
                            df.index[3*len(df)//4], df.index[-1]]
-            ax.set_xticks(date_indices)
-            # 글자 크기 50% 증가 (기본 10에서 15로), 대각선에서 가로로 변경 (rotation=0)
-            # 주차 정보를 포함한 X축 라벨 생성
-            x_labels = []
-            for date in date_indices:
-                year, week = WeekCalculator.get_week_number(date)
-                x_labels.append(f"{date.strftime('%Y-%m')}\n({year}년 {week}주차)")
+            x_tick_positions = [x_positions[0], x_positions[len(df)//4], x_positions[len(df)//2], 
+                               x_positions[3*len(df)//4], x_positions[-1]]
+            ax.set_xticks(x_tick_positions)
             
-            ax.set_xticklabels(x_labels, rotation=0, ha='center', fontweight='bold', fontsize=15)
+            # X축 라벨을 개별적으로 그려서 글씨 크기 조정
+            ax.set_xticks(x_tick_positions)
+            ax.set_xticklabels([])  # 기본 라벨 제거
+            
+            # 개별 텍스트 라벨 그리기 (날짜는 크게, 주차 정보는 작게)
+            for i, (pos, date) in enumerate(zip(x_tick_positions, date_indices)):
+                year, week = WeekCalculator.get_week_number(date)
+                
+                # 첫 번째 줄: 날짜 (큰 글씨)
+                ax.text(pos, -0.15, date.strftime('%Y-%m'), 
+                       ha='center', va='top', fontsize=15, fontweight='bold', 
+                       transform=ax.get_xaxis_transform())
+                
+                # 두 번째 줄: 주차 정보 (작은 글씨, 30% 작게 = 10.5px)
+                ax.text(pos, -0.25, f'({year}년 {week}주차)', 
+                       ha='center', va='top', fontsize=8, fontweight='bold', 
+                       transform=ax.get_xaxis_transform())
         else:
             ax.set_xticks([])  # 다른 패널은 X축 눈금 숨김
     
