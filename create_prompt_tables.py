@@ -84,14 +84,18 @@ def create_prompt_tables(db):
 def insert_prompt_categories(db):
     """프롬프트 카테고리 데이터 삽입"""
     categories = [
-        ('일봉', '일봉 차트 분석을 위한 프롬프트'),
-        ('주봉', '주봉 차트 분석을 위한 프롬프트'),
-        ('월봉', '월봉 차트 분석을 위한 프롬프트')
+        ('일봉', '일봉 차트 분석을 위한 프롬프트', 1),
+        ('주봉', '주봉 차트 분석을 위한 프롬프트', 2),
+        ('월봉', '월봉 차트 분석을 위한 프롬프트', 3),
+        ('일봉 요약', '일봉 분석 결과 요약을 위한 프롬프트', 4),
+        ('주봉 요약', '주봉 분석 결과 요약을 위한 프롬프트', 5),
+        ('월봉 요약', '월봉 분석 결과 요약을 위한 프롬프트', 6),
+        ('태그', '태그 분석을 위한 프롬프트', 7)
     ]
     
     insert_sql = """
-    INSERT IGNORE INTO prompt_categories (name, description)
-    VALUES (%s, %s)
+    INSERT IGNORE INTO prompt_categories (name, description, sort_order)
+    VALUES (%s, %s, %s)
     """
     
     try:

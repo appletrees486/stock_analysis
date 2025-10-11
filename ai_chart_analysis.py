@@ -3502,199 +3502,6 @@ class SummaryFileGenerator:
             print(f"⚠️ AI 분석기 초기화 실패: {e}")
             self.analyzer = None
     
-    def _extract_seo_tags_from_summary(self, summary_text: str) -> list:
-        """
-        요약 텍스트에서 검색 최적화 태그를 추출하는 메서드
-        
-        Args:
-            summary_text (str): 요약 텍스트
-            
-        Returns:
-            list: 추출된 태그 리스트
-        """
-        try:
-            tags = []
-            
-            # 해시태그 패턴 찾기 (#으로 시작하는 태그들)
-            import re
-            hashtag_pattern = r'#([가-힣a-zA-Z0-9_]+)'
-            hashtags = re.findall(hashtag_pattern, summary_text)
-            
-            for tag in hashtags:
-                # 태그 길이 검증 (2-15자)
-                if len(tag) >= 2 and len(tag) <= 15:
-                    tags.append(tag)
-            
-            # 중복 제거
-            unique_tags = []
-            for tag in tags:
-                if tag not in unique_tags:
-                    unique_tags.append(tag)
-            
-            # 최대 15개로 제한
-            return unique_tags[:15]
-            
-        except Exception as e:
-            print(f"⚠️ 검색 최적화 태그 추출 중 오류: {e}")
-            return []
-
-    def _remove_seo_tags_from_text(self, text: str) -> str:
-        """
-        텍스트에서 검색 최적화 태그 부분을 제거하는 메서드
-        
-        Args:
-            text (str): 원본 텍스트
-            
-        Returns:
-            str: 태그 부분이 제거된 깨끗한 텍스트
-        """
-        try:
-            import re
-            # "검색 최적화 태그:" 부분을 포함한 줄을 제거
-            lines = text.split('\n')
-            clean_lines = []
-            
-            # "나머지 종목들의 세부 차트 분석은 첨부파일에서 확인하세요." 이후 내용 삭제
-            cutoff_found = False
-            
-            for line in lines:
-                line_stripped = line.strip()
-                
-                # 기준점 문구를 찾으면 그 이후는 모두 제거
-                if "나머지 종목들의 세부 차트 분석은 첨부파일에서 확인하세요." in line_stripped:
-                    cutoff_found = True
-                    # 기준점 문구는 포함
-                    clean_lines.append(line)
-                    break
-                
-                # 기준점을 찾기 전까지는 모든 줄 포함
-                clean_lines.append(line)
-            
-            # 연속된 줄바꿈 정리 (3개 이상을 2개로)
-            clean_text = '\n'.join(clean_lines)
-            clean_text = re.sub(r'\n{3,}', '\n\n', clean_text)
-            
-            # 앞뒤 공백 제거
-            return clean_text.strip()
-            
-        except Exception as e:
-            print(f"⚠️ 검색 최적화 태그 제거 중 오류: {e}")
-            return text
-
-    def create_tags_document(self, results_dir: str = "ai_analysis_results", batch_id: str = None) -> str:
-        """
-        모든 summary JSON에서 검색 최적화 태그를 수집하여 tag.docx 생성
-        
-        Args:
-            results_dir (str): 분석 결과 폴더 경로
-            batch_id (str): 배치 ID (파일명 구분용)
-            
-        Returns:
-            str: 생성된 tag.docx 파일 경로 또는 None
-        """
-        try:
-            print("🏷️ 검색 최적화 태그 수집 중...")
-            
-            if not os.path.exists(results_dir):
-                print(f"❌ 분석 결과 폴더가 존재하지 않습니다: {results_dir}")
-                return None
-            
-            # summary JSON 파일들 찾기
-            summary_files = []
-            for file in os.listdir(results_dir):
-                if file.startswith('summary_') and file.endswith('.json'):
-                    summary_files.append(os.path.join(results_dir, file))
-            
-            if not summary_files:
-                print("❌ summary JSON 파일을 찾을 수 없습니다")
-                return None
-            
-            print(f"📁 발견된 summary 파일: {len(summary_files)}개")
-            
-            # 모든 태그 수집
-            all_tags = []
-            for summary_file in summary_files:
-                try:
-                    with open(summary_file, 'r', encoding='utf-8') as f:
-                        summary_data = json.load(f)
-                    
-                    # market_summary에서 검색_최적화_태그 추출
-                    market_summary = summary_data.get("market_summary", {})
-                    if isinstance(market_summary, dict):
-                        tags = market_summary.get("검색_최적화_태그", [])
-                        if isinstance(tags, list):
-                            all_tags.extend(tags)
-                    
-                except Exception as e:
-                    print(f"⚠️ {summary_file} 읽기 실패: {e}")
-                    continue
-            
-            if not all_tags:
-                print("❌ 검색 최적화 태그를 찾을 수 없습니다")
-                return None
-            
-            # 중복 제거 및 정렬
-            unique_tags = sorted(list(set(all_tags)))
-            print(f"✅ 수집된 태그: {len(unique_tags)}개")
-            
-            # tag.docx 파일명 생성 (배치 ID 또는 타임스탬프 포함)
-            from datetime import datetime
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            
-            if batch_id:
-                filename = f"tag_{batch_id}_{timestamp}.docx"
-            else:
-                filename = f"tag_{timestamp}.docx"
-            
-            output_path = os.path.join(results_dir, filename)
-            success = self._create_tags_docx(unique_tags, output_path)
-            
-            if success:
-                print(f"✅ tag.docx 생성 완료: {output_path}")
-                return output_path
-            else:
-                print("❌ tag.docx 생성 실패")
-                return None
-                
-        except Exception as e:
-            print(f"❌ 태그 문서 생성 중 오류: {e}")
-            return None
-
-    def _create_tags_docx(self, tags: list, output_path: str) -> bool:
-        """
-        태그 리스트를 DOCX 파일로 생성
-        
-        Args:
-            tags (list): 태그 리스트
-            output_path (str): 출력 파일 경로
-            
-        Returns:
-            bool: 생성 성공 여부
-        """
-        try:
-            from docx import Document
-            from docx.shared import Inches, Pt
-            from docx.enum.text import WD_ALIGN_PARAGRAPH
-            from docx.oxml.ns import qn
-            
-            doc = Document()
-            
-            # 태그를 쉼표로 구분하여 표시
-            tags_text = ", ".join(tags)
-            tags_para = doc.add_paragraph(tags_text)
-            for run in tags_para.runs:
-                run.font.name = '맑은 고딕'
-                run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
-            
-            # 문서 저장
-            doc.save(output_path)
-            return True
-            
-        except Exception as e:
-            print(f"❌ tag.docx 생성 중 오류: {e}")
-            return False
-
-
     def scan_analysis_results(self, results_dir: str = "ai_analysis_results") -> dict:
         """
         분석 결과 폴더를 스캔하여 차트 유형별로 그룹화
@@ -4008,26 +3815,6 @@ class SummaryFileGenerator:
                 ai_result = self.analyzer.analyze_text_with_prompt(formatted_prompt)
                 
                 if ai_result:
-                    # AI 결과에서 검색 최적화 태그 추출
-                    seo_tags = []
-                    clean_analysis_text = ""
-                    
-                    if isinstance(ai_result, dict) and "분석_결과" in ai_result:
-                        seo_tags = self._extract_seo_tags_from_summary(ai_result["분석_결과"])
-                        clean_analysis_text = self._remove_seo_tags_from_text(ai_result["분석_결과"])
-                        ai_result["분석_결과"] = clean_analysis_text
-                    elif isinstance(ai_result, str):
-                        seo_tags = self._extract_seo_tags_from_summary(ai_result)
-                        clean_analysis_text = self._remove_seo_tags_from_text(ai_result)
-                        ai_result = {
-                            "분석_결과": clean_analysis_text,
-                            "검색_최적화_태그": seo_tags
-                        }
-                    
-                    # market_summary에 검색 최적화 태그 추가
-                    if isinstance(ai_result, dict):
-                        ai_result["검색_최적화_태그"] = seo_tags
-                    
                     # 통합 요약 결과 구성
                     consolidated_result = {
                         "summary_meta": {
@@ -4061,8 +3848,7 @@ class SummaryFileGenerator:
                 "market_summary": {
                     "분석_결과": f"{chart_type_kr} 차트 {len(analysis_results)}개 종목 분석 완료",
                     "생성_시간": datetime.now().isoformat(),
-                    "분석_유형": f"{chart_type_kr}_통합요약",
-                    "검색_최적화_태그": [f"{chart_type_kr}분석", "차트분석", "투자분석"]
+                    "분석_유형": f"{chart_type_kr}_통합요약"
                 },
                 "stock_details": summary_data["종목별요약"],
                 "raw_analysis_count": len(analysis_results)
@@ -4137,7 +3923,149 @@ class SummaryFileGenerator:
             print(f"❌ 거래타입 추출 중 오류: {e}")
             return ""
     
-    def save_summary_files(self, consolidated_result: dict, chart_type: str, output_dir: str = "ai_analysis_results") -> tuple:
+    def _generate_tags_from_summary(self, json_path: str, batch_id: str = None, output_dir: str = "ai_analysis_results") -> str:
+        """
+        Summary JSON의 분석_결과로부터 태그 생성
+        
+        Args:
+            json_path (str): summary JSON 파일 경로
+            batch_id (str): 배치 ID (파일명 구분용)
+            output_dir (str): 출력 디렉토리
+            
+        Returns:
+            str: 생성된 tag.docx 파일 경로 또는 None
+        """
+        try:
+            print(f"🏷️ 태그 생성 시작...")
+            
+            # 1. Summary JSON 파일 읽기
+            if not os.path.exists(json_path):
+                print(f"❌ Summary JSON 파일을 찾을 수 없습니다: {json_path}")
+                return None
+            
+            with open(json_path, 'r', encoding='utf-8') as f:
+                summary_data = json.load(f)
+            
+            # 2. market_summary에서 분석_결과 추출
+            market_summary = summary_data.get("market_summary", {})
+            analysis_result = market_summary.get("분석_결과", "")
+            
+            if not analysis_result:
+                print(f"❌ 분석_결과가 비어있습니다")
+                return None
+            
+            print(f"📄 분석_결과 텍스트 추출 완료 (길이: {len(analysis_result)}자)")
+            
+            # 3. DB에서 태그 프롬프트 조회 (category_id=9)
+            if not self.prompts:
+                print(f"❌ 프롬프트 관리자가 초기화되지 않았습니다")
+                return None
+            
+            try:
+                # '태그' 카테고리로 프롬프트 조회 (category_id=9)
+                tag_prompt = self.prompts.prompt_manager.get_prompt('태그')
+                if not tag_prompt:
+                    print(f"❌ 태그 프롬프트를 찾을 수 없습니다 (category_id=9)")
+                    return None
+                
+                print(f"✅ 태그 프롬프트 조회 완료 (길이: {len(tag_prompt)}자)")
+            except Exception as e:
+                print(f"❌ 태그 프롬프트 조회 실패: {e}")
+                return None
+            
+            # 4. AI에게 태그 생성 요청
+            if not self.analyzer:
+                print(f"❌ AI 분석기가 초기화되지 않았습니다")
+                return None
+            
+            try:
+                # 태그 프롬프트 + 분석 결과 조합
+                combined_prompt = f"{tag_prompt}\n\n분석 결과:\n{analysis_result}\n\n위 분석 결과를 바탕으로 태그를 생성해주세요."
+                
+                print(f"🤖 AI 태그 생성 요청 중...")
+                ai_response = self.analyzer.analyze_text_with_prompt(combined_prompt)
+                
+                if not ai_response:
+                    print(f"❌ AI 응답이 없습니다")
+                    return None
+                
+                # AI 응답에서 태그 텍스트 추출
+                if isinstance(ai_response, dict):
+                    tag_text = ai_response.get("분석_결과", "")
+                elif isinstance(ai_response, str):
+                    tag_text = ai_response
+                else:
+                    tag_text = str(ai_response)
+                
+                if not tag_text:
+                    print(f"❌ 태그 텍스트가 비어있습니다")
+                    return None
+                
+                print(f"✅ AI 태그 생성 완료 (길이: {len(tag_text)}자)")
+                
+            except Exception as e:
+                print(f"❌ AI 태그 생성 실패: {e}")
+                return None
+            
+            # 5. tag.docx 파일 생성
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            
+            if batch_id:
+                tag_filename = f"tag_{batch_id}_{timestamp}.docx"
+            else:
+                tag_filename = f"tag_{timestamp}.docx"
+            
+            tag_path = os.path.join(output_dir, tag_filename)
+            
+            # DOCX 파일 생성
+            if self._create_tags_docx(tag_text, tag_path):
+                print(f"✅ tag.docx 파일 생성 완료: {tag_path}")
+                return tag_path
+            else:
+                print(f"❌ tag.docx 파일 생성 실패")
+                return None
+            
+        except Exception as e:
+            print(f"❌ 태그 생성 중 오류: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def _create_tags_docx(self, tag_text: str, output_path: str) -> bool:
+        """
+        태그 텍스트를 DOCX 파일로 저장
+        
+        Args:
+            tag_text (str): 태그 텍스트
+            output_path (str): 출력 파일 경로
+            
+        Returns:
+            bool: 생성 성공 여부
+        """
+        try:
+            from docx import Document
+            from docx.shared import Pt
+            from docx.oxml.ns import qn
+            
+            doc = Document()
+            
+            # 태그 텍스트를 문단으로 추가
+            para = doc.add_paragraph(tag_text)
+            
+            # 한글 폰트 적용
+            for run in para.runs:
+                run.font.name = '맑은 고딕'
+                run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
+            
+            # 문서 저장
+            doc.save(output_path)
+            return True
+            
+        except Exception as e:
+            print(f"❌ tag.docx 파일 생성 중 오류: {e}")
+            return False
+    
+    def save_summary_files(self, consolidated_result: dict, chart_type: str, output_dir: str = "ai_analysis_results", batch_id: str = None) -> tuple:
         """
         통합 요약 결과를 JSON 및 DOCX 파일로 저장
         
@@ -4145,6 +4073,7 @@ class SummaryFileGenerator:
             consolidated_result (dict): 통합 요약 결과
             chart_type (str): 차트 유형
             output_dir (str): 출력 디렉토리
+            batch_id (str): 배치 ID (tag 파일명 구분용)
             
         Returns:
             tuple: (json_path, docx_path, success)
@@ -4203,6 +4132,17 @@ class SummaryFileGenerator:
             
             if docx_success:
                 print(f"✅ DOCX 요약 파일 저장 완료: {docx_path}")
+                
+                # 태그 생성 (실패해도 summary 파일은 성공으로 처리)
+                try:
+                    tag_path = self._generate_tags_from_summary(json_path, batch_id, output_dir)
+                    if tag_path:
+                        print(f"✅ 태그 파일 생성 완료: {tag_path}")
+                    else:
+                        print(f"⚠️ 태그 파일 생성 실패 (summary 파일은 정상 저장됨)")
+                except Exception as tag_error:
+                    print(f"⚠️ 태그 생성 중 오류 (summary 파일은 정상 저장됨): {tag_error}")
+                
                 return json_path, docx_path, True
             else:
                 print(f"⚠️ DOCX 파일 저장 실패")
@@ -4668,13 +4608,14 @@ class SummaryFileGenerator:
             print(f"❌ 전체 요약 생성 중 오류: {e}")
             return {}
 
-    def create_consolidated_summary_from_files(self, chart_type: str, file_paths: list) -> Optional[Dict[str, str]]:
+    def create_consolidated_summary_from_files(self, chart_type: str, file_paths: list, batch_id: str = None) -> Optional[Dict[str, str]]:
         """
         특정 파일들로부터 요약 분석 실행
         
         Args:
             chart_type (str): 차트 유형 ("daily", "weekly", "monthly")
             file_paths (list): 분석할 JSON 파일 경로들
+            batch_id (str): 배치 ID (tag 파일명 구분용)
             
         Returns:
             Optional[Dict[str, str]]: 생성된 파일 경로들 {"json_path": "...", "docx_path": "..."}
@@ -4705,9 +4646,9 @@ class SummaryFileGenerator:
             if summary_result:
                 print(f"✅ {chart_type} 통합 요약 생성 완료")
                 
-                # 4. 파일 저장
+                # 4. 파일 저장 (batch_id 전달)
                 print(f"💾 요약 파일 저장 중...")
-                json_path, docx_path, success = self.save_summary_files(summary_result, chart_type)
+                json_path, docx_path, success = self.save_summary_files(summary_result, chart_type, batch_id=batch_id)
                 
                 if success:
                     print(f"✅ 요약 파일 저장 완료")

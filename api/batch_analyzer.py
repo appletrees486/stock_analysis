@@ -360,7 +360,7 @@ class BatchAnalyzer:
                 for file_path in successful_stocks:
                     logger.info(f"  - {file_path}")
                 
-                summary_files = self._create_summary_analysis(chart_type, successful_stocks)
+                summary_files = self._create_summary_analysis(chart_type, successful_stocks, batch_id=batch_id)
                 logger.info(f"요약 분석 완료: batch_id={batch_id}")
             except Exception as e:
                 logger.error(f"요약 분석 중 오류: {e}")
@@ -1700,13 +1700,14 @@ class BatchAnalyzer:
                 run.font.name = '맑은 고딕'
                 run._element.rPr.rFonts.set(qn('w:eastAsia'), '맑은 고딕')
     
-    def _create_summary_analysis(self, chart_type: str, specific_files: list = None) -> dict:
+    def _create_summary_analysis(self, chart_type: str, specific_files: list = None, batch_id: str = None) -> dict:
         """
         배치 분석 완료 후 요약 분석 실행
         
         Args:
             chart_type (str): 차트 유형 (한글)
             specific_files (list): 특정 파일 경로들 (None이면 전체 폴더 스캔)
+            batch_id (str): 배치 ID (tag 파일명 구분용)
             
         Returns:
             dict: 생성된 요약 파일 정보 {"json_path": "...", "docx_path": "..."}
@@ -1734,8 +1735,8 @@ class BatchAnalyzer:
             
             # 통합 요약 파일 생성 (차트 유형별)
             if specific_files:
-                # 특정 파일들만 사용하여 요약 생성
-                result = summary_generator.create_consolidated_summary_from_files(chart_type_en, specific_files)
+                # 특정 파일들만 사용하여 요약 생성 (batch_id 전달)
+                result = summary_generator.create_consolidated_summary_from_files(chart_type_en, specific_files, batch_id=batch_id)
             else:
                 # 전체 폴더 스캔하여 요약 생성 (기존 방식)
                 result = summary_generator.create_consolidated_summary_by_type(chart_type_en)
@@ -1824,40 +1825,41 @@ class BatchAnalyzer:
     
     def _create_tags_document(self, batch_id: str) -> str:
         """
-        모든 summary JSON에서 검색 최적화 태그를 수집하여 tag.docx 생성
+        이미 생성된 tag.docx 파일을 찾아서 반환
+        (save_summary_files 메서드에서 자동 생성됨)
         
         Args:
             batch_id (str): 배치 ID
             
         Returns:
-            str: 생성된 tag.docx 파일 경로 또는 None
+            str: 찾은 tag.docx 파일 경로 또는 None
         """
         try:
-            logger.info("🏷️ 검색 최적화 태그 수집 중...")
+            logger.info("🏷️ 생성된 태그 DOCX 파일 찾는 중...")
             
-            # ai_chart_analysis 모듈에서 SummaryFileGenerator import
-            sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-            from ai_chart_analysis import SummaryFileGenerator
-            from database_config import get_db_config
+            # ai_analysis_results 폴더에서 tag_{batch_id}_*.docx 패턴으로 검색
+            results_dir = "ai_analysis_results"
+            if not os.path.exists(results_dir):
+                logger.warning(f"❌ {results_dir} 폴더가 존재하지 않습니다")
+                return None
             
-            # 데이터베이스 설정 로드
-            db_config = get_db_config()
+            import glob
+            tag_pattern = os.path.join(results_dir, f"tag_{batch_id}_*.docx")
+            logger.info(f"🔍 검색 패턴: {tag_pattern}")
             
-            # 요약 파일 생성기 초기화
-            summary_generator = SummaryFileGenerator(db_config)
+            tag_files = glob.glob(tag_pattern)
             
-            # 태그 DOCX 파일 생성 (배치 ID 전달)
-            tag_docx_path = summary_generator.create_tags_document(batch_id=batch_id)
-            
-            if tag_docx_path:
-                logger.info(f"✅ 태그 DOCX 생성 완료: {tag_docx_path}")
-                return tag_docx_path
+            if tag_files:
+                # 가장 최근 파일 선택
+                latest_tag_file = max(tag_files, key=os.path.getctime)
+                logger.info(f"✅ 태그 DOCX 파일 발견: {latest_tag_file}")
+                return latest_tag_file
             else:
-                logger.warning("❌ 태그 DOCX 생성 실패")
+                logger.warning(f"❌ 태그 DOCX 파일을 찾을 수 없습니다 (패턴: {tag_pattern})")
                 return None
                 
         except Exception as e:
-            logger.error(f"❌ 태그 문서 생성 중 오류: {e}")
+            logger.error(f"❌ 태그 문서 찾기 중 오류: {e}")
             return None
     
     def _send_completion_email(self, batch_id: str, zip_file: str, email_address: str):

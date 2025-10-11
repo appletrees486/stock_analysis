@@ -148,11 +148,12 @@ class PromptManager:
                 'monthly': '월봉', '월봉': '월봉', 'month': '월봉',
                 'daily-summary': '일봉 요약', '일봉 요약': '일봉 요약',
                 'weekly-summary': '주봉 요약', '주봉 요약': '주봉 요약',
-                'monthly-summary': '월봉 요약', '월봉 요약': '월봉 요약'
+                'monthly-summary': '월봉 요약', '월봉 요약': '월봉 요약',
+                'tag': '태그', '태그': '태그'
             }
             
             # chart_type이 이미 한글이면 그대로 사용, 영어면 매핑
-            if chart_type in ['일봉', '주봉', '월봉', '일봉 요약', '주봉 요약', '월봉 요약']:
+            if chart_type in ['일봉', '주봉', '월봉', '일봉 요약', '주봉 요약', '월봉 요약', '태그']:
                 category_name = chart_type
             else:
                 category_name = category_mapping.get(chart_type.lower(), '일봉')
@@ -248,11 +249,12 @@ class PromptManager:
                 'monthly': '월봉', '월봉': '월봉', 'month': '월봉',
                 'daily-summary': '일봉 요약', '일봉 요약': '일봉 요약',
                 'weekly-summary': '주봉 요약', '주봉 요약': '주봉 요약',
-                'monthly-summary': '월봉 요약', '월봉 요약': '월봉 요약'
+                'monthly-summary': '월봉 요약', '월봉 요약': '월봉 요약',
+                'tag': '태그', '태그': '태그'
             }
             
             # chart_type이 이미 한글이면 그대로 사용, 영어면 매핑
-            if chart_type in ['일봉', '주봉', '월봉', '일봉 요약', '주봉 요약', '월봉 요약']:
+            if chart_type in ['일봉', '주봉', '월봉', '일봉 요약', '주봉 요약', '월봉 요약', '태그']:
                 category_name = chart_type
             else:
                 category_name = category_mapping.get(chart_type.lower(), '일봉')
@@ -316,11 +318,12 @@ class PromptManager:
                 'monthly': '월봉', '월봉': '월봉', 'month': '월봉',
                 'daily-summary': '일봉 요약', '일봉 요약': '일봉 요약',
                 'weekly-summary': '주봉 요약', '주봉 요약': '주봉 요약',
-                'monthly-summary': '월봉 요약', '월봉 요약': '월봉 요약'
+                'monthly-summary': '월봉 요약', '월봉 요약': '월봉 요약',
+                'tag': '태그', '태그': '태그'
             }
             
             # chart_type이 이미 한글이면 그대로 사용, 영어면 매핑
-            if chart_type in ['일봉', '주봉', '월봉', '일봉 요약', '주봉 요약', '월봉 요약']:
+            if chart_type in ['일봉', '주봉', '월봉', '일봉 요약', '주봉 요약', '월봉 요약', '태그']:
                 category_name = chart_type
             else:
                 category_name = category_mapping.get(chart_type.lower(), '일봉')

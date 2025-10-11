@@ -45,7 +45,7 @@ def get_prompts():
             }), 500
         
         # 모든 차트 유형의 프롬프트 조회
-        chart_types = ['일봉', '주봉', '월봉', '일봉 요약', '주봉 요약', '월봉 요약']
+        chart_types = ['일봉', '주봉', '월봉', '일봉 요약', '주봉 요약', '월봉 요약', '태그']
         prompts_data = {}
         
         for chart_type in chart_types:
@@ -276,7 +276,8 @@ def get_categories():
             {"name": "월봉", "description": "월봉 차트 분석용 프롬프트", "sort_order": 3},
             {"name": "일봉 요약", "description": "일봉 분석 결과 요약용 프롬프트", "sort_order": 4},
             {"name": "주봉 요약", "description": "주봉 분석 결과 요약용 프롬프트", "sort_order": 5},
-            {"name": "월봉 요약", "description": "월봉 분석 결과 요약용 프롬프트", "sort_order": 6}
+            {"name": "월봉 요약", "description": "월봉 분석 결과 요약용 프롬프트", "sort_order": 6},
+            {"name": "태그", "description": "태그 분석용 프롬프트", "sort_order": 7}
         ]
         
         return jsonify({

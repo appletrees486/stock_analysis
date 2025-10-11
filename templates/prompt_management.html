@@ -137,6 +137,11 @@
                                             <i class="fas fa-file-alt me-1"></i>월봉 요약
                                         </button>
                                     </li>
+                                    <li class="nav-item" role="presentation">
+                                        <button class="nav-link" id="tag-tab" data-bs-toggle="tab" data-bs-target="#tag" type="button" role="tab">
+                                            <i class="fas fa-tags me-1"></i>태그
+                                        </button>
+                                    </li>
                                 </ul>
 
                                 <!-- 프롬프트 편집 영역 -->
@@ -278,6 +283,29 @@
                                             </div>
                                         </div>
                                     </div>
+
+                                    <div class="tab-pane fade" id="tag" role="tabpanel">
+                                        <div class="row">
+                                            <div class="col-md-8">
+                                                <div class="mb-3">
+                                                    <label class="form-label">태그 프롬프트 내용</label>
+                                                    <textarea class="form-control prompt-editor" id="tag-prompt" rows="20" placeholder="태그 분석 프롬프트를 입력하세요..."></textarea>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-4">
+                                                <div class="card">
+                                                    <div class="card-header">
+                                                        <h6>버전 정보</h6>
+                                                    </div>
+                                                    <div class="card-body">
+                                                        <div id="tag-versions">
+                                                            <p class="text-muted">버전 정보를 불러오는 중...</p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -342,7 +370,7 @@
         // 프롬프트 로드
         async function loadPrompts() {
             try {
-                const chartTypes = ['daily', 'weekly', 'monthly', 'daily-summary', 'weekly-summary', 'monthly-summary'];
+                const chartTypes = ['daily', 'weekly', 'monthly', 'daily-summary', 'weekly-summary', 'monthly-summary', 'tag'];
                 
                 for (const chartType of chartTypes) {
                     const response = await fetch(`/api/prompts/${getChartTypeName(chartType)}`);
@@ -369,7 +397,8 @@
                 'monthly': '월봉',
                 'daily-summary': '일봉 요약',
                 'weekly-summary': '주봉 요약',
-                'monthly-summary': '월봉 요약'
+                'monthly-summary': '월봉 요약',
+                'tag': '태그'
             };
             return mapping[chartType] || chartType;
         }
@@ -409,7 +438,7 @@
         // 모든 프롬프트 저장
         async function saveAllPrompts() {
             try {
-                const chartTypes = ['daily', 'weekly', 'monthly', 'daily-summary', 'weekly-summary', 'monthly-summary'];
+                const chartTypes = ['daily', 'weekly', 'monthly', 'daily-summary', 'weekly-summary', 'monthly-summary', 'tag'];
                 let successCount = 0;
 
                 for (const chartType of chartTypes) {
