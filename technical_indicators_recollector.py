@@ -30,8 +30,8 @@ class TechnicalIndicatorsRecollector:
     def __init__(self):
         """초기화"""
         self.db = DatabaseManager()
-        self.batch_size = 100  # 배치 크기
-        self.delay_between_requests = 0.1  # 요청 간 딜레이
+        self.batch_size = 200  # 배치 크기 (100 → 200) [최적화]
+        self.delay_between_requests = 0  # 요청 간 딜레이 제거 (DB 작업이므로 불필요) [최적화]
         
     def calculate_technical_indicators(self, df):
         """기술적 지표 계산 (stock_data_collector.py와 동일한 로직)"""
@@ -98,13 +98,55 @@ class TechnicalIndicatorsRecollector:
         finally:
             self.db.disconnect()
     
-    def get_daily_data_for_stock(self, stock_code: str) -> Optional[pd.DataFrame]:
-        """특정 종목의 일봉 데이터 조회"""
+    def get_batch_daily_data(self, stock_codes: List[str]) -> dict:
+        """배치로 여러 종목의 일봉 데이터 한 번에 조회 [최적화]"""
         try:
-            if not self.db.connect():
-                logging.error("데이터베이스 연결 실패")
-                return None
+            if not stock_codes:
+                return {}
             
+            # IN 절을 위한 플레이스홀더 생성
+            placeholders = ','.join(['%s'] * len(stock_codes))
+            query = f"""
+            SELECT stock_code, trade_date, open, high, low, close, volume
+            FROM daily_data 
+            WHERE stock_code IN ({placeholders})
+            ORDER BY stock_code, trade_date ASC
+            """
+            
+            result = self.db.fetch_all(query, tuple(stock_codes))
+            
+            if not result:
+                logging.warning(f"⚠️ 배치 조회 결과 없음")
+                return {}
+            
+            # 종목별로 데이터프레임 생성
+            stock_data_dict = {}
+            df_all = pd.DataFrame(result)
+            
+            for stock_code in stock_codes:
+                stock_df = df_all[df_all['stock_code'] == stock_code].copy()
+                if not stock_df.empty:
+                    stock_df['trade_date'] = pd.to_datetime(stock_df['trade_date'])
+                    stock_df.set_index('trade_date', inplace=True)
+                    stock_df = stock_df[['open', 'high', 'low', 'close', 'volume']]
+                    stock_df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+                    
+                    # Decimal 타입을 float로 변환
+                    for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
+                        stock_df[col] = stock_df[col].astype(float)
+                    
+                    stock_data_dict[stock_code] = stock_df
+            
+            logging.info(f"✅ 배치 조회 완료: {len(stock_data_dict)}/{len(stock_codes)}개 종목")
+            return stock_data_dict
+                
+        except Exception as e:
+            logging.error(f"❌ 배치 일봉 데이터 조회 실패: {e}")
+            return {}
+    
+    def get_daily_data_for_stock(self, stock_code: str) -> Optional[pd.DataFrame]:
+        """특정 종목의 일봉 데이터 조회 (DB 연결/해제 제거 - 배치에서 관리) [최적화]"""
+        try:
             query = """
             SELECT trade_date, open, high, low, close, volume
             FROM daily_data 
@@ -133,16 +175,10 @@ class TechnicalIndicatorsRecollector:
         except Exception as e:
             logging.error(f"❌ {stock_code} 일봉 데이터 조회 실패: {e}")
             return None
-        finally:
-            self.db.disconnect()
     
     def save_technical_indicators_fixed(self, stock_code: str, df_with_indicators: pd.DataFrame) -> bool:
-        """기술적 지표를 데이터베이스에 저장 (수정된 버전 - NULL 값 허용)"""
+        """기술적 지표를 데이터베이스에 저장 (DB 연결/해제 제거, 청크 저장) [최적화]"""
         try:
-            if not self.db.connect():
-                logging.error("데이터베이스 연결 실패")
-                return False
-            
             technical_insert_sql = """
             INSERT INTO technical_indicators 
             (stock_code, trade_date, ma5, ma20, ma60, ma120, rsi, macd, macd_signal, macd_histogram, bb_upper, bb_middle, bb_lower)
@@ -178,18 +214,23 @@ class TechnicalIndicatorsRecollector:
                     bb_upper, bb_middle, bb_lower
                 ))
             
-            if self.db.execute_many(technical_insert_sql, technical_data):
-                logging.info(f"✅ {stock_code} 기술적 지표 {len(technical_data)}개 저장 완료")
-                return True
-            else:
-                logging.error(f"❌ {stock_code} 기술적 지표 저장 실패")
-                return False
+            # 500개씩 나눠서 INSERT (최적화)
+            chunk_size = 500
+            total_saved = 0
+            for i in range(0, len(technical_data), chunk_size):
+                chunk = technical_data[i:i + chunk_size]
+                if self.db.execute_many(technical_insert_sql, chunk):
+                    total_saved += len(chunk)
+                else:
+                    logging.error(f"❌ {stock_code} 기술적 지표 청크 저장 실패 (시작: {i})")
+                    return False
+            
+            logging.info(f"✅ {stock_code} 기술적 지표 {total_saved}개 저장 완료")
+            return True
                 
         except Exception as e:
             logging.error(f"❌ {stock_code} 기술적 지표 저장 중 오류: {e}")
             return False
-        finally:
-            self.db.disconnect()
     
     def process_single_stock(self, stock_code: str, stock_name: str) -> bool:
         """단일 종목의 보조지표 재수집"""
@@ -260,24 +301,53 @@ class TechnicalIndicatorsRecollector:
             logging.info(f"🚀 배치 {batch_num}/{total_batches} 시작 ({len(stock_batch)}개 종목)")
             logging.info("="*60)
             
+            # ✅ 배치 시작 시 DB 연결 (한 번만) [최적화]
+            if not self.db.connect():
+                logging.error(f"❌ 배치 {batch_num} DB 연결 실패")
+                total_failed += len(stock_batch)
+                continue
+            
             batch_success = 0
             batch_failed = 0
+            
+            # ✅ 배치 전체 종목의 데이터를 한 번에 조회 [최적화]
+            stock_codes_only = [code for code, name in stock_batch]
+            logging.info(f"🔍 배치 {batch_num}: {len(stock_codes_only)}개 종목 데이터 일괄 조회 중...")
+            batch_data_dict = self.get_batch_daily_data(stock_codes_only)
             
             for i, (stock_code, stock_name) in enumerate(stock_batch, 1):
                 logging.info(f"📊 [{i}/{len(stock_batch)}] {stock_code} ({stock_name}) 처리 중...")
                 
                 try:
-                    if self.process_single_stock(stock_code, stock_name):
-                        batch_success += 1
+                    # 미리 조회한 데이터 사용
+                    if stock_code in batch_data_dict:
+                        daily_data = batch_data_dict[stock_code]
+                        if daily_data is not None and not daily_data.empty:
+                            # 기술적 지표 계산
+                            df_with_indicators = self.calculate_technical_indicators(daily_data.copy())
+                            # 기술적 지표 저장
+                            if self.save_technical_indicators_fixed(stock_code, df_with_indicators):
+                                logging.info(f"✅ {stock_code} ({stock_name}) 보조지표 재수집 완료")
+                                batch_success += 1
+                            else:
+                                logging.error(f"❌ {stock_code} ({stock_name}) 보조지표 저장 실패")
+                                batch_failed += 1
+                        else:
+                            logging.warning(f"⚠️ {stock_code} ({stock_name}): 일봉 데이터가 비어있음")
+                            batch_failed += 1
                     else:
+                        logging.warning(f"⚠️ {stock_code} ({stock_name}): 배치 조회 결과에 없음")
                         batch_failed += 1
                     
-                    # API 호출 간격 조절
-                    time.sleep(self.delay_between_requests + random.uniform(0.05, 0.15))
+                    # ✅ 딜레이 제거 (DB 작업이므로 불필요) [최적화]
+                    # time.sleep 제거
                     
                 except Exception as e:
                     logging.error(f"❌ {stock_code} ({stock_name}) 처리 중 오류: {e}")
                     batch_failed += 1
+            
+            # ✅ 배치 종료 시 DB 연결 해제 (한 번만) [최적화]
+            self.db.disconnect()
             
             total_success += batch_success
             total_failed += batch_failed
@@ -286,10 +356,10 @@ class TechnicalIndicatorsRecollector:
             logging.info(f"✅ 성공: {batch_success}개, ❌ 실패: {batch_failed}개")
             logging.info("="*60)
             
-            # 배치 간 딜레이
+            # ✅ 배치 간 딜레이 단축 (2초 → 0.5초) [최적화]
             if batch_num < total_batches:
-                logging.info(f"⏳ 다음 배치까지 2초 대기...")
-                time.sleep(2)
+                logging.info(f"⏳ 다음 배치까지 0.5초 대기...")
+                time.sleep(0.5)
         
         logging.info(f"\n🎉 전체 보조지표 재수집 완료!")
         logging.info(f"✅ 총 성공: {total_success}개")

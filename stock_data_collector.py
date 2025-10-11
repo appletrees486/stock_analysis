@@ -47,11 +47,11 @@ class StockDataCollector:
         self.db = DatabaseManager()
         self.market_detector = MarketStatusDetector()  # 시장 상태 감지기
         self.data_validator = EnhancedDataValidator()  # 데이터 검증기
-        self.batch_size = 150  # 배치 크기를 150으로 증가 (속도 개선)
-        self.delay_between_requests = 0.05  # 요청 간 딜레이 최적화 (0.1초 → 0.05초)
-        self.max_retries = 3  # 최대 재시도 횟수
-        self.max_workers = 5  # 병렬 처리 워커 수를 5로 조정 (DB 연결 안정성)
-        self.batch_delay = 2  # 배치 간 딜레이 감소 (10초 → 2초)
+        self.batch_size = 200  # 배치 크기 증가 (안정성 유지) [최적화]
+        self.delay_between_requests = 0.03  # 요청 간 딜레이 (30ms - 속도와 안정성 균형) [최적화]
+        self.max_retries = 5  # 최대 재시도 횟수 (100% 수집 목표) [최적화]
+        self.max_workers = 8  # 병렬 처리 워커 수 증가 (속도 개선) [최적화]
+        self.batch_delay = 1  # 배치 간 딜레이 (1초 - 속도 개선) [최적화]
         self._db_lock = threading.Lock()  # DB 연결 동기화용 락
         
         # 유통주식수 배치 조회 최적화를 위한 캐시
@@ -510,8 +510,8 @@ class StockDataCollector:
             
             # 종료일 (오늘)
             end_date = datetime.now()
-            # 시작일 (years년 전 해당 월의 1일)
-            start_date = datetime(end_date.year - years, end_date.month, 1)
+            # 시작일 고정: 2015-08-03 (전체 재수집 기준일)
+            start_date = datetime(2015, 8, 3)
             
             # PyKrx로 데이터 조회 (거래대금 포함 - adjusted=False 옵션 사용)
             try:
@@ -561,54 +561,49 @@ class StockDataCollector:
             except Exception as e:
                 logging.warning(f"⚠️ {stock_code} ({stock_name}): PyKrx 개별 종목 조회 실패: {e}")
             
-            # 2차 시도: 개별 종목 데이터 재시도 (PyKrx의 권장 방식)
+            # 2차 시도: 짧은 기간 (3개월)으로 시도
             try:
-                logging.info(f"🔄 {stock_code} ({stock_name}): 개별 종목 데이터 재시도...")
+                logging.info(f"🔄 {stock_code} ({stock_name}): 짧은 기간 (3개월)으로 재시도...")
                 
-                # 개별 종목 데이터 조회 (PyKrx의 권장 방식)
+                # 3개월 데이터로 재시도
+                short_start = end_date - timedelta(days=90)
                 market_data = stock.get_market_ohlcv_by_date(
-                    fromdate=start_date.strftime('%Y%m%d'),
+                    fromdate=short_start.strftime('%Y%m%d'),
                     todate=end_date.strftime('%Y%m%d'),
                     ticker=stock_code,
-                    adjusted=False  # 거래대금 포함을 위해 False로 설정
+                    adjusted=False
                 )
                 
                 if not market_data.empty:
-                    # PyKrx 응답 구조에 맞춰 컬럼명 매핑 (거래대금 포함)
+                    # PyKrx 응답 구조에 맞춰 컬럼명 매핑
                     if len(market_data.columns) == 7:
                         market_data.columns = ['Open', 'High', 'Low', 'Close', 'Volume', 'Trading_Value', 'Change_Rate']
                         market_data = market_data.drop('Change_Rate', axis=1)
                     elif len(market_data.columns) == 6:
                         market_data.columns = ['Open', 'High', 'Low', 'Close', 'Volume', 'Change_Rate']
                         market_data = market_data.drop('Change_Rate', axis=1)
-                        # 거래대금 계산 (거래량 × 종가)
                         market_data['Trading_Value'] = market_data['Volume'] * market_data['Close']
-                        logging.info(f"📊 {stock_code}: 거래대금 계산 완료 (거래량 × 종가)")
                     elif len(market_data.columns) == 5:
                         market_data.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-                        # 거래대금 계산 (거래량 × 종가)
                         market_data['Trading_Value'] = market_data['Volume'] * market_data['Close']
-                        logging.info(f"📊 {stock_code}: 거래대금 계산 완료 (거래량 × 종가)")
                     else:
                         market_data.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-                        # 거래대금 계산 (거래량 × 종가)
                         market_data['Trading_Value'] = market_data['Volume'] * market_data['Close']
-                        logging.info(f"📊 {stock_code}: 거래대금 계산 완료 (거래량 × 종가)")
                     
-                    logging.info(f"✅ {stock_code} ({stock_name}): 개별 종목 데이터 재시도 성공")
+                    logging.info(f"✅ {stock_code} ({stock_name}): 짧은 기간 데이터 조회 성공 (3개월)")
                     return market_data
                 else:
-                    logging.warning(f"⚠️ {stock_code} ({stock_name}): 개별 종목 데이터 재시도에서 데이터를 찾을 수 없습니다")
+                    logging.warning(f"⚠️ {stock_code} ({stock_name}): 짧은 기간 데이터 조회에서 데이터를 찾을 수 없습니다")
                     
             except Exception as e2:
-                logging.warning(f"⚠️ {stock_code} ({stock_name}): 개별 종목 데이터 재시도 실패: {e2}")
+                logging.warning(f"⚠️ {stock_code} ({stock_name}): 짧은 기간 데이터 조회 실패: {e2}")
             
-            # 3차 시도: 더 짧은 기간으로 시도
+            # 3차 시도: 12개월 기간으로 시도
             try:
-                logging.info(f"🔄 {stock_code} ({stock_name}): 짧은 기간으로 재시도...")
+                logging.info(f"🔄 {stock_code} ({stock_name}): 12개월 기간으로 재시도...")
                 
-                # 1년, 6개월, 3개월 순으로 시도
-                for period_months in [12, 6, 3]:
+                # 12개월만 시도 (단순화)
+                for period_months in [12]:
                     try:
                         period_start = end_date - timedelta(days=period_months * 30)
                         
@@ -712,45 +707,40 @@ class StockDataCollector:
             except Exception as e:
                 logging.warning(f"⚠️ {stock_code} ({stock_name}): PyKrx 개별 종목 증분 조회 실패: {e}")
             
-            # 2차 시도: 개별 종목 증분 데이터 재시도 (PyKrx의 권장 방식)
+            # 2차 시도: 짧은 기간 (3개월)으로 재시도
             try:
-                logging.info(f"🔄 {stock_code} ({stock_name}): 개별 종목 증분 데이터 재시도...")
+                logging.info(f"🔄 {stock_code} ({stock_name}): 짧은 기간 (3개월)으로 재시도...")
                 
-                # 개별 종목 증분 데이터 조회 (PyKrx의 권장 방식)
+                # 3개월 데이터로 재시도
+                short_start = end_date - timedelta(days=90)
                 market_data = stock.get_market_ohlcv_by_date(
-                    fromdate=start_date_obj.strftime('%Y%m%d'),
+                    fromdate=short_start.strftime('%Y%m%d'),
                     todate=end_date.strftime('%Y%m%d'),
                     ticker=stock_code,
-                    adjusted=False  # 거래대금 포함을 위해 False로 설정
+                    adjusted=False
                 )
                 
                 if not market_data.empty:
-                    # PyKrx 응답 구조에 맞춰 컬럼명 매핑 (거래대금 포함)
+                    # PyKrx 응답 구조에 맞춰 컬럼명 매핑
                     if len(market_data.columns) == 7:
                         market_data.columns = ['Open', 'High', 'Low', 'Close', 'Volume', 'Trading_Value', 'Change_Rate']
                         market_data = market_data.drop('Change_Rate', axis=1)
                     elif len(market_data.columns) == 6:
                         market_data.columns = ['Open', 'High', 'Low', 'Close', 'Volume', 'Change_Rate']
                         market_data = market_data.drop('Change_Rate', axis=1)
-                        # 거래대금 계산 (거래량 × 종가)
                         market_data['Trading_Value'] = market_data['Volume'] * market_data['Close']
-                        logging.info(f"📊 {stock_code}: 거래대금 계산 완료 (거래량 × 종가)")
                     elif len(market_data.columns) == 5:
                         market_data.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-                        # 거래대금 계산 (거래량 × 종가)
                         market_data['Trading_Value'] = market_data['Volume'] * market_data['Close']
-                        logging.info(f"📊 {stock_code}: 거래대금 계산 완료 (거래량 × 종가)")
                     else:
                         market_data.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-                        # 거래대금 계산 (거래량 × 종가)
                         market_data['Trading_Value'] = market_data['Volume'] * market_data['Close']
-                        logging.info(f"📊 {stock_code}: 거래대금 계산 완료 (거래량 × 종가)")
                     
-                    logging.info(f"✅ {stock_code} ({stock_name}): 개별 종목 증분 데이터 재시도 성공")
+                    logging.info(f"✅ {stock_code} ({stock_name}): 짧은 기간 데이터 조회 성공 (3개월)")
                     return market_data
                     
             except Exception as e2:
-                logging.warning(f"⚠️ {stock_code} ({stock_name}): 개별 종목 증분 데이터 재시도 실패: {e2}")
+                logging.warning(f"⚠️ {stock_code} ({stock_name}): 짧은 기간 데이터 조회 실패: {e2}")
             
             logging.warning(f"⚠️ {stock_code} ({stock_name}): 모든 PyKrx 증분 데이터 조회 방법 실패")
             return None
@@ -1168,33 +1158,58 @@ class StockDataCollector:
             return False
 
     def process_single_stock(self, stock_info):
-        """단일 종목 처리 (병렬 처리용) - 일봉 데이터 + 유통주식수 통합 수집"""
+        """단일 종목 처리 (병렬 처리용) - 스마트 재시도 + 다중 소스 폴백"""
         stock_code, stock_name = stock_info
-        max_retries = 2  # 최대 재시도 횟수
+        max_retries = self.max_retries
         
         for attempt in range(max_retries + 1):
             try:
                 if attempt > 0:
-                    logging.info(f"🔄 {stock_code} ({stock_name}) 재시도 {attempt}/{max_retries}...")
-                    time.sleep(1)  # 재시도 전 잠시 대기
+                    # 지수적 백오프: 1초 → 2초 → 4초 → 8초 → 16초 → 32초 → 60초
+                    wait_time = min(2 ** attempt, 60)
+                    jitter = random.uniform(0, wait_time * 0.2)  # 지터 추가
+                    total_wait = wait_time + jitter
+                    
+                    logging.info(f"🔄 {stock_code} ({stock_name}) 재시도 {attempt}/{max_retries} ({total_wait:.1f}초 대기)...")
+                    time.sleep(total_wait)
                 
                 logging.info(f"📊 {stock_code} ({stock_name}) 처리 중... (시도 {attempt + 1}/{max_retries + 1})")
                 
                 # 통합 수집 메서드 사용 (일봉 데이터 + 유통주식수)
                 if self.collect_stock_data_with_shares(stock_code, stock_name):
-                    logging.info(f"✅ {stock_code} ({stock_name}) 데이터 + 유통주식수 수집 완료")
+                    logging.info(f"✅ {stock_code} ({stock_name}) 데이터 수집 완료")
+                    if attempt > 0:
+                        logging.info(f"💡 재시도로 성공: {attempt}회 시도")
                     return True, stock_code
                 else:
-                    logging.error(f"❌ {stock_code} ({stock_name}) 통합 수집 실패")
+                    logging.error(f"❌ {stock_code} ({stock_name}) 수집 실패")
                     if attempt < max_retries:
                         continue  # 재시도
                     return False, stock_code
                     
             except Exception as e:
-                logging.error(f"{stock_code} ({stock_name}) 처리 중 오류 (시도 {attempt + 1}/{max_retries + 1}): {e}")
+                error_msg = str(e)
+                logging.error(f"❌ {stock_code} ({stock_name}) 처리 중 오류 (시도 {attempt + 1}): {e}")
+                
+                # 스마트 재시도: 오류 유형 분석 및 대응
                 if attempt < max_retries:
-                    continue  # 재시도
-                return False, stock_code
+                    action, delay = self._analyze_and_adapt_error(stock_code, error_msg)
+                    
+                    if action == 'skip':
+                        logging.info(f"⏭️ {stock_code} 건너뛰기 (상장폐지)")
+                        return False, stock_code
+                    elif action in ['retry_immediate', 'retry_short', 'retry_long']:
+                        time.sleep(delay)
+                        continue
+                    elif action == 'try_alternative':
+                        # 대체 소스 시도
+                        if self._try_alternative_sources(stock_code, stock_name):
+                            logging.info(f"✅ {stock_code} 대체 소스로 수집 완료")
+                            return True, stock_code
+                        continue
+                
+                if attempt >= max_retries:
+                    return False, stock_code
             finally:
                 # DB 연결은 배치 단위로 관리하므로 여기서는 해제하지 않음
                 pass
@@ -1202,6 +1217,92 @@ class StockDataCollector:
         # 모든 재시도 실패
         logging.error(f"❌ {stock_code} ({stock_name}): 최대 재시도 횟수 초과")
         return False, stock_code
+    
+    def _analyze_and_adapt_error(self, stock_code, error_msg):
+        """오류 분석 및 자동 대응 전략 결정"""
+        error_lower = error_msg.lower()
+        
+        # 네트워크 오류 → 즉시 재시도
+        if any(keyword in error_lower for keyword in ['network', 'timeout', 'connection']):
+            logging.info(f"🔍 {stock_code}: 네트워크 오류 감지 → 즉시 재시도")
+            return 'retry_immediate', 2
+        
+        # API 제한 → 긴 대기 후 재시도
+        elif any(keyword in error_lower for keyword in ['rate limit', '429', 'too many']):
+            logging.warning(f"⚠️ {stock_code}: API 제한 감지 → 60초 대기")
+            self.delay_between_requests = min(self.delay_between_requests * 1.5, 0.15)
+            return 'retry_long', 60
+        
+        # 데이터 없음 → 대체 소스 시도
+        elif any(keyword in error_lower for keyword in ['404', 'not found', 'no data']):
+            logging.info(f"🔍 {stock_code}: 데이터 없음 → 대체 소스 시도")
+            return 'try_alternative', 0
+        
+        # 상장폐지 → 건너뛰기
+        elif any(keyword in error_lower for keyword in ['delisted', '상장폐지', '거래정지']):
+            logging.info(f"ℹ️ {stock_code}: 상장폐지 종목")
+            return 'skip', 0
+        
+        # API 오류 → 대기 후 재시도
+        elif any(keyword in error_lower for keyword in ['api error', '500', '503']):
+            logging.warning(f"⚠️ {stock_code}: API 오류 → 30초 대기")
+            return 'retry_long', 30
+        
+        # 일시적 오류 → 짧은 대기 후 재시도
+        elif any(keyword in error_lower for keyword in ['temporary', 'retry']):
+            logging.info(f"🔍 {stock_code}: 일시적 오류 → 5초 대기")
+            return 'retry_short', 5
+        
+        # 기타 오류 → 일반 재시도
+        else:
+            logging.info(f"🔍 {stock_code}: 일반 오류 → 5초 대기")
+            return 'retry_short', 5
+    
+    def _try_alternative_sources(self, stock_code, stock_name):
+        """다중 소스 폴백: PyKrx 실패 시 대체 소스 시도"""
+        try:
+            # 1순위: FinanceDataReader 시도
+            try:
+                logging.info(f"📊 {stock_code}: FinanceDataReader 시도...")
+                import FinanceDataReader as fdr
+                from datetime import timedelta
+                
+                data = fdr.DataReader(stock_code, datetime.now() - timedelta(days=3650))
+                if data is not None and not data.empty:
+                    # 컬럼명 통일 및 거래대금 계산
+                    if 'Close' in data.columns:
+                        data['Trading_Value'] = data.get('Volume', 0) * data['Close']
+                        # 데이터 저장
+                        if self.save_daily_data(stock_code, data):
+                            logging.info(f"✅ {stock_code}: FinanceDataReader 성공!")
+                            return True
+            except Exception as e:
+                logging.debug(f"FinanceDataReader 실패: {e}")
+            
+            # 2순위: Yahoo Finance 시도
+            try:
+                logging.info(f"📊 {stock_code}: Yahoo Finance 시도...")
+                import yfinance as yf
+                
+                for ticker in [f"{stock_code}.KS", f"{stock_code}.KQ"]:
+                    try:
+                        data = yf.download(ticker, period="10y", progress=False)
+                        if data is not None and not data.empty:
+                            data['Trading_Value'] = data.get('Volume', 0) * data['Close']
+                            # 데이터 저장
+                            if self.save_daily_data(stock_code, data):
+                                logging.info(f"✅ {stock_code}: Yahoo Finance 성공! ({ticker})")
+                                return True
+                    except:
+                        continue
+            except Exception as e:
+                logging.debug(f"Yahoo Finance 실패: {e}")
+            
+            return False
+            
+        except Exception as e:
+            logging.error(f"❌ {stock_code}: 대체 소스 시도 중 오류: {e}")
+            return False
 
     def process_batch_parallel(self, stock_batch, batch_num, total_batches):
         """배치 단위로 종목을 병렬 처리"""
@@ -1270,7 +1371,7 @@ class StockDataCollector:
                     failed_count += 1
                 
                 # API 호출 간격 조절 (랜덤 딜레이로 API 제한 방지)
-                delay = self.delay_between_requests + random.uniform(0.02, 0.1)
+                delay = self.delay_between_requests + random.uniform(0.01, 0.03)
                 time.sleep(delay)
                 
             except Exception as e:
@@ -1384,18 +1485,19 @@ class StockDataCollector:
                             failed_count += 1
                             logging.error(f"❌ {stock_code} ({stock_name}) 데이터 준비 실패 (빈 데이터)")
                     elif hist_data is None:
-                        # 이미 최신 데이터이거나 데이터가 없는 경우
+                        # 이미 최신 데이터이거나 데이터가 없는 경우 - 즉시 건너뛰기 (딜레이 없음)
                         if i % 10 == 0 or i == 1:
-                            logging.info(f"✅ {stock_code} ({stock_name}) 이미 최신 데이터이거나 수집할 데이터가 없습니다.")
+                            logging.info(f"✅ {stock_code} ({stock_name}) 이미 최신 데이터이거나 수집할 데이터가 없습니다. (즉시 건너뛰기)")
                         else:
-                            logging.debug(f"✅ {stock_code} ({stock_name}) 이미 최신 데이터이거나 수집할 데이터가 없습니다.")
+                            logging.debug(f"✅ {stock_code} ({stock_name}) 이미 최신 데이터 (즉시 건너뛰기)")
                         success_count += 1
+                        continue  # 즉시 다음 종목으로 (time.sleep 없음)
                     else:
                         logging.warning(f"❌ {stock_code} ({stock_name}) 데이터 조회 실패")
                         failed_count += 1
                     
                     # API 호출 간격 조절 (랜덤 딜레이로 API 제한 방지)
-                    delay = self.delay_between_requests + random.uniform(0.02, 0.1)
+                    delay = self.delay_between_requests + random.uniform(0.01, 0.03)
                     time.sleep(delay)
                     
                     # DB 연결 상태 주기적 확인 (10개 종목마다)
@@ -1714,19 +1816,55 @@ class StockDataCollector:
             updated_at = CURRENT_TIMESTAMP
             """
             
-            logging.info(f"💾 데이터베이스에 저장 중... (SQL: {daily_insert_sql[:100]}...)")
-            logging.info(f"💾 저장할 데이터 개수: {len(valid_data)}개")
+            logging.info(f"💾 일봉 데이터 {len(valid_data):,}개를 청크 단위로 저장 시작...")
             logging.info(f"💾 DB 연결 상태: {self.db.is_connected()}")
             
-            result = self.db.execute_many(daily_insert_sql, valid_data)
-            logging.info(f"💾 execute_many 결과: {result}")
+            # 🚀 청크 단위로 분할 저장 (1,000개씩)
+            chunk_size = 1000
+            total_chunks = (len(valid_data) + chunk_size - 1) // chunk_size
+            saved_count = 0
+            failed_count = 0
             
-            if result:
-                logging.info(f"✅ 배치 일봉 데이터 {len(valid_data)}개 저장 성공")
+            for i in range(0, len(valid_data), chunk_size):
+                chunk = valid_data[i:i+chunk_size]
+                chunk_num = (i // chunk_size) + 1
+                
+                try:
+                    # DB 연결 확인
+                    if not self.db.is_connected():
+                        logging.warning(f"⚠️ 일봉 데이터 청크 {chunk_num}/{total_chunks} 저장 전 DB 재연결 시도...")
+                        if not self.db.connect():
+                            logging.error(f"❌ 일봉 데이터 청크 {chunk_num}/{total_chunks} DB 재연결 실패")
+                            failed_count += len(chunk)
+                            continue
+                    
+                    # 청크 저장 시도
+                    result = self.db.execute_many(daily_insert_sql, chunk)
+                    if result:
+                        saved_count += len(chunk)
+                        if chunk_num % 10 == 0 or chunk_num == total_chunks:  # 10개마다 또는 마지막
+                            logging.info(f"✅ 일봉 데이터 청크 {chunk_num}/{total_chunks} 저장 완료 ({len(chunk):,}개)")
+                    else:
+                        logging.error(f"❌ 일봉 데이터 청크 {chunk_num}/{total_chunks} 저장 실패")
+                        failed_count += len(chunk)
+                        
+                except Exception as chunk_e:
+                    logging.error(f"❌ 일봉 데이터 청크 {chunk_num}/{total_chunks} 저장 중 예외: {chunk_e}")
+                    failed_count += len(chunk)
+                    
+                    # MySQL 연결 오류 시 재연결
+                    if "lost connection" in str(chunk_e).lower() or "gone away" in str(chunk_e).lower():
+                        logging.warning("🔄 MySQL 연결 끊김 감지, 재연결 시도...")
+                        self.db.connect()
+                        time.sleep(2)
+            
+            # 최종 결과
+            success = (failed_count == 0)
+            if success:
+                logging.info(f"✅ 배치 일봉 데이터 전체 저장 성공: {saved_count:,}개")
                 
                 # 저장 후 데이터베이스에서 확인
                 try:
-                    # 저장된 데이터 중 일부를 조회하여 확인
                     sample_stock_code = valid_data[0][0] if valid_data else None
                     if sample_stock_code:
                         count_query = "SELECT COUNT(*) as count FROM daily_data WHERE stock_code = %s"
@@ -1736,9 +1874,9 @@ class StockDataCollector:
                 except Exception as e:
                     logging.warning(f"⚠️ 저장 확인 중 오류: {e}")
             else:
-                logging.error(f"❌ 배치 일봉 데이터 저장 실패")
+                logging.error(f"⚠️ 배치 일봉 데이터 부분 저장: 성공 {saved_count:,}개, 실패 {failed_count:,}개")
             
-            return result
+            return success
             
         except Exception as e:
             logging.error(f"❌ 배치 일봉 데이터 저장 중 예외 발생: {e}")
@@ -1747,7 +1885,7 @@ class StockDataCollector:
             return False
     
     def save_batch_technical_indicators(self, batch_technical_data):
-        """배치 단위로 기술적 지표 저장 - 오류 처리 강화 (NULL 값 허용)"""
+        """배치 단위로 기술적 지표 저장 - 청크 분할 저장 (MySQL 연결 끊김 방지)"""
         try:
             if not batch_technical_data:
                 logging.info("📝 배치 기술적 지표 데이터가 없습니다.")
@@ -1766,6 +1904,8 @@ class StockDataCollector:
                 logging.error("❌ 유효한 기술적 지표 데이터가 없습니다.")
                 return False
             
+            logging.info(f"💾 기술적 지표 {len(valid_data):,}개를 청크 단위로 저장 시작...")
+            
             technical_insert_sql = """
             INSERT INTO technical_indicators 
             (stock_code, trade_date, ma5, ma20, ma60, ma120, rsi, macd, macd_signal, macd_histogram, bb_upper, bb_middle, bb_lower)
@@ -1777,16 +1917,58 @@ class StockDataCollector:
             updated_at = CURRENT_TIMESTAMP
             """
             
-            result = self.db.execute_many(technical_insert_sql, valid_data)
-            if result:
-                logging.info(f"✅ 배치 기술적 지표 {len(valid_data)}개 저장 성공")
-            else:
-                logging.error(f"❌ 배치 기술적 지표 저장 실패")
+            # 🚀 청크 단위로 분할 저장 (1,000개씩)
+            chunk_size = 1000
+            total_chunks = (len(valid_data) + chunk_size - 1) // chunk_size
+            saved_count = 0
+            failed_count = 0
             
-            return result
+            for i in range(0, len(valid_data), chunk_size):
+                chunk = valid_data[i:i+chunk_size]
+                chunk_num = (i // chunk_size) + 1
+                
+                try:
+                    # DB 연결 확인
+                    if not self.db.is_connected():
+                        logging.warning(f"⚠️ 기술적 지표 청크 {chunk_num}/{total_chunks} 저장 전 DB 재연결 시도...")
+                        if not self.db.connect():
+                            logging.error(f"❌ 기술적 지표 청크 {chunk_num}/{total_chunks} DB 재연결 실패")
+                            failed_count += len(chunk)
+                            continue
+                    
+                    # 청크 저장 시도
+                    result = self.db.execute_many(technical_insert_sql, chunk)
+                    if result:
+                        saved_count += len(chunk)
+                        if chunk_num % 10 == 0 or chunk_num == total_chunks:  # 10개마다 또는 마지막
+                            logging.info(f"✅ 기술적 지표 청크 {chunk_num}/{total_chunks} 저장 완료 ({len(chunk):,}개)")
+                    else:
+                        logging.error(f"❌ 기술적 지표 청크 {chunk_num}/{total_chunks} 저장 실패")
+                        failed_count += len(chunk)
+                        
+                except Exception as chunk_e:
+                    logging.error(f"❌ 기술적 지표 청크 {chunk_num}/{total_chunks} 저장 중 예외: {chunk_e}")
+                    failed_count += len(chunk)
+                    
+                    # MySQL 연결 오류 시 재연결
+                    if "lost connection" in str(chunk_e).lower() or "gone away" in str(chunk_e).lower():
+                        logging.warning("🔄 MySQL 연결 끊김 감지, 재연결 시도...")
+                        self.db.connect()
+                        time.sleep(2)
+            
+            # 최종 결과
+            success = (failed_count == 0)
+            if success:
+                logging.info(f"✅ 배치 기술적 지표 전체 저장 성공: {saved_count:,}개")
+            else:
+                logging.error(f"⚠️ 배치 기술적 지표 부분 저장: 성공 {saved_count:,}개, 실패 {failed_count:,}개")
+            
+            return success
             
         except Exception as e:
             logging.error(f"❌ 배치 기술적 지표 저장 중 예외 발생: {e}")
+            import traceback
+            logging.error(f"상세 오류: {traceback.format_exc()}")
             return False
     
     def save_batch_collection_status(self, batch_status_data):

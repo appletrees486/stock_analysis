@@ -911,12 +911,11 @@ def analyze_stock_data(hist, stock_code):
     detect_special_signals(df_with_indicators, stock_code)
 
 def create_stock_chart(hist, stock_code):
-    """주식 일봉 차트 생성 (캔들차트 + 보조지표) - test_overlay_chart.py 스타일 적용"""
+    """주식 일봉 차트 생성 (캔들차트 + 보조지표) - 공백 없는 연속 차트"""
     if hist is None or hist.empty:
         return None
     
-    print(f"\n📈 일봉 캔들차트를 생성합니다...")
-    print(f"🔍 create_stock_chart 함수 호출됨 - 추가 정보 수집 예정")
+    print(f"\n📈 공백 없는 일봉 캔들차트를 생성합니다...")
     
     # 기술적 지표 계산
     try:
@@ -927,6 +926,11 @@ def create_stock_chart(hist, stock_code):
         import traceback
         traceback.print_exc()
         return None
+    
+    # 🔧 핵심 수정: 연속적인 숫자 인덱스로 변경 (공백 제거)
+    # 날짜 인덱스를 0, 1, 2, 3... 형태로 변경
+    df_reset = df.reset_index(drop=True)
+    df_reset.index = range(len(df_reset))
     
     # 차트 생성 (4개 패널: 메인차트, 거래량, RSI, MACD)
     fig, axes = plt.subplots(4, 1, figsize=(12, 13), height_ratios=[5, 2, 2, 2])
@@ -945,22 +949,21 @@ def create_stock_chart(hist, stock_code):
         # 실패시 기본값 사용
         pass
     
-    #fig.suptitle(f'{stock_code} 일봉 차트 (6개월/120거래일) - 이미지 참고 스타일', fontsize=16, fontweight='bold')
-    fig.suptitle(f'{chart_stock_name} ({stock_code}) 일봉 차트 분석(6Months)', fontsize=16, fontweight='bold')
+    fig.suptitle(f'{chart_stock_name} ({stock_code}) 일봉 차트 분석(연속)', fontsize=16, fontweight='bold')
     
     # 1. 메인 차트 (캔들차트 + 보조지표 오버레이)
     ax1 = axes[0]
     
-    # 볼린저 밴드 영역 채우기 (이미지 참고 - 오렌지/베이지 스타일)
-    ax1.fill_between(df.index, df['BB_Upper'], df['BB_Lower'], 
+    # 볼린저 밴드 영역 채우기 (연속 인덱스 사용)
+    ax1.fill_between(df_reset.index, df_reset['BB_Upper'], df_reset['BB_Lower'], 
                      alpha=0.15, color='#FFE4B5', label='Bollinger Bands')
     
     # 볼린저 밴드 상단과 하단을 오렌지/베이지 색으로 표시 (범례에 표시하지 않음)
-    ax1.plot(df.index, df['BB_Upper'], color='#FFCE89', alpha=0.8, linewidth=1.5, label='_nolegend_', marker='None', linestyle='-')
-    ax1.plot(df.index, df['BB_Lower'], color='#FFCE89', alpha=0.8, linewidth=1.5, label='_nolegend_', marker='None', linestyle='-')
+    ax1.plot(df_reset.index, df_reset['BB_Upper'], color='#FFCE89', alpha=0.8, linewidth=1.5, label='_nolegend_', marker='None', linestyle='-')
+    ax1.plot(df_reset.index, df_reset['BB_Lower'], color='#FFCE89', alpha=0.8, linewidth=1.5, label='_nolegend_', marker='None', linestyle='-')
     
-    # 캔들차트 그리기 (이미지 참고 - 빨간색/파란색)
-    for date, row in df.iterrows():
+    # 캔들차트 그리기 (연속 인덱스 사용 - 공백 제거)
+    for i, (date, row) in enumerate(df.iterrows()):
         # 거래정지 기간 감지
         is_trading_suspension = detect_trading_suspension(row, df)
         
@@ -969,22 +972,22 @@ def create_stock_chart(hist, stock_code):
             # 아무것도 그리지 않음 - 거래정지 기간은 시각적으로 표시하지 않음
             pass
         else:
-            # 일반 거래일: 기존 캔들차트 방식
+            # 일반 거래일: 연속 인덱스 i 사용
             if row['Close'] >= row['Open']:  # 상승
                 color = '#FF4444'  # 빨간색
             else:  # 하락
                 color = '#4444FF'  # 파란색
             
-            ax1.plot([date, date], [row['Low'], row['High']], color=color, linewidth=1.0, marker='None', linestyle='-')
-            ax1.plot([date, date], [row['Open'], row['Close']], color=color, linewidth=3.0, marker='None', linestyle='-')
+            ax1.plot([i, i], [row['Low'], row['High']], color=color, linewidth=1.0, marker='None', linestyle='-')
+            ax1.plot([i, i], [row['Open'], row['Close']], color=color, linewidth=3.0, marker='None', linestyle='-')
     
-    # 이동평균선 추가 (웹 트레이딩 스타일 유지) - 일봉 차트 설정
-    ax1.plot(df.index, df['MA5'], color='#F59E0B', linewidth=2.0, alpha=0.9, label='5일선', marker='None', linestyle='-')      # 주황색
-    ax1.plot(df.index, df['MA20'], color='#8B5CF6', linewidth=2.0, alpha=0.9, label='20일선', marker='None', linestyle='-')    # 보라색
-    ax1.plot(df.index, df['MA60'], color='#06B6D4', linewidth=2.0, alpha=0.9, label='60일선', marker='None', linestyle='-')    # 청록색
-    ax1.plot(df.index, df['MA120'], color='#84CC16', linewidth=2.0, alpha=0.9, label='120일선', marker='None', linestyle='-')  # 연두색
-    ax1.plot(df.index, df['MA240'], color='#EF4444', linewidth=2.0, alpha=0.9, label='240일선', marker='None', linestyle='-')  # 빨간색
-    ax1.plot(df.index, df['EMA20'], color='#F97316', linewidth=2.0, alpha=0.9, label='20일 지수이동평균', marker='None', linestyle='-')  # 주황빨강색
+    # 이동평균선 추가 (연속 인덱스 사용)
+    ax1.plot(df_reset.index, df_reset['MA5'], color='#F59E0B', linewidth=2.0, alpha=0.9, label='5일선', marker='None', linestyle='-')      # 주황색
+    ax1.plot(df_reset.index, df_reset['MA20'], color='#8B5CF6', linewidth=2.0, alpha=0.9, label='20일선', marker='None', linestyle='-')    # 보라색
+    ax1.plot(df_reset.index, df_reset['MA60'], color='#06B6D4', linewidth=2.0, alpha=0.9, label='60일선', marker='None', linestyle='-')    # 청록색
+    ax1.plot(df_reset.index, df_reset['MA120'], color='#84CC16', linewidth=2.0, alpha=0.9, label='120일선', marker='None', linestyle='-')  # 연두색
+    ax1.plot(df_reset.index, df_reset['MA240'], color='#EF4444', linewidth=2.0, alpha=0.9, label='240일선', marker='None', linestyle='-')  # 빨간색
+    ax1.plot(df_reset.index, df_reset['EMA20'], color='#F97316', linewidth=2.0, alpha=0.9, label='20일 지수이동평균', marker='None', linestyle='-')  # 주황빨강색
     
     # 메인 차트 설정
     #ax1.set_title('볼린저 밴드와 이동평균선이 포함된 가격 차트', fontsize=14, fontweight='bold')
@@ -1025,9 +1028,9 @@ def create_stock_chart(hist, stock_code):
                 colors.append('#4444FF')  # 파란색
             volumes.append(row['Volume'])
     
-    ax2.bar(df.index, volumes, color=colors, alpha=0.7, width=0.8)
-    # 거래량 이동평균선 추가
-    ax2.plot(df.index, df['Volume_MA20'], color='#F59E0B', linewidth=2.0, alpha=0.9, label='거래량 MA20', marker='None', linestyle='-')
+    ax2.bar(df_reset.index, volumes, color=colors, alpha=0.7, width=0.8)
+    # 거래량 이동평균선 추가 (연속 인덱스 사용)
+    ax2.plot(df_reset.index, df_reset['Volume_MA20'], color='#F59E0B', linewidth=2.0, alpha=0.9, label='거래량 MA20', marker='None', linestyle='-')
     
     # 거래정지 기간은 시각적으로 표시하지 않으므로 범례도 제거
     # if has_suspension:
@@ -1043,46 +1046,42 @@ def create_stock_chart(hist, stock_code):
     ax2.yaxis.set_label_position('right')
     ax2.yaxis.tick_right()
     
-    # 3. RSI 차트 (세 번째 패널) - 웹 트레이딩 스타일 유지
+    # 3. RSI 차트 (세 번째 패널) - 연속 인덱스 사용
     ax3 = axes[2]
-    ax3.plot(df.index, df['RSI'], color='#8B5CF6', alpha=0.9, linewidth=2.0, label='RSI', marker='None', linestyle='-')
+    ax3.plot(df_reset.index, df_reset['RSI'], color='#8B5CF6', alpha=0.9, linewidth=2.0, label='RSI', marker='None', linestyle='-')
     ax3.axhline(y=80, color='#EF4444', linestyle='--', alpha=0.8, linewidth=1.5, label='과매수')
     ax3.axhline(y=40, color='#10B981', linestyle='--', alpha=0.8, linewidth=1.5, label='과매도')
     ax3.axhline(y=60, color='#6B7280', linestyle='-', alpha=0.6, linewidth=1.0)
     ax3.set_title('RSI (상대강도지수)', fontsize=12, fontweight='bold')
-    # ax3.set_ylabel('RSI', fontsize=10, fontweight='bold')  # 차트명 삭제
     ax3.set_ylim(0, 100)
-    ax3.legend(loc='upper left', fontsize=10, framealpha=0.9)  # 왼쪽 정렬로 변경
+    ax3.legend(loc='upper left', fontsize=10, framealpha=0.9)
     ax3.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
-    
-    # Y축을 오른쪽으로 이동
     ax3.yaxis.set_label_position('right')
     ax3.yaxis.tick_right()
     
-    # 4. MACD 차트 (네 번째 패널) - 웹 트레이딩 스타일 유지
+    # 4. MACD 차트 (네 번째 패널) - 연속 인덱스 사용
     ax4 = axes[3]
-    ax4.plot(df.index, df['MACD'], color='#3B82F6', linewidth=2.0, label='MACD', marker='None', linestyle='-')
-    ax4.plot(df.index, df['MACD_Signal'], color='#F59E0B', linewidth=2.0, label='시그널', marker='None', linestyle='-')
-    ax4.bar(df.index, df['MACD_Histogram'], color='#6B7280', alpha=0.6, width=0.8, label='히스토그램')
+    ax4.plot(df_reset.index, df_reset['MACD'], color='#3B82F6', linewidth=2.0, label='MACD', marker='None', linestyle='-')
+    ax4.plot(df_reset.index, df_reset['MACD_Signal'], color='#F59E0B', linewidth=2.0, label='시그널', marker='None', linestyle='-')
+    ax4.bar(df_reset.index, df_reset['MACD_Histogram'], color='#6B7280', alpha=0.6, width=0.8, label='히스토그램')
     ax4.axhline(y=0, color='#374151', linestyle='-', alpha=0.7, linewidth=1.0)
     ax4.set_title('MACD (12,26,9)', fontsize=12, fontweight='bold')
     ax4.legend(fontsize=10, framealpha=0.9)
     ax4.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
-    
-    # Y축을 오른쪽으로 이동
     ax4.yaxis.set_label_position('right')
     ax4.yaxis.tick_right()
     
-    # X축 날짜 설정 - 하단에만 표시 (스타일 변경: 글자 크기 50% 증가, 가로 표시)
+    # X축 날짜 설정 - 연속 인덱스 기반 날짜 표시
     for i, ax in enumerate(axes):
         if i == len(axes) - 1:  # 마지막 패널에만 날짜 표시
-            # 날짜 인덱스에서 적절한 간격으로 날짜 선택
-            date_indices = [df.index[0], df.index[len(df)//4], df.index[len(df)//2], 
-                           df.index[3*len(df)//4], df.index[-1]]
-            ax.set_xticks(date_indices)
-            # 글자 크기 50% 증가 (기본 10에서 15로), 대각선에서 가로로 변경 (rotation=0)
-            ax.set_xticklabels([date.strftime('%Y-%m') for date in date_indices], 
-                              rotation=0, ha='center', fontweight='bold', fontsize=15)
+            # 연속 인덱스에서 적절한 간격으로 선택
+            total_points = len(df_reset)
+            indices = [0, total_points//4, total_points//2, 3*total_points//4, total_points-1]
+            ax.set_xticks(indices)
+            
+            # 해당 인덱스의 실제 날짜로 라벨 생성
+            labels = [df.index[idx].strftime('%Y-%m') for idx in indices]
+            ax.set_xticklabels(labels, rotation=0, ha='center', fontweight='bold', fontsize=15)
         else:
             ax.set_xticks([])  # 다른 패널은 X축 눈금 숨김
     
