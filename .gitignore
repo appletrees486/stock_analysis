@@ -40,3 +40,12 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+
+# Analysis results and output files
+ai_analysis_results/
+results/*.zip
+daily_charts/
+weekly_charts/
+monthly_charts/
+chart_data_json/
+chart_data_text/
