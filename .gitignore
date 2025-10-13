@@ -1,4 +1,6 @@
-# Gmail configuration files with sensitive information
+# Configuration files with sensitive information
+config.txt
+database_config.txt
 gmail_config.py
 gmail_config.txt
 gmail_sender.py
