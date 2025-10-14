@@ -109,7 +109,7 @@ class BatchAnalyzer:
             
             # 배치로 종목명 조회 (성능 최적화)
             from batch_stock_analyzer_optimized import get_stock_names_batch
-            print(f"🔍 종목명 배치 조회 중...")
+            print(f"[INFO] 종목명 배치 조회 중...")
             stock_names_cache = get_stock_names_batch(stock_codes)
             
             pass  # 대량 분석 시작

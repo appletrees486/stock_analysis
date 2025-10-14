@@ -264,6 +264,55 @@ class BatchScheduler:
         finally:
             self.db.disconnect()
     
+    def _update_collection_completed_flag(self, job_id: int):
+        """수집 완료 플래그 업데이트 (자동 분석 트리거용)"""
+        try:
+            if not self.db.connect():
+                logger.error("DB 연결 실패")
+                return
+            
+            # job_id로 스케줄 찾기
+            find_schedule_query = """
+            SELECT id FROM batch_schedules 
+            WHERE last_job_id = %s 
+            AND is_active = TRUE
+            AND job_type = 'DAILY_COLLECTION'
+            ORDER BY id DESC
+            LIMIT 1
+            """
+            
+            schedule = self.db.fetch_one(find_schedule_query, (job_id,))
+            
+            if not schedule:
+                logger.warning(f"Job ID {job_id}에 해당하는 활성 스케줄을 찾을 수 없습니다.")
+                return
+            
+            schedule_id = schedule['id']
+            
+            # 수집 완료 플래그 업데이트
+            update_query = """
+            UPDATE batch_schedules 
+            SET collection_completed = TRUE, 
+                collection_completed_at = %s,
+                updated_at = %s
+            WHERE id = %s
+            """
+            
+            params = (datetime.now(), datetime.now(), schedule_id)
+            
+            if self.db.execute_query(update_query, params):
+                logger.info(f"✅ 수집 완료 플래그 업데이트: Schedule ID={schedule_id}, Job ID={job_id}")
+                logger.info(f"   → auto_analysis_trigger가 랭킹 추출을 시작합니다.")
+            else:
+                logger.error(f"수집 완료 플래그 업데이트 실패: Schedule ID={schedule_id}")
+            
+        except Exception as e:
+            logger.error(f"수집 완료 플래그 업데이트 중 오류: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+        finally:
+            self.db.disconnect()
+    
     def _run_daily_collection(self, job_id: int, job_config: Dict):
         """일일 시세 수집 실행"""
         try:
@@ -300,6 +349,10 @@ class BatchScheduler:
             if success_count > 0:
                 self.job_manager.complete_job(job_id, True)
                 logger.info(f"✅ 일일 시세 수집 완료: Job ID={job_id}, 성공={success_count}, 실패={failed_count}")
+                
+                # 수집 완료 플래그 업데이트 (자동 분석 트리거용)
+                self._update_collection_completed_flag(job_id)
+                
             else:
                 self.job_manager.complete_job(job_id, False, "모든 종목 수집 실패")
                 logger.error(f"❌ 일일 시세 수집 실패: Job ID={job_id}")

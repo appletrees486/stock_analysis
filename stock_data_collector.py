@@ -515,12 +515,12 @@ class StockDataCollector:
             
             # PyKrx로 데이터 조회 (거래대금 포함 - adjusted=False 옵션 사용)
             try:
-                # 1차 시도: 개별 종목 데이터 조회 (거래대금 포함)
+                # 1차 시도: 개별 종목 데이터 조회 (주가 조정 적용)
                 hist = stock.get_market_ohlcv_by_date(
                     fromdate=start_date.strftime('%Y%m%d'),
                     todate=end_date.strftime('%Y%m%d'),
                     ticker=stock_code,
-                    adjusted=False  # 거래대금 포함을 위해 False로 설정
+                    adjusted=True  # 주가 조정 적용 (무상증자 등 반영)
                 )
                 
                 if not hist.empty:
@@ -571,7 +571,7 @@ class StockDataCollector:
                     fromdate=short_start.strftime('%Y%m%d'),
                     todate=end_date.strftime('%Y%m%d'),
                     ticker=stock_code,
-                    adjusted=False
+                    adjusted=True
                 )
                 
                 if not market_data.empty:
@@ -611,7 +611,7 @@ class StockDataCollector:
                             fromdate=period_start.strftime('%Y%m%d'),
                             todate=end_date.strftime('%Y%m%d'),
                             ticker=stock_code,
-                            adjusted=False  # 거래대금 포함을 위해 False로 설정
+                            adjusted=True  # 거래대금 포함을 위해 False로 설정
                         )
                         
                         if not hist.empty:
@@ -673,7 +673,7 @@ class StockDataCollector:
                     fromdate=start_date_obj.strftime('%Y%m%d'),
                     todate=end_date.strftime('%Y%m%d'),
                     ticker=stock_code,
-                    adjusted=False  # 거래대금 포함을 위해 False로 설정
+                    adjusted=True  # 거래대금 포함을 위해 False로 설정
                 )
                 
                 if not hist.empty:
@@ -717,7 +717,7 @@ class StockDataCollector:
                     fromdate=short_start.strftime('%Y%m%d'),
                     todate=end_date.strftime('%Y%m%d'),
                     ticker=stock_code,
-                    adjusted=False
+                    adjusted=True
                 )
                 
                 if not market_data.empty:

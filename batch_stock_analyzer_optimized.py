@@ -45,12 +45,12 @@ def get_stock_names_batch(stock_codes: list) -> dict:
             for row in results:
                 stock_names[row['stock_code']] = row['stock_name']
             
-            print(f"✅ 배치 종목명 조회 완료: {len(stock_names)}개")
+            print(f"[INFO] 배치 종목명 조회 완료: {len(stock_names)}개")
             db_manager.disconnect()
         else:
-            print(f"⚠️ DB 연결 실패")
+            print(f"[WARNING] DB 연결 실패")
     except Exception as e:
-        print(f"⚠️ 배치 종목명 조회 중 오류: {e}")
+        print(f"[ERROR] 배치 종목명 조회 중 오류: {e}")
     
     return stock_names
 

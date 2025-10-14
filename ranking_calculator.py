@@ -149,14 +149,14 @@ class RankingCalculator:
             
             # 캐시 완전 초기화
             self._cache.clear()
-            print(f"🔍 캐시 초기화 완료")
+            logger.debug("캐시 초기화 완료")
             
             # 시점별 쿼리 생성
             query, params = self._build_ranking_list_query(target_date, chart_type, trading_type, limit)
             
             # 디버깅: 쿼리와 파라미터 출력
-            print(f"🔍 쿼리: {query}")
-            print(f"🔍 파라미터: {params}")
+            logger.debug(f"쿼리: {query}")
+            logger.debug(f"파라미터: {params}")
             
             # 순위 리스트 조회
             results = db.fetch_all(query, params)
