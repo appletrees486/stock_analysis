@@ -4,6 +4,10 @@
 AI 제미나이를 활용한 주식 차트 분석 스크립트 (일봉/주봉/월봉 지원)
 """
 
+# UTF-8 인코딩 설정 (Windows 환경 대응)
+import os
+os.environ['PYTHONIOENCODING'] = 'utf-8'
+
 import os
 import json
 import base64
@@ -2115,14 +2119,14 @@ JSON 파일의 모든 수치를 정확히 반영하여 분석해주세요."""
             - DB 연결 실패 시 모든 값이 "N/A"로 반환
         """
         try:
-            print(f"🔗 database_config 모듈 import 시도...")
+            print(f"[INFO] database_config 모듈 import 시도...")
             from database_config import DatabaseManager
-            print(f"✅ database_config 모듈 import 성공")
+            print(f"[OK] database_config 모듈 import 성공")
             db = DatabaseManager()
-            print(f"✅ DatabaseManager 인스턴스 생성 성공")
+            print(f"[OK] DatabaseManager 인스턴스 생성 성공")
             
             if not db.connect():
-                print(f"⚠️ DB 연결 실패 - 거래정보 조회 불가")
+                print(f"[WARN] DB 연결 실패 - 거래정보 조회 불가")
                 return {
                     "거래일": "N/A",
                     "거래대금": "N/A",
@@ -4778,7 +4782,7 @@ def create_consolidated_analysis(analysis_results: list, chart_type: str) -> dic
         dict: 통합 분석 결과
     """
     try:
-        print(f"🔗 {chart_type} 통합 분석 생성 중...")
+        print(f"[INFO] {chart_type} 통합 분석 생성 중...")
         
         consolidated_result = {
             "metadata": {
@@ -4866,11 +4870,11 @@ def create_consolidated_analysis(analysis_results: list, chart_type: str) -> dic
         consolidated_result["analysis_summary"]["failed_analyses"] = len(analysis_results) - successful_count
         consolidated_result["analysis_summary"]["average_score"] = total_score / successful_count if successful_count > 0 else 0
         
-        print(f"✅ {chart_type} 통합 분석 생성 완료: {len(analysis_results)}개 종목")
+        print(f"[OK] {chart_type} 통합 분석 생성 완료: {len(analysis_results)}개 종목")
         return consolidated_result
         
     except Exception as e:
-        print(f"❌ {chart_type} 통합 분석 생성 실패: {e}")
+        print(f"[ERROR] {chart_type} 통합 분석 생성 실패: {e}")
         return None
 
 def create_consolidated_word_document(consolidated_result: dict, chart_type: str, output_path: str) -> bool:

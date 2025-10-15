@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>자동 배치 상태 모니터링</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .auto-batch-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header-section {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 15px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        
+        .header-section h1 {
+            margin: 0 0 10px 0;
+            font-size: 28px;
+        }
+        
+        .header-section p {
+            margin: 0;
+            opacity: 0.9;
+        }
+        
+        .nav-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        
+        .nav-btn {
+            padding: 10px 20px;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.3s;
+        }
+        
+        .nav-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+        }
+        
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .status-card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+            transition: all 0.3s;
+        }
+        
+        .status-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+        }
+        
+        .status-card h3 {
+            margin: 0 0 15px 0;
+            color: #333;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .status-card .icon {
+            font-size: 24px;
+        }
+        
+        .progress-bar-container {
+            background: #f0f0f0;
+            border-radius: 10px;
+            height: 30px;
+            overflow: hidden;
+            margin: 15px 0;
+        }
+        
+        .progress-bar {
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            transition: width 0.5s ease;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: bold;
+            margin: 5px 0;
+        }
+        
+        .status-completed {
+            background: #10b981;
+            color: white;
+        }
+        
+        .status-pending {
+            background: #f59e0b;
+            color: white;
+        }
+        
+        .status-failed {
+            background: #ef4444;
+            color: white;
+        }
+        
+        .status-running {
+            background: #3b82f6;
+            color: white;
+        }
+        
+        .jobs-section {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+        
+        .jobs-section h2 {
+            margin: 0 0 20px 0;
+            color: #333;
+            font-size: 22px;
+        }
+        
+        .jobs-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        .jobs-table th,
+        .jobs-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .jobs-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #666;
+        }
+        
+        .jobs-table tr:hover {
+            background: #f8f9fa;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+        
+        .empty-state i {
+            font-size: 64px;
+            margin-bottom: 20px;
+            opacity: 0.3;
+        }
+        
+        .auto-refresh-indicator {
+            display: inline-block;
+            padding: 5px 15px;
+            background: #10b981;
+            color: white;
+            border-radius: 20px;
+            font-size: 12px;
+            margin-left: 10px;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .timestamp {
+            font-size: 12px;
+            color: #999;
+            margin-top: 5px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+        
+        .loading i {
+            font-size: 48px;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="auto-batch-container">
+        <!-- 헤더 -->
+        <div class="header-section">
+            <h1><i class="fas fa-robot"></i> 자동 배치 상태 모니터링</h1>
+            <p>실시간 자동 분석 진행 상황을 확인하세요</p>
+            <div class="nav-buttons">
+                <a href="/" class="nav-btn">
+                    <i class="fas fa-home"></i> 홈으로
+                </a>
+                <a href="/batch-schedule" class="nav-btn">
+                    <i class="fas fa-clock"></i> 배치 스케줄 관리
+                </a>
+                <a href="/daily-collection" class="nav-btn">
+                    <i class="fas fa-database"></i> 일일 시세 수집
+                </a>
+            </div>
+        </div>
+        
+        <!-- 상태 카드 -->
+        <div class="status-grid">
+            <!-- 전체 진행률 -->
+            <div class="status-card">
+                <h3><i class="fas fa-tasks icon"></i> 전체 진행률</h3>
+                <div class="progress-bar-container">
+                    <div class="progress-bar" id="totalProgress" style="width: 0%">0%</div>
+                </div>
+                <div id="progressText" style="text-align: center; margin-top: 10px; color: #666;">
+                    로딩 중...
+                </div>
+            </div>
+            
+            <!-- 수집 완료 -->
+            <div class="status-card">
+                <h3><i class="fas fa-download icon"></i> 시세 수집</h3>
+                <div id="collectionStatus">
+                    <div class="loading">
+                        <i class="fas fa-spinner"></i>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 랭킹 추출 -->
+            <div class="status-card">
+                <h3><i class="fas fa-sort-amount-down icon"></i> 랭킹 추출</h3>
+                <div id="rankingStatus">
+                    <div class="loading">
+                        <i class="fas fa-spinner"></i>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 분석 진행 -->
+            <div class="status-card">
+                <h3><i class="fas fa-chart-line icon"></i> AI 분석</h3>
+                <div id="analysisStatus">
+                    <div class="loading">
+                        <i class="fas fa-spinner"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 작업 이력 -->
+        <div class="jobs-section">
+            <h2>
+                <i class="fas fa-history"></i> 최근 작업 이력
+                <span class="auto-refresh-indicator" id="refreshIndicator">
+                    <i class="fas fa-sync"></i> 자동 새로고침
+                </span>
+            </h2>
+            <div id="jobsContent">
+                <div class="loading">
+                    <i class="fas fa-spinner"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // 상태 업데이트 함수
+        async function updateStatus() {
+            try {
+                const response = await fetch('/api/auto-batch/status');
+                const data = await response.json();
+                
+                if (data.error) {
+                    console.error('상태 조회 오류:', data.error);
+                    return;
+                }
+                
+                // 활성 스케줄이 없는 경우
+                if (!data.has_active_schedule) {
+                    document.getElementById('totalProgress').style.width = '0%';
+                    document.getElementById('totalProgress').textContent = '0%';
+                    document.getElementById('progressText').innerHTML = 
+                        '<span class="status-badge status-pending">대기 중</span><br>활성 스케줄이 없습니다';
+                    
+                    document.getElementById('collectionStatus').innerHTML = 
+                        '<span class="status-badge status-pending">대기 중</span>';
+                    document.getElementById('rankingStatus').innerHTML = 
+                        '<span class="status-badge status-pending">대기 중</span>';
+                    document.getElementById('analysisStatus').innerHTML = 
+                        '<span class="status-badge status-pending">대기 중</span>';
+                    
+                    document.getElementById('jobsContent').innerHTML = 
+                        '<div class="empty-state">' +
+                        '<i class="fas fa-inbox"></i>' +
+                        '<p>활성 스케줄이 없습니다</p>' +
+                        '</div>';
+                    return;
+                }
+                
+                // 전체 진행률 업데이트
+                const totalProgress = data.total_progress || 0;
+                document.getElementById('totalProgress').style.width = totalProgress + '%';
+                document.getElementById('totalProgress').textContent = totalProgress + '%';
+                
+                const progressSteps = [];
+                if (data.progress.collection) progressSteps.push('수집 완료');
+                if (data.progress.ranking) progressSteps.push('랭킹 추출 완료');
+                if (data.progress.analysis) progressSteps.push('분석 진행 중');
+                
+                document.getElementById('progressText').innerHTML = 
+                    progressSteps.length > 0 
+                        ? progressSteps.join(' → ')
+                        : '대기 중';
+                
+                // 각 단계별 상태 업데이트
+                updateStepStatus('collectionStatus', data.progress.collection, data.timestamps.collection_completed_at, '시세 수집');
+                updateStepStatus('rankingStatus', data.progress.ranking, data.timestamps.ranking_extracted_at, '랭킹 추출');
+                updateStepStatus('analysisStatus', data.progress.analysis, data.timestamps.analysis_started_at, 'AI 분석');
+                
+                // 작업 이력 업데이트
+                updateJobsTable(data.jobs || []);
+                
+            } catch (error) {
+                console.error('상태 업데이트 오류:', error);
+            }
+        }
+        
+        // 단계별 상태 업데이트
+        function updateStepStatus(elementId, completed, timestamp, stepName) {
+            const element = document.getElementById(elementId);
+            
+            if (completed) {
+                element.innerHTML = 
+                    '<span class="status-badge status-completed">완료</span>' +
+                    (timestamp ? `<div class="timestamp">${formatTimestamp(timestamp)}</div>` : '');
+            } else {
+                element.innerHTML = 
+                    '<span class="status-badge status-pending">대기 중</span>';
+            }
+        }
+        
+        // 작업 이력 테이블 업데이트
+        function updateJobsTable(jobs) {
+            const contentDiv = document.getElementById('jobsContent');
+            
+            if (!jobs || jobs.length === 0) {
+                contentDiv.innerHTML = 
+                    '<div class="empty-state">' +
+                    '<i class="fas fa-inbox"></i>' +
+                    '<p>작업 이력이 없습니다</p>' +
+                    '</div>';
+                return;
+            }
+            
+            let html = '<table class="jobs-table">';
+            html += '<thead><tr>';
+            html += '<th>작업 유형</th>';
+            html += '<th>상태</th>';
+            html += '<th>거래 타입</th>';
+            html += '<th>배치 ID</th>';
+            html += '<th>생성 시간</th>';
+            html += '<th>오류 메시지</th>';
+            html += '</tr></thead>';
+            html += '<tbody>';
+            
+            jobs.forEach(job => {
+                html += '<tr>';
+                html += `<td>${job.job_type || '-'}</td>`;
+                html += `<td>${getStatusBadge(job.job_status)}</td>`;
+                html += `<td>${job.trading_type || '-'}</td>`;
+                html += `<td>${job.batch_id || '-'}</td>`;
+                html += `<td>${job.created_at ? formatTimestamp(job.created_at) : '-'}</td>`;
+                html += `<td>${job.error_message || '-'}</td>`;
+                html += '</tr>';
+            });
+            
+            html += '</tbody></table>';
+            contentDiv.innerHTML = html;
+        }
+        
+        // 상태 배지 생성
+        function getStatusBadge(status) {
+            const badges = {
+                'completed': '<span class="status-badge status-completed">완료</span>',
+                'running': '<span class="status-badge status-running">진행 중</span>',
+                'failed': '<span class="status-badge status-failed">실패</span>',
+                'pending': '<span class="status-badge status-pending">대기</span>'
+            };
+            return badges[status] || `<span class="status-badge status-pending">${status}</span>`;
+        }
+        
+        // 타임스탬프 포맷팅
+        function formatTimestamp(timestamp) {
+            if (!timestamp) return '-';
+            const date = new Date(timestamp);
+            return date.toLocaleString('ko-KR', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+        
+        // 초기 로드 및 자동 새로고침
+        updateStatus();
+        setInterval(updateStatus, 5000); // 5초마다 자동 새로고침
+    </script>
+</body>
+</html>
+

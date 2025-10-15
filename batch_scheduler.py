@@ -5,6 +5,10 @@
 APScheduler를 사용한 자동 수집 작업 스케줄링
 """
 
+# UTF-8 인코딩 설정 (Windows 환경 대응)
+import os
+os.environ['PYTHONIOENCODING'] = 'utf-8'
+
 import logging
 import json
 from datetime import datetime, timedelta
@@ -18,6 +22,7 @@ import time
 
 from database_config import DatabaseManager
 from collection_job_manager import CollectionJobManager
+from cleanup_running_jobs import cleanup_running_jobs
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
@@ -159,6 +164,10 @@ class BatchScheduler:
         try:
             logger.info(f"🚀 스케줄 작업 실행 시작: Schedule ID={schedule_id}")
             
+            # 🧹 스케줄 실행 전 실행 중인 작업 정리 (우선순위 보장)
+            logger.info("🧹 실행 중인 작업 정리 중...")
+            cleanup_running_jobs()
+            
             # 스케줄 정보 조회
             schedule_info = self._get_schedule_info(schedule_id)
             if not schedule_info:
@@ -167,12 +176,6 @@ class BatchScheduler:
             
             job_type = schedule_info['job_type']
             job_config = schedule_info.get('job_config', {})
-            
-            # 이미 실행 중인 동일한 작업이 있는지 확인
-            running_job = self.job_manager.get_running_job(job_type)
-            if running_job:
-                logger.warning(f"이미 실행 중인 {job_type} 작업이 있습니다. 스케줄 실행 건너뜀")
-                return
             
             # 새로운 작업 생성 및 시작
             job_id = self.job_manager.create_job(job_type, 'SCHEDULED', job_config)
@@ -265,7 +268,7 @@ class BatchScheduler:
             self.db.disconnect()
     
     def _update_collection_completed_flag(self, job_id: int):
-        """수집 완료 플래그 업데이트 (자동 분석 트리거용)"""
+        """수집 완료 플래그 업데이트 및 랭킹 추출 시작"""
         try:
             if not self.db.connect():
                 logger.error("DB 연결 실패")
@@ -302,7 +305,17 @@ class BatchScheduler:
             
             if self.db.execute_query(update_query, params):
                 logger.info(f"✅ 수집 완료 플래그 업데이트: Schedule ID={schedule_id}, Job ID={job_id}")
-                logger.info(f"   → auto_analysis_trigger가 랭킹 추출을 시작합니다.")
+                logger.info(f"   → 랭킹 추출을 시작합니다.")
+                
+                # 비동기로 랭킹 추출 및 분석 시작
+                import threading
+                thread = threading.Thread(
+                    target=self._start_ranking_extraction_and_analysis,
+                    args=(schedule_id,),
+                    daemon=True
+                )
+                thread.start()
+                logger.info(f"   → 랭킹 추출 스레드 시작됨")
             else:
                 logger.error(f"수집 완료 플래그 업데이트 실패: Schedule ID={schedule_id}")
             
@@ -312,6 +325,135 @@ class BatchScheduler:
             logger.error(traceback.format_exc())
         finally:
             self.db.disconnect()
+    
+    def _start_ranking_extraction_and_analysis(self, schedule_id: int):
+        """랭킹 추출 및 분석 실행 (비동기)"""
+        try:
+            logger.info(f"[INFO] 랭킹 추출 및 분석 시작: Schedule ID={schedule_id}")
+            
+            # 1. 랭킹 추출
+            from ranking_data_extractor import RankingDataExtractor
+            
+            extractor = RankingDataExtractor()
+            today = datetime.now().strftime('%Y-%m-%d')
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M')
+            batch_id = f"schedule_{schedule_id}_{timestamp}"
+            
+            result = extractor.extract_rankings_for_auto_analysis(
+                target_date=today,
+                batch_id=batch_id
+            )
+            
+            if not result.get('success'):
+                logger.error(f"❌ 랭킹 추출 실패: {result.get('error')}")
+                return
+            
+            logger.info(f"✅ 랭킹 추출 완료")
+            logger.info(f"   - 거래율 파일: {result.get('turnover_file')}")
+            logger.info(f"   - 거래대금 파일: {result.get('volume_file')}")
+            
+            # 랭킹 추출 완료 플래그 업데이트
+            if not self.db.connect():
+                logger.error("DB 연결 실패")
+                return
+            
+            update_query = """
+            UPDATE batch_schedules 
+            SET ranking_extracted = TRUE, 
+                ranking_extracted_at = %s,
+                updated_at = %s
+            WHERE id = %s
+            """
+            
+            params = (datetime.now(), datetime.now(), schedule_id)
+            self.db.execute_query(update_query, params)
+            self.db.disconnect()
+            
+            # 2. 분석 시작
+            self._run_analysis_async(result, schedule_id)
+            
+        except Exception as e:
+            logger.error(f"랭킹 추출 및 분석 중 오류: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+    
+    def _run_analysis_async(self, ranking_result: Dict, schedule_id: int):
+        """분석 실행 (비동기)"""
+        try:
+            logger.info(f"📊 분석 시작: Schedule ID={schedule_id}")
+            
+            turnover_file = ranking_result.get('turnover_file')
+            volume_file = ranking_result.get('volume_file')
+            
+            # 파일 존재 확인
+            import os
+            if not turnover_file or not os.path.exists(turnover_file):
+                logger.error(f"거래율 파일을 찾을 수 없습니다: {turnover_file}")
+                return
+            
+            if not volume_file or not os.path.exists(volume_file):
+                logger.error(f"거래대금 파일을 찾을 수 없습니다: {volume_file}")
+                return
+            
+            # BatchAnalyzer 임포트
+            from api.batch_analyzer import BatchAnalyzer
+            batch_analyzer = BatchAnalyzer()
+            
+            today = datetime.now().strftime('%Y-%m-%d')
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M')
+            
+            # 1. 거래율 분석
+            logger.info(f"📈 거래율 상위 50위 분석 시작...")
+            turnover_batch_id = f"auto_turnover_{timestamp}"
+            
+            batch_analyzer.start_batch_analysis(
+                stock_list_path=turnover_file,
+                chart_type='일봉',
+                batch_id=turnover_batch_id,
+                trading_type='거래율',
+                email_enabled=False,
+                email_address=''
+            )
+            
+            # 2. 거래대금 분석
+            logger.info(f"[INFO] 거래대금 상위 50위 분석 시작...")
+            volume_batch_id = f"auto_volume_{timestamp}"
+            
+            batch_analyzer.start_batch_analysis(
+                stock_list_path=volume_file,
+                chart_type='일봉',
+                batch_id=volume_batch_id,
+                trading_type='거래대금',
+                email_enabled=False,
+                email_address=''
+            )
+            
+            # 참고: 파일 삭제는 모든 분석이 완료된 후에 수행됩니다
+            # (batch_analyzer의 cleanup_batch에서 처리)
+            
+            # 분석 시작 플래그 업데이트
+            if not self.db.connect():
+                logger.error("DB 연결 실패")
+                return
+            
+            update_query = """
+            UPDATE batch_schedules 
+            SET analysis_started = TRUE, 
+                analysis_started_at = %s,
+                updated_at = %s
+            WHERE id = %s
+            """
+            
+            params = (datetime.now(), datetime.now(), schedule_id)
+            self.db.execute_query(update_query, params)
+            self.db.disconnect()
+            
+            logger.info(f"✅ 분석 완료: Schedule ID={schedule_id}")
+            
+        except Exception as e:
+            logger.error(f"분석 실행 중 오류: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
     
     def _run_daily_collection(self, job_id: int, job_config: Dict):
         """일일 시세 수집 실행"""

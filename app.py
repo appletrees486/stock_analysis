@@ -64,6 +64,14 @@ try:
 except ImportError as e:
     logger.error(f"배치 스케줄 관리 블루프린트 등록 실패: {e}")
 
+# 자동 배치 상태 모니터링 블루프린트 등록
+try:
+    from api.auto_batch_routes import auto_batch_bp
+    app.register_blueprint(auto_batch_bp)
+    logger.info("자동 배치 상태 모니터링 블루프린트 등록 완료")
+except ImportError as e:
+    logger.error(f"자동 배치 상태 모니터링 블루프린트 등록 실패: {e}")
+
 @app.route('/')
 def index():
     """메인 페이지 - 분석 타입 선택"""
@@ -195,6 +203,7 @@ def run_with_scheduler(debug=False):
         time.sleep(2)
         
         logger.info("📡 스케줄러와 웹 서버가 동시에 실행됩니다")
+        logger.info("   → 스케줄 실행 시 자동으로 랭킹 추출 및 분석이 실행됩니다")
     else:
         logger.info("🔧 Debug 모드 - 스케줄러는 별도로 시작하세요")
     

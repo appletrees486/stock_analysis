@@ -432,25 +432,59 @@ class TechnicalIndicatorsRecollector:
 
 def main():
     """메인 함수"""
+    import sys
+    import glob
+    
     print("🚀 기술적 지표 재수집 프로그램 시작")
     print("="*60)
     
     recollector = TechnicalIndicatorsRecollector()
     
     try:
+        # 실패한 종목 파일 찾기
+        failed_files = glob.glob("failed_technical_indicators_*.txt")
+        specific_codes = None
+        
+        if failed_files:
+            # 가장 최근 파일 사용
+            latest_file = max(failed_files, key=lambda x: x.split('_')[-1].split('.')[0])
+            print(f"📄 실패한 종목 파일 발견: {latest_file}")
+            
+            # 실패한 종목 코드 읽기
+            with open(latest_file, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+                specific_codes = []
+                for line in lines:
+                    line = line.strip()
+                    # 헤더나 빈 줄 건너뛰기
+                    if line and not line.startswith('기술') and not line.startswith('생성') and not line.startswith('총') and not line.startswith('=') and not line.startswith('개'):
+                        specific_codes.append(line)
+            
+            if specific_codes:
+                print(f"📊 실패한 종목 {len(specific_codes)}개를 재수집합니다.")
+                print(f"   (예: {specific_codes[:5]})")
+            else:
+                print("⚠️ 실패한 종목 코드를 찾을 수 없습니다.")
+                specific_codes = None
+        
         # 현재 상태 확인
-        print("📊 현재 보조지표 상태 확인 중...")
+        print("\n📊 현재 보조지표 상태 확인 중...")
         recollector.check_technical_indicators_status()
         
         # 사용자 확인
-        response = input("\n전체 종목의 보조지표를 재수집하시겠습니까? (y/N): ")
+        if specific_codes:
+            print(f"\n⚠️ 실패한 종목 {len(specific_codes)}개의 보조지표를 재수집합니다.")
+        else:
+            print("\n전체 종목의 보조지표를 재수집합니다.")
+        
+        response = input("\n진행하시겠습니까? (y/N): ")
         if response.lower() != 'y':
             print("사용자에 의해 중단되었습니다.")
             return
         
         # 보조지표 재수집 실행
         print("\n🔄 보조지표 재수집 시작...")
-        success, failed = recollector.recollect_all_technical_indicators()
+        success, failed = recollector.recollect_all_technical_indicators(specific_codes)
         
         # 재수집 후 상태 확인
         print("\n📊 재수집 후 보조지표 상태:")

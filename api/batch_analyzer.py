@@ -5,6 +5,10 @@
 비동기적으로 다수 종목을 분석하는 기능
 """
 
+# UTF-8 인코딩 설정 (Windows 환경 대응)
+import os
+os.environ['PYTHONIOENCODING'] = 'utf-8'
+
 import os
 import json
 import threading
