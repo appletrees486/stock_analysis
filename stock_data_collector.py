@@ -923,8 +923,15 @@ class StockDataCollector:
             return None
     
     def get_past_data_for_indicators(self, stock_code, days=120):
-        """기술적 지표 계산을 위해 DB에서 과거 데이터 조회"""
+        """기술적 지표 계산을 위해 DB에서 과거 데이터 조회 (독립적인 DB 커넥션 사용)"""
+        temp_db = None
         try:
+            # 배치 모드에서 커넥션 충돌 방지를 위해 임시 DB 커넥션 생성
+            temp_db = DatabaseManager()
+            if not temp_db.connect():
+                logging.error(f"❌ {stock_code} 과거 데이터 조회용 DB 연결 실패")
+                return None
+            
             query = """
             SELECT trade_date, open, high, low, close, volume
             FROM daily_data
@@ -933,7 +940,7 @@ class StockDataCollector:
             LIMIT %s
             """
             
-            result = self.db.fetch_all(query, (stock_code, days))
+            result = temp_db.fetch_all(query, (stock_code, days))
             
             if result and len(result) > 0:
                 df = pd.DataFrame(result)
@@ -955,6 +962,10 @@ class StockDataCollector:
         except Exception as e:
             logging.error(f"❌ {stock_code} 과거 데이터 조회 중 오류: {e}")
             return None
+        finally:
+            # 임시 DB 커넥션 해제
+            if temp_db:
+                temp_db.disconnect()
     
     def save_daily_data(self, stock_code, hist_data):
         """일봉 데이터와 유통주식수, 시가총액을 함께 데이터베이스에 저장"""
