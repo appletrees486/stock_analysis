@@ -4,6 +4,16 @@
 국내 주식 주봉 시세 조회 스크립트 (DB 기반)
 """
 
+# Windows에서 UTF-8 출력 설정 (이모지 지원)
+import sys
+import io
+if sys.platform == 'win32':
+    try:
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    except:
+        pass  # 이미 설정되어 있거나 실패 시 무시
+
 # matplotlib 백엔드를 Agg로 설정 (tkinter 에러 방지)
 import matplotlib
 matplotlib.use('Agg')
@@ -47,19 +57,31 @@ for font in font_list:
         font_path = fm.findfont(font)
         if font_path and 'DejaVu' not in font_path:  # DejaVu는 한글 미지원
             available_font = font
-            print(f"✅ 한글 지원 폰트 발견: {font} ({font_path})")
+            try:
+                print(f"[OK] 한글 지원 폰트 발견: {font} ({font_path})")
+            except:
+                pass
             break
     except Exception as e:
-        print(f"⚠️ 폰트 {font} 확인 실패: {e}")
+        try:
+            print(f"[WARN] 폰트 {font} 확인 실패: {e}")
+        except:
+            pass
         continue
 
 if available_font:
     plt.rcParams['font.family'] = available_font
-    print(f"✅ 사용 폰트: {available_font}")
+    try:
+        print(f"[OK] 사용 폰트: {available_font}")
+    except:
+        pass
 else:
     # 기본 폰트 사용
     plt.rcParams['font.family'] = 'DejaVu Sans'
-    print("⚠️ 한글 폰트를 찾을 수 없어 기본 폰트를 사용합니다.")
+    try:
+        print("[WARN] 한글 폰트를 찾을 수 없어 기본 폰트를 사용합니다.")
+    except:
+        pass
 
 plt.rcParams['axes.unicode_minus'] = False
 
@@ -191,8 +213,12 @@ def convert_daily_to_weekly(daily_data, stock_code):
         
         # 현재 시간 및 장 상태 확인
         current_time = datetime.now()
-        market_status = holiday_manager.get_market_status(current_time)
-        market_status_desc = holiday_manager.get_market_status_description(market_status)
+        try:
+            market_status = holiday_manager.get_market_status(current_time)
+            market_status_desc = str(market_status)
+        except:
+            market_status = "unknown"
+            market_status_desc = "알 수 없음"
         
         print(f"   📅 현재 시간: {current_time.strftime('%Y-%m-%d %H:%M')}")
         print(f"   🏢 장 상태: {market_status_desc}")
@@ -249,11 +275,11 @@ def convert_daily_to_weekly(daily_data, stock_code):
             next_date = daily_data_copy.index[daily_data_copy.index.get_loc(date) + 1] if daily_data_copy.index.get_loc(date) + 1 < len(daily_data_copy) else None
             
             if next_date is None or _is_new_trading_week(current_week_start, next_date, holiday_manager):
-                # ✅ 완성된 주인지 확인 - 4일 이상 거래된 주는 완성된 주로 간주
+                # ✅ 완성된 주인지 확인 - 1일 이상 거래된 주는 완성된 주로 간주
                 if current_week_data and not is_complete_week(current_week_start, daily_data_copy.index[-1]):
-                    # 최소 4일 이상 거래된 주는 완성된 주로 간주
-                    if len(current_week_data) >= 4:
-                        print(f"   ✅ 4일 이상 거래된 주로 완성된 주로 간주: {current_week_start.strftime('%Y-%m-%d')} 주")
+                    # 최소 1일 이상 거래된 주는 완성된 주로 간주
+                    if len(current_week_data) >= 1:
+                        print(f"   ✅ 1일 이상 거래된 주로 완성된 주로 간주: {current_week_start.strftime('%Y-%m-%d')} 주")
                         # 주봉 생성 로직 계속 진행 (break 제거)
                     else:
                         print(f"   ⚠️ 미완성 주 제외: {current_week_start.strftime('%Y-%m-%d')} 주 (거래일 부족: {len(current_week_data)}일)")
@@ -1228,10 +1254,10 @@ def create_weekly_stock_chart(hist, stock_code):
     # 종목명 가져오기 (DB에서)
     stock_name = get_stock_name(stock_code)
     
-    # 파일명 생성: weekly_종목명_종목번호_생성일.png
+    # 파일명 생성: weekly_종목명_종목번호_생성일.jpg
     current_date = datetime.now().strftime("%Y%m%d")
     # 종목명에서 띄어쓰기 제거하여 파일명 생성
-    base_filename = f"weekly_{stock_name.replace(' ', '')}_{stock_code}_{current_date}.png"
+    base_filename = f"weekly_{stock_name.replace(' ', '')}_{stock_code}_{current_date}.jpg"
     
     # 파일명에서 특수문자 제거 및 공백을 언더스코어로 변경
     base_filename = base_filename.replace(" ", "_").replace("/", "_").replace("\\", "_").replace(":", "_")
@@ -1249,9 +1275,12 @@ def create_weekly_stock_chart(hist, stock_code):
         filepath = os.path.join(charts_dir, filename)
         version += 1
     
-    # 차트 저장
-    plt.savefig(filepath, dpi=100, bbox_inches='tight')
+    # 차트 저장 (JPEG 포맷, 품질 95%)
+    plt.savefig(filepath, dpi=100, bbox_inches='tight', 
+                facecolor='white', edgecolor='none',
+                format='jpg', pil_kwargs={'quality': 75})
     print(f"💾 차트가 저장되었습니다: {filepath}")
+    print(f"   🎨 이미지 포맷: JPEG (품질: 75%)")
     
     # 차트 뷰어를 띄우지 않고 차트 닫기
     plt.close(fig)  # 특정 figure 닫기

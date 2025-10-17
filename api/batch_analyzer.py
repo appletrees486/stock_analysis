@@ -515,6 +515,23 @@ class BatchAnalyzer:
             
             logger.info(f"ZIP 파일 생성 완료: {zip_file}")
             logger.info(f"ZIP 파일 최종 확인 - 존재: {os.path.exists(zip_file)}, 크기: {os.path.getsize(zip_file) if os.path.exists(zip_file) else 'N/A'} bytes")
+            
+            # blog_auto/docs 폴더에도 압축 파일 복사
+            try:
+                # 프로젝트 루트를 기준으로 절대 경로 생성
+                project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                docs_dir = os.path.join(project_root, "blog_auto", "docs")
+                if not os.path.exists(docs_dir):
+                    os.makedirs(docs_dir)
+                    logger.info(f"docs 폴더 생성: {docs_dir}")
+                
+                import shutil
+                docs_zip_file = os.path.join(docs_dir, os.path.basename(zip_file))
+                shutil.copy2(zip_file, docs_zip_file)
+                logger.info(f"ZIP 파일을 blog_auto/docs 폴더에 복사 완료: {docs_zip_file}")
+            except Exception as copy_error:
+                logger.error(f"blog_auto/docs 폴더로 ZIP 파일 복사 중 오류: {copy_error}")
+            
             logger.info(f"배치 결과 저장 완료: {batch_id}")
             
             # 메일 발송 (옵션이 활성화된 경우)
@@ -531,7 +548,8 @@ class BatchAnalyzer:
                     logger.error(f"❌ 메일 발송용 ZIP 파일을 찾을 수 없습니다: {zip_file}")
             
             # 배치 완료 후 캐시 정리 (차트 이미지 꼬임 방지)
-            self.clear_batch_cache(batch_id)
+            # 주의: 여러 분석이 연속으로 실행되는 경우, 모든 분석이 완료된 후에 한 번만 호출해야 합니다
+            # self.clear_batch_cache(batch_id)  # 자동 호출 제거 - 외부에서 명시적으로 호출 필요
             
             # 메모리 정리
             self.cleanup_batch_memory(batch_id)
@@ -542,10 +560,11 @@ class BatchAnalyzer:
             logger.error(f"상세 오류: {traceback.format_exc()}")
             
             # 오류 발생 시에도 캐시 정리 시도
-            try:
-                self.clear_batch_cache(batch_id)
-            except Exception as cache_error:
-                logger.error(f"캐시 정리 중 오류: {cache_error}")
+            # 주의: 여러 분석이 연속으로 실행되는 경우, 모든 분석이 완료된 후에 한 번만 호출해야 합니다
+            # try:
+            #     self.clear_batch_cache(batch_id)
+            # except Exception as cache_error:
+            #     logger.error(f"캐시 정리 중 오류: {cache_error}")
             
             # 오류 발생 시에도 메모리 정리
             self.cleanup_batch_memory(batch_id)
@@ -1230,13 +1249,13 @@ class BatchAnalyzer:
                             logger.info(f"폴더 검색 중: {folder}")
                             # 종목코드가 포함된 이미지 파일 찾기 (여러 패턴 시도)
                             for file in os.listdir(folder):
-                                # 패턴 1: chart_type_en_stock_code_*.png
-                                if file.startswith(f"{chart_type_en}_{stock_code}_") and file.endswith('.png'):
+                                # 패턴 1: chart_type_en_stock_code_*.jpg
+                                if file.startswith(f"{chart_type_en}_{stock_code}_") and file.endswith('.jpg'):
                                     chart_image_path = os.path.join(folder, file)
                                     logger.info(f"패턴 1으로 찾음: {file}")
                                     break
-                                # 패턴 2: chart_type_en_*stock_code*.png (종목명_종목코드_날짜 형태)
-                                elif f"{chart_type_en}_" in file and f"_{stock_code}_" in file and file.endswith('.png'):
+                                # 패턴 2: chart_type_en_*stock_code*.jpg (종목명_종목코드_날짜 형태)
+                                elif f"{chart_type_en}_" in file and f"_{stock_code}_" in file and file.endswith('.jpg'):
                                     chart_image_path = os.path.join(folder, file)
                                     logger.info(f"패턴 2로 찾음: {file}")
                                     break
@@ -1318,7 +1337,7 @@ class BatchAnalyzer:
                     if ai_analysis_file:
                         no_image_msg = doc.add_paragraph(f"차트 이미지를 찾을 수 없습니다. (종목코드: {stock_code}, 차트타입: {chart_type})")
                         no_image_msg2 = doc.add_paragraph(f"검색한 폴더: {chart_type_en}_charts, charts")
-                        no_image_msg3 = doc.add_paragraph(f"파일명 패턴: {chart_type_en}_{stock_code}_*.png 또는 {chart_type_en}_*{stock_code}*.png")
+                        no_image_msg3 = doc.add_paragraph(f"파일명 패턴: {chart_type_en}_{stock_code}_*.jpg 또는 {chart_type_en}_*{stock_code}*.jpg")
                         
                         for p in [no_image_msg, no_image_msg2, no_image_msg3]:
                             for run in p.runs:
@@ -2070,10 +2089,18 @@ AI 주식 차트 분석 시스템
                                 logger.info(f"   ✅ {json_file.name} 삭제됨")
                                 removed_count += 1
                         else:
-                            # PNG 파일들만 삭제
+                            # 이미지 파일들 삭제 (PNG, JPG, JPEG)
                             for png_file in chart_path.glob('*.png'):
                                 png_file.unlink()
                                 logger.info(f"   ✅ {png_file.name} 삭제됨")
+                                removed_count += 1
+                            for jpg_file in chart_path.glob('*.jpg'):
+                                jpg_file.unlink()
+                                logger.info(f"   ✅ {jpg_file.name} 삭제됨")
+                                removed_count += 1
+                            for jpeg_file in chart_path.glob('*.jpeg'):
+                                jpeg_file.unlink()
+                                logger.info(f"   ✅ {jpeg_file.name} 삭제됨")
                                 removed_count += 1
                     except Exception as e:
                         logger.warning(f"   ⚠️ {chart_dir} 정리 실패: {e}")

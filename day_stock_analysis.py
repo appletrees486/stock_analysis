@@ -1109,7 +1109,7 @@ def create_stock_chart(hist, stock_code):
         # 실패시 기본값 사용
         pass
     
-    # 파일명 생성: daily_종목명_종목번호_DB최신거래일.png
+    # 파일명 생성: daily_종목명_종목번호_DB최신거래일.jpg
     # DB에서 최신 거래일 조회하여 파일명에 포함
     db_latest_date = "unknown"
     try:
@@ -1125,7 +1125,7 @@ def create_stock_chart(hist, stock_code):
         db_latest_date = datetime.now().strftime("%Y%m%d")
     
     # 종목명에서 띄어쓰기 제거하여 파일명 생성
-    base_filename = f"daily_{stock_name.replace(' ', '')}_{stock_code}_{db_latest_date}.png"
+    base_filename = f"daily_{stock_name.replace(' ', '')}_{stock_code}_{db_latest_date}.jpg"
     
     # 파일명에서 특수문자 제거 및 공백을 언더스코어로 변경
     base_filename = base_filename.replace(" ", "_").replace("/", "_").replace("\\", "_").replace(":", "_")
@@ -1143,12 +1143,13 @@ def create_stock_chart(hist, stock_code):
         filepath = os.path.join(charts_dir, filename)
         version += 1
     
-    # 한글 인코딩 보장하여 차트 저장
+    # 한글 인코딩 보장하여 차트 저장 (JPEG 포맷, 품질 95%)
     plt.savefig(filepath, dpi=100, bbox_inches='tight', 
                 facecolor='white', edgecolor='none', 
-                format='png')
+                format='jpg', pil_kwargs={'quality': 95})
     print(f"💾 차트가 저장되었습니다: {filepath}")
     print(f"   📝 한글 폰트: {available_font} 적용")
+    print(f"   🎨 이미지 포맷: JPEG (품질: 95%)")
     
     # 차트 뷰어를 띄우지 않고 차트 닫기
     plt.close(fig)  # 특정 figure 닫기

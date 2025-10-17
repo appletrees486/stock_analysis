@@ -179,7 +179,7 @@ class StockNameMapper:
                         stock_name = self.get_stock_name(stock_code)
                         return stock_name, stock_code
                 
-                # 차트 파일 패턴 처리: daily_종목명_종목번호_날짜.png
+                # 차트 파일 패턴 처리: daily_종목명_종목번호_날짜.jpg
                 if len(parts) >= 3 and parts[0] in ["daily", "weekly", "monthly"]:
                     # daily_지투지바이오_456160_20250916 형태에서 종목번호 찾기
                     # 차트타입_종목명_종목코드_날짜 패턴에서 종목코드는 3번째 부분 (parts[2])
@@ -3076,7 +3076,7 @@ def main():
     
     for folder in chart_folders:
         if os.path.exists(folder):
-            chart_files = [f for f in os.listdir(folder) if f.endswith('.png')]
+            chart_files = [f for f in os.listdir(folder) if f.endswith('.jpg')]
             if chart_files:
                 available_folders.append((folder, chart_files))
     

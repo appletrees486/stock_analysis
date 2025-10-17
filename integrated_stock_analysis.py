@@ -559,7 +559,7 @@ def run_ai_analysis_automated(stock_name: str, stock_code: str, chart_type: str,
             print(f"❌ {charts_dir} 폴더를 찾을 수 없습니다.")
             return False
         
-        chart_files = [f for f in os.listdir(charts_dir) if f.endswith('.png') and stock_code in f]
+        chart_files = [f for f in os.listdir(charts_dir) if f.endswith('.jpg') and stock_code in f]
         
         if not chart_files:
             print(f"❌ 해당 종목의 {chart_type} 차트 파일을 찾을 수 없습니다.")
@@ -604,7 +604,7 @@ def run_ai_analysis_automated(stock_name: str, stock_code: str, chart_type: str,
                             if chart_path:
                                 print(f"   ✅ 차트 재생성 완료: {chart_path}")
                                 # 재생성된 차트 파일 선택
-                                chart_files = [f for f in os.listdir(charts_dir) if f.endswith('.png') and stock_code in f]
+                                chart_files = [f for f in os.listdir(charts_dir) if f.endswith('.jpg') and stock_code in f]
                                 matching_files = [f for f in chart_files if db_latest_date in f]
                                 if matching_files:
                                     selected_file = matching_files[0]
@@ -773,7 +773,7 @@ def show_final_results(stock_name: str, chart_type: str):
     chart_folders = ["daily_charts", "weekly_charts", "monthly_charts"]
     for folder in chart_folders:
         if os.path.exists(folder):
-            chart_files = [f for f in os.listdir(folder) if f.endswith('.png') and stock_name in f]
+            chart_files = [f for f in os.listdir(folder) if f.endswith('.jpg') and stock_name in f]
             if chart_files:
                 print(f"   📈 {folder}: {len(chart_files)}개")
                 for file in chart_files:

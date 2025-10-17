@@ -335,12 +335,12 @@ class BatchScheduler:
             from ranking_data_extractor import RankingDataExtractor
             
             extractor = RankingDataExtractor()
-            today = datetime.now().strftime('%Y-%m-%d')
             timestamp = datetime.now().strftime('%Y%m%d_%H%M')
             batch_id = f"schedule_{schedule_id}_{timestamp}"
             
+            # target_date=None으로 전달하면 daily_data의 최신 trade_date 자동 조회
             result = extractor.extract_rankings_for_auto_analysis(
-                target_date=today,
+                target_date=None,  # None으로 전달하면 daily_data의 최신 trade_date 사용
                 batch_id=batch_id
             )
             
@@ -416,7 +416,7 @@ class BatchScheduler:
             )
             
             # 2. 거래대금 분석
-            logger.info(f"[INFO] 거래대금 상위 50위 분석 시작...")
+            logger.info(f"💰 거래대금 상위 50위 분석 시작...")
             volume_batch_id = f"auto_volume_{timestamp}"
             
             batch_analyzer.start_batch_analysis(
@@ -428,8 +428,10 @@ class BatchScheduler:
                 email_address=''
             )
             
-            # 참고: 파일 삭제는 모든 분석이 완료된 후에 수행됩니다
-            # (batch_analyzer의 cleanup_batch에서 처리)
+            # 🆕 모든 분석이 완료된 후 캐시 정리 (차트 이미지 꼬임 방지)
+            logger.info(f"🧹 모든 분석 완료 후 캐시 정리 시작...")
+            batch_analyzer.clear_batch_cache(f"auto_analysis_{timestamp}")
+            logger.info(f"✅ 캐시 정리 완료!")
             
             # 분석 시작 플래그 업데이트
             if not self.db.connect():
@@ -450,10 +452,219 @@ class BatchScheduler:
             
             logger.info(f"✅ 분석 완료: Schedule ID={schedule_id}")
             
+            # 🆕 분석 완료 후 블로그 작성 시작
+            logger.info(f"📝 블로그 자동 작성 시작: Schedule ID={schedule_id}")
+            self._run_blog_writing_async(schedule_id)
+            
         except Exception as e:
             logger.error(f"분석 실행 중 오류: {e}")
             import traceback
             logger.error(traceback.format_exc())
+    
+    def _run_blog_writing_async(self, schedule_id: int):
+        """블로그 작성 실행 (비동기)"""
+        try:
+            logger.info(f"📝 블로그 자동 작성 시작: Schedule ID={schedule_id}")
+            
+            # auto_blog.py 임포트
+            import sys
+            import os
+            
+            # 프로젝트 루트 및 blog_auto 디렉토리 경로 설정
+            project_root = os.path.dirname(os.path.abspath(__file__))
+            blog_auto_path = os.path.join(project_root, 'blog_auto')
+            docs_path = os.path.join(blog_auto_path, 'docs')
+            
+            logger.info(f"[DEBUG] 프로젝트 루트: {project_root}")
+            logger.info(f"[DEBUG] blog_auto 경로: {blog_auto_path}")
+            logger.info(f"[DEBUG] docs 경로: {docs_path}")
+            
+            # blog_auto 디렉토리를 경로에 추가
+            if blog_auto_path not in sys.path:
+                sys.path.insert(0, blog_auto_path)
+            
+            # docs 디렉토리 존재 확인
+            if not os.path.exists(docs_path):
+                logger.warning(f"⚠️ docs 디렉토리가 존재하지 않습니다: {docs_path}")
+                logger.info(f"📁 docs 디렉토리를 생성합니다...")
+                os.makedirs(docs_path, exist_ok=True)
+            
+            from auto_blog import NaverBlogBot
+            
+            # 블로그 봇 인스턴스 생성 (일반 모드 - 캡챠 처리 가능)
+            bot = NaverBlogBot(headless=False, debug_mode=True)
+            
+            try:
+                # 로그인
+                if not bot.run_login():
+                    logger.error(f"❌ 블로그 로그인 실패: Schedule ID={schedule_id}")
+                    self._update_blog_writing_status(schedule_id, False, "로그인 실패")
+                    return
+                
+                logger.info(f"✅ 블로그 로그인 성공: Schedule ID={schedule_id}")
+                
+                # docs 경로 확인
+                if not os.path.exists(docs_path):
+                    logger.error(f"❌ docs 디렉토리를 찾을 수 없습니다: {docs_path}")
+                    self._update_blog_writing_status(schedule_id, False, "docs 디렉토리 없음")
+                    return
+                
+                # docs 디렉토리의 zip 파일 확인
+                zip_files = [f for f in os.listdir(docs_path) if f.endswith('.zip')]
+                logger.info(f"📂 docs 디렉토리: {docs_path}")
+                logger.info(f"📦 발견된 zip 파일: {len(zip_files)}개")
+                
+                if zip_files:
+                    for zip_file in zip_files:
+                        logger.info(f"   - {zip_file}")
+                
+                # docs 폴더의 zip 파일 처리 및 블로그 작성
+                if bot.docs_zip_processor:
+                    # 미처리 zip 파일 확인
+                    unprocessed_zips = bot.get_unprocessed_zips()
+                    
+                    if not unprocessed_zips:
+                        logger.info(f"📭 처리할 zip 파일이 없습니다: Schedule ID={schedule_id}")
+                        logger.info(f"   (총 {len(zip_files)}개 zip 파일이 있지만 모두 처리됨)")
+                        self._update_blog_writing_status(schedule_id, True, "처리할 파일 없음")
+                        return
+                    
+                    logger.info(f"📦 총 {len(unprocessed_zips)}개의 zip 파일 처리 시작")
+                    
+                    # 각 zip 파일 처리
+                    success_count = 0
+                    for zip_path in unprocessed_zips:
+                        zip_filename = os.path.basename(zip_path)
+                        logger.info(f"📝 블로그 작성 중: {zip_filename}")
+                        
+                        try:
+                            # 단일 zip 파일 처리
+                            blog_post = bot.docs_zip_processor.process_single_zip_file(zip_path)
+                            
+                            if not blog_post:
+                                logger.error(f"❌ ZIP 파일 처리 실패: {zip_filename}")
+                                continue
+                            
+                            # 블로그 글쓰기 페이지로 이동
+                            if not bot.navigate_to_blog_write():
+                                logger.error(f"❌ 블로그 글쓰기 페이지 이동 실패")
+                                continue
+                            
+                            # iframe으로 전환
+                            if not bot.switch_to_blog_frame():
+                                logger.error(f"❌ iframe 전환 실패")
+                                continue
+                            
+                            # 팝업 닫기
+                            bot.close_popups_and_help()
+                            
+                            # 제목 입력
+                            if not bot.enter_blog_title(blog_post['title']):
+                                logger.error(f"❌ 제목 입력 실패")
+                                continue
+                            
+                            # 내용과 표 입력
+                            if not bot.write_content_with_structured_tables(blog_post['content'], blog_post['tables']):
+                                logger.error(f"❌ 내용 입력 실패")
+                                continue
+                            
+                            # 첨부파일 추가
+                            if blog_post.get('attachment_file'):
+                                if not bot.add_file_to_blog(blog_post['attachment_file']):
+                                    logger.warning(f"⚠️ 첨부파일 추가 실패")
+                            
+                            # 분석월 추출 (ZIP 파일명에서)
+                            analysis_month = None
+                            try:
+                                from zip_analyzer import ZipAnalyzer
+                                zip_analyzer = ZipAnalyzer()
+                                zip_result = zip_analyzer.parse_zip_filename(zip_filename)
+                                if zip_result:
+                                    analysis_month = zip_result['analysis_month']
+                            except Exception as e:
+                                logger.warning(f"⚠️ 분석월 추출 실패: {e}")
+                            
+                            # 태그 정보
+                            tags = blog_post.get('tags', '')
+                            
+                            # 발행
+                            if not bot.click_save_button(analysis_month, tags):
+                                logger.error(f"❌ 발행 실패")
+                                continue
+                            
+                            logger.info(f"✅ 블로그 작성 완료: {zip_filename}")
+                            success_count += 1
+                            
+                            # 처리 완료 표시
+                            bot.mark_zip_as_processed(zip_filename)
+                            
+                            # 작성 페이지로 돌아가기
+                            bot.return_to_write_page()
+                            
+                            # extracted 폴더만 정리 (ZIP 파일은 유지)
+                            if bot.docs_zip_processor:
+                                bot.docs_zip_processor.cleanup_extracted_files()
+                                logger.info(f"✅ extracted 폴더 정리 완료")
+                            
+                        except Exception as e:
+                            logger.error(f"❌ 블로그 작성 중 오류: {e}")
+                            import traceback
+                            logger.error(traceback.format_exc())
+                            continue
+                    
+                    # 블로그 작성 상태 업데이트
+                    if success_count > 0:
+                        self._update_blog_writing_status(schedule_id, True, f"{success_count}개 포스트 작성 완료")
+                        logger.info(f"✅ 블로그 자동 작성 완료: {success_count}개 포스트")
+                    else:
+                        self._update_blog_writing_status(schedule_id, False, "모든 포스트 작성 실패")
+                        logger.error(f"❌ 블로그 자동 작성 실패: 모든 포스트 작성 실패")
+                else:
+                    logger.error(f"❌ docs zip 처리기를 사용할 수 없습니다.")
+                    self._update_blog_writing_status(schedule_id, False, "docs zip 처리기 없음")
+                
+            finally:
+                # 드라이버 정리
+                bot.close_driver()
+                
+        except Exception as e:
+            logger.error(f"블로그 자동 작성 중 오류: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            self._update_blog_writing_status(schedule_id, False, str(e))
+    
+    def _update_blog_writing_status(self, schedule_id: int, success: bool, message: str = ""):
+        """블로그 작성 상태 업데이트"""
+        try:
+            if not self.db.connect():
+                logger.error("DB 연결 실패")
+                return
+            
+            if success:
+                update_query = """
+                UPDATE batch_schedules 
+                SET blog_written = TRUE, 
+                    blog_written_at = %s,
+                    updated_at = %s
+                WHERE id = %s
+                """
+                params = (datetime.now(), datetime.now(), schedule_id)
+            else:
+                update_query = """
+                UPDATE batch_schedules 
+                SET blog_error_message = %s,
+                    updated_at = %s
+                WHERE id = %s
+                """
+                params = (message, datetime.now(), schedule_id)
+            
+            if self.db.execute_query(update_query, params):
+                logger.info(f"블로그 작성 상태 업데이트: Schedule ID={schedule_id}, Success={success}")
+            
+        except Exception as e:
+            logger.error(f"블로그 작성 상태 업데이트 실패: {e}")
+        finally:
+            self.db.disconnect()
     
     def _run_daily_collection(self, job_id: int, job_config: Dict):
         """일일 시세 수집 실행"""

@@ -140,8 +140,8 @@ class WeekMonthDataGenerator:
                 week_close = week_group.iloc[-1]['close']
                 week_volume = week_group['volume'].sum()
                 
-                # 거래일 수 확인 (최소 4일 이상 거래된 주만 포함)
-                if len(week_group) >= 4:
+                # 거래일 수 확인 (최소 1일 이상 거래된 주만 포함)
+                if len(week_group) >= 1:
                     weekly_data.append({
                         'trade_date': week_start,
                         'open': week_open,

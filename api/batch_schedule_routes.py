@@ -41,6 +41,8 @@ def get_schedule_list():
         query = """
         SELECT s.id, s.schedule_name, s.job_type, s.cron_expression, s.is_active,
                s.last_run, s.next_run, s.description, s.job_config,
+               s.collection_completed, s.ranking_extracted, s.analysis_started,
+               s.blog_written, s.blog_written_at, s.blog_post_url, s.blog_error_message,
                j.status as last_job_status, j.success_count, j.failed_count
         FROM batch_schedules s
         LEFT JOIN collection_jobs j ON s.last_job_id = j.id
@@ -70,7 +72,14 @@ def get_schedule_list():
                 'job_config': job_config,
                 'last_job_status': schedule['last_job_status'],
                 'last_success_count': schedule['success_count'] or 0,
-                'last_failed_count': schedule['failed_count'] or 0
+                'last_failed_count': schedule['failed_count'] or 0,
+                'collection_completed': bool(schedule.get('collection_completed', False)),
+                'ranking_extracted': bool(schedule.get('ranking_extracted', False)),
+                'analysis_started': bool(schedule.get('analysis_started', False)),
+                'blog_written': bool(schedule.get('blog_written', False)),
+                'blog_written_at': schedule['blog_written_at'].isoformat() if schedule.get('blog_written_at') else None,
+                'blog_post_url': schedule.get('blog_post_url'),
+                'blog_error_message': schedule.get('blog_error_message')
             })
         
         return jsonify({

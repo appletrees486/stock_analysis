@@ -48,7 +48,7 @@ class StockDataCollector:
         self.market_detector = MarketStatusDetector()  # 시장 상태 감지기
         self.data_validator = EnhancedDataValidator()  # 데이터 검증기
         self.batch_size = 200  # 배치 크기 증가 (안정성 유지) [최적화]
-        self.delay_between_requests = 0  # 요청 간 딜레이 제거 (DB 작업이므로 불필요) [최적화]
+        self.delay_between_requests = 0.03  # 요청 간 딜레이 (30ms - 속도와 안정성 균형) [최적화]
         self.max_retries = 5  # 최대 재시도 횟수 (100% 수집 목표) [최적화]
         self.max_workers = 8  # 병렬 처리 워커 수 증가 (속도 개선) [최적화]
         self.batch_delay = 1  # 배치 간 딜레이 (1초 - 속도 개선) [최적화]
@@ -287,52 +287,6 @@ class StockDataCollector:
             
         except Exception as e:
             logging.error(f"배치 마지막 수집 날짜 조회 실패: {e}")
-            return {}
-    
-    def get_batch_daily_data(self, stock_codes):
-        """배치로 여러 종목의 일봉 데이터 한 번에 조회 [최적화]"""
-        try:
-            if not stock_codes:
-                return {}
-            
-            # IN 절을 위한 플레이스홀더 생성
-            placeholders = ','.join(['%s'] * len(stock_codes))
-            query = f"""
-            SELECT stock_code, trade_date, open, high, low, close, volume
-            FROM daily_data 
-            WHERE stock_code IN ({placeholders})
-            ORDER BY stock_code, trade_date ASC
-            """
-            
-            result = self.db.fetch_all(query, tuple(stock_codes))
-            
-            if not result:
-                logging.warning(f"⚠️ 배치 조회 결과 없음")
-                return {}
-            
-            # 종목별로 데이터프레임 생성
-            stock_data_dict = {}
-            df_all = pd.DataFrame(result)
-            
-            for stock_code in stock_codes:
-                stock_df = df_all[df_all['stock_code'] == stock_code].copy()
-                if not stock_df.empty:
-                    stock_df['trade_date'] = pd.to_datetime(stock_df['trade_date'])
-                    stock_df.set_index('trade_date', inplace=True)
-                    stock_df = stock_df[['open', 'high', 'low', 'close', 'volume']]
-                    stock_df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-                    
-                    # Decimal 타입을 float로 변환
-                    for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
-                        stock_df[col] = stock_df[col].astype(float)
-                    
-                    stock_data_dict[stock_code] = stock_df
-            
-            logging.info(f"✅ 배치 조회 완료: {len(stock_data_dict)}/{len(stock_codes)}개 종목")
-            return stock_data_dict
-                
-        except Exception as e:
-            logging.error(f"❌ 배치 일봉 데이터 조회 실패: {e}")
             return {}
     
     def get_last_collected_date(self, stock_code):
@@ -1143,62 +1097,6 @@ class StockDataCollector:
             logging.error(f"{stock_code} 기술적 지표 저장 중 오류: {e}")
             return False
     
-    def save_technical_indicators_fixed(self, stock_code, df_with_indicators):
-        """기술적 지표를 데이터베이스에 저장 (청크 저장) [최적화]"""
-        try:
-            technical_insert_sql = """
-            INSERT INTO technical_indicators 
-            (stock_code, trade_date, ma5, ma20, ma60, ma120, rsi, macd, macd_signal, macd_histogram, bb_upper, bb_middle, bb_lower)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON DUPLICATE KEY UPDATE
-            ma5 = VALUES(ma5), ma20 = VALUES(ma20), ma60 = VALUES(ma60), ma120 = VALUES(ma120),
-            rsi = VALUES(rsi), macd = VALUES(macd), macd_signal = VALUES(macd_signal), macd_histogram = VALUES(macd_histogram),
-            bb_upper = VALUES(bb_upper), bb_middle = VALUES(bb_middle), bb_lower = VALUES(bb_lower),
-            updated_at = CURRENT_TIMESTAMP
-            """
-            
-            technical_data = []
-            for date, row in df_with_indicators.iterrows():
-                # NaN 값 처리 (NULL 값 허용)
-                ma5 = row['MA5'] if pd.notna(row['MA5']) else None
-                ma20 = row['MA20'] if pd.notna(row['MA20']) else None
-                ma60 = row['MA60'] if pd.notna(row['MA60']) else None
-                ma120 = row['MA120'] if pd.notna(row['MA120']) else None
-                rsi = row['RSI'] if pd.notna(row['RSI']) else None
-                macd = row['MACD'] if pd.notna(row['MACD']) else None
-                macd_signal = row['MACD_Signal'] if pd.notna(row['MACD_Signal']) else None
-                macd_histogram = row['MACD_Histogram'] if pd.notna(row['MACD_Histogram']) else None
-                bb_upper = row['BB_Upper'] if pd.notna(row['BB_Upper']) else None
-                bb_middle = row['BB_Middle'] if pd.notna(row['BB_Middle']) else None
-                bb_lower = row['BB_Lower'] if pd.notna(row['BB_Lower']) else None
-                
-                technical_data.append((
-                    stock_code,
-                    date.strftime('%Y-%m-%d'),
-                    ma5, ma20, ma60, ma120,
-                    rsi,
-                    macd, macd_signal, macd_histogram,
-                    bb_upper, bb_middle, bb_lower
-                ))
-            
-            # 500개씩 나눠서 INSERT (최적화)
-            chunk_size = 500
-            total_saved = 0
-            for i in range(0, len(technical_data), chunk_size):
-                chunk = technical_data[i:i + chunk_size]
-                if self.db.execute_many(technical_insert_sql, chunk):
-                    total_saved += len(chunk)
-                else:
-                    logging.error(f"❌ {stock_code} 기술적 지표 청크 저장 실패 (시작: {i})")
-                    return False
-            
-            logging.info(f"✅ {stock_code} 기술적 지표 {total_saved}개 저장 완료")
-            return True
-                
-        except Exception as e:
-            logging.error(f"❌ {stock_code} 기술적 지표 저장 중 오류: {e}")
-            return False
-    
     def update_collection_status(self, stock_code, hist_data):
         """종목별 수집 상태 업데이트"""
         try:
@@ -1540,12 +1438,9 @@ class StockDataCollector:
             stock_codes = [stock[0] for stock in stock_batch]
             batch_last_dates = self.get_batch_last_collected_dates(stock_codes)
             
-            # ✅ 배치 전체 종목의 일봉 데이터를 한 번에 조회 [최적화]
-            logging.info(f"🔍 배치 {batch_num}: {len(stock_codes)}개 종목 데이터 일괄 조회 중...")
-            batch_daily_data_dict = self.get_batch_daily_data(stock_codes)
-            
             # 배치 내 모든 종목 데이터를 수집
             batch_daily_data = []
+            batch_technical_data = []
             batch_status_data = []
             
             logging.info(f"🔄 배치 {batch_num} 종목 처리 루프 시작 - {len(stock_batch)}개 종목 처리 예정")
@@ -1564,30 +1459,46 @@ class StockDataCollector:
                         skipped_count += 1
                         continue
                     
-                    # ✅ 미리 조회한 데이터 사용 (배치 조회 최적화)
-                    if stock_code in batch_daily_data_dict:
-                        daily_data = batch_daily_data_dict[stock_code]
+                    # 배치로 조회한 마지막 수집 날짜 사용
+                    last_collected_date = batch_last_dates.get(stock_code)
+                    
+                    # 데이터 조회 (마지막 수집 날짜 정보 전달)
+                    hist_data = self.get_stock_data_with_last_date(stock_code, stock_name, last_collected_date)
+                    
+                    if hist_data is not None and not hist_data.empty:
+                        # 데이터 준비 (저장하지 않고 메모리에 보관)
+                        daily_data, technical_data, status_data = self.prepare_stock_data(stock_code, hist_data)
                         
-                        if daily_data is not None and not daily_data.empty:
-                            # ✅ 기술적 지표 즉시 계산 및 저장 [최적화]
-                            df_with_indicators = self.calculate_technical_indicators(daily_data.copy())
-                            
-                            # ✅ 각 종목마다 즉시 저장 (청크 500개씩) [최적화]
-                            if self.save_technical_indicators_fixed(stock_code, df_with_indicators):
-                                logging.info(f"✅ {stock_code} ({stock_name}) 보조지표 저장 완료")
-                                success_count += 1
+                        if daily_data and len(daily_data) > 0:
+                            batch_daily_data.extend(daily_data)
+                            batch_technical_data.extend(technical_data)
+                            batch_status_data.append(status_data)
+                            success_count += 1
+                            # 10개 종목마다만 성공 로그 출력
+                            if i % 10 == 0 or i == 1:
+                                logging.info(f"✅ {stock_code} ({stock_name}) 데이터 준비 완료 ({len(daily_data)}일)")
                             else:
-                                logging.error(f"❌ {stock_code} ({stock_name}) 보조지표 저장 실패")
-                                failed_count += 1
+                                logging.debug(f"✅ {stock_code} ({stock_name}) 데이터 준비 완료 ({len(daily_data)}일)")
+                            
+                            # 유통주식수는 save_daily_data에서 이미 통합 처리됨 (중복 로직 제거)
                         else:
-                            logging.warning(f"⚠️ {stock_code} ({stock_name}): 일봉 데이터가 비어있음")
                             failed_count += 1
+                            logging.error(f"❌ {stock_code} ({stock_name}) 데이터 준비 실패 (빈 데이터)")
+                    elif hist_data is None:
+                        # 이미 최신 데이터이거나 데이터가 없는 경우 - 즉시 건너뛰기 (딜레이 없음)
+                        if i % 10 == 0 or i == 1:
+                            logging.info(f"✅ {stock_code} ({stock_name}) 이미 최신 데이터이거나 수집할 데이터가 없습니다. (즉시 건너뛰기)")
+                        else:
+                            logging.debug(f"✅ {stock_code} ({stock_name}) 이미 최신 데이터 (즉시 건너뛰기)")
+                        success_count += 1
+                        continue  # 즉시 다음 종목으로 (time.sleep 없음)
                     else:
-                        logging.warning(f"⚠️ {stock_code} ({stock_name}): 배치 조회 결과에 없음")
+                        logging.warning(f"❌ {stock_code} ({stock_name}) 데이터 조회 실패")
                         failed_count += 1
                     
-                    # ✅ DB 작업이므로 딜레이 제거 [최적화]
-                    # time.sleep() 제거
+                    # API 호출 간격 조절 (랜덤 딜레이로 API 제한 방지)
+                    delay = self.delay_between_requests + random.uniform(0.01, 0.03)
+                    time.sleep(delay)
                     
                     # DB 연결 상태 주기적 확인 (10개 종목마다)
                     if i % 10 == 0:
@@ -1609,12 +1520,71 @@ class StockDataCollector:
                         time.sleep(10)
             
             # 배치 처리 루프 완료 로깅
-            logging.info(f"🔄 배치 {batch_num} 종목 처리 루프 완료")
+            logging.info(f"🔄 배치 {batch_num} 종목 처리 루프 완료 - 저장 단계로 진행")
             logging.info(f"🔄 배치 {batch_num} 배치 데이터 현황:")
+            logging.info(f"   📊 일봉 데이터: {len(batch_daily_data)}개")
+            logging.info(f"   📊 기술적 지표: {len(batch_technical_data)}개")
+            logging.info(f"   📊 수집 상태: {len(batch_status_data)}개")
             logging.info(f"   📊 성공: {success_count}개, 실패: {failed_count}개, 건너뜀: {skipped_count}개")
             
-            # ✅ 보조지표는 이미 각 종목마다 즉시 저장되었으므로 배치 저장 불필요 [최적화]
-            logging.info(f"✅ 배치 {batch_num}: 보조지표는 이미 각 종목마다 즉시 저장 완료")
+            # 배치 단위로 데이터베이스에 저장 (오류 처리 강화)
+            logging.info(f"💾 배치 {batch_num} 데이터베이스 저장 시작...")
+            logging.info(f"💾 배치 {batch_num} 저장 전 DB 연결 상태 확인 중...")
+            
+            # DB 연결 상태 재확인
+            if not self.db.is_connected():
+                logging.warning(f"⚠️ 배치 {batch_num} 저장 전 DB 연결이 끊어져 있습니다. 재연결 시도...")
+                if not self.db.connect():
+                    logging.error(f"❌ 배치 {batch_num} 저장 전 DB 재연결 실패")
+                    return 0, len(stock_batch)
+                else:
+                    logging.info(f"✅ 배치 {batch_num} 저장 전 DB 재연결 성공")
+            else:
+                logging.info(f"✅ 배치 {batch_num} 저장 전 DB 연결 상태 정상")
+            
+            if batch_daily_data:
+                try:
+                    logging.info(f"💾 배치 {batch_num} 일봉 데이터 저장 시작... ({len(batch_daily_data)}개)")
+                    logging.info(f"💾 배치 {batch_num} 저장할 데이터 샘플: {batch_daily_data[0] if batch_daily_data else 'None'}")
+                    
+                    save_result = self.save_batch_daily_data(batch_daily_data)
+                    logging.info(f"💾 배치 {batch_num} save_batch_daily_data 결과: {save_result}")
+                    
+                    if save_result:
+                        logging.info(f"✅ 배치 {batch_num} 일봉 데이터 {len(batch_daily_data)}개 저장 완료")
+                    else:
+                        logging.error(f"❌ 배치 {batch_num} 일봉 데이터 저장 실패")
+                        # 저장 실패 시 성공 카운트 조정
+                        failed_count += len(batch_daily_data)
+                        success_count -= len(batch_daily_data)
+                except Exception as e:
+                    logging.error(f"❌ 배치 {batch_num} 일봉 데이터 저장 중 예외 발생: {e}")
+                    import traceback
+                    logging.error(f"❌ 배치 {batch_num} 상세 오류: {traceback.format_exc()}")
+                    failed_count += len(batch_daily_data)
+                    success_count -= len(batch_daily_data)
+            else:
+                logging.warning(f"⚠️ 배치 {batch_num}: 저장할 일봉 데이터가 없습니다.")
+            
+            if batch_technical_data:
+                try:
+                    logging.info(f"💾 기술적 지표 저장 중... ({len(batch_technical_data)}개)")
+                    if self.save_batch_technical_indicators(batch_technical_data):
+                        logging.info(f"✅ 배치 {batch_num} 기술적 지표 {len(batch_technical_data)}개 저장 완료")
+                    else:
+                        logging.error(f"❌ 배치 {batch_num} 기술적 지표 저장 실패")
+                except Exception as e:
+                    logging.error(f"❌ 배치 {batch_num} 기술적 지표 저장 중 예외 발생: {e}")
+            
+            if batch_status_data:
+                try:
+                    logging.info(f"💾 수집 상태 업데이트 중... ({len(batch_status_data)}개)")
+                    if self.save_batch_collection_status(batch_status_data):
+                        logging.info(f"✅ 배치 {batch_num} 수집 상태 {len(batch_status_data)}개 업데이트 완료")
+                    else:
+                        logging.error(f"❌ 배치 {batch_num} 수집 상태 업데이트 실패")
+                except Exception as e:
+                    logging.error(f"❌ 배치 {batch_num} 수집 상태 업데이트 중 예외 발생: {e}")
             
             logging.info(f"🎉 배치 {batch_num}/{total_batches} 완료!")
             logging.info(f"✅ 성공: {success_count}개, ❌ 실패: {failed_count}개, ⏭️ 건너뜀: {skipped_count}개")
@@ -1947,8 +1917,8 @@ class StockDataCollector:
             updated_at = CURRENT_TIMESTAMP
             """
             
-            # 🚀 청크 단위로 분할 저장 (500개씩) [최적화]
-            chunk_size = 500
+            # 🚀 청크 단위로 분할 저장 (1,000개씩)
+            chunk_size = 1000
             total_chunks = (len(valid_data) + chunk_size - 1) // chunk_size
             saved_count = 0
             failed_count = 0
@@ -2092,10 +2062,10 @@ class StockDataCollector:
                 total_success += success
                 total_failed += failed
                 
-                # ✅ 배치 간 딜레이 단축 (1초 → 0.5초) [최적화]
+                # 배치 간 딜레이 (API 제한 방지)
                 if batch_num < total_batches:
-                    logging.info(f"⏳ 다음 배치까지 0.5초 대기...")
-                    time.sleep(0.5)
+                    logging.info(f"⏳ 다음 배치까지 {self.batch_delay}초 대기...")
+                    time.sleep(self.batch_delay)
                 
             except KeyboardInterrupt:
                 logging.warning("⚠️ 사용자에 의해 중단되었습니다.")
@@ -2953,12 +2923,12 @@ class StockDataCollector:
         except Exception as e:
             logging.error(f"❌ 실패 종목 리스트 저장 실패: {e}")
     
-    def validate_and_fix_technical_indicators(self, max_retries=3, null_threshold=0.06):
-        """기술지표 검증 및 수정 (최대 3회 재시도, 6% 임계치)"""
+    def validate_and_fix_technical_indicators(self, max_retries=3, null_threshold=0.05, ma120_null_threshold=0.06):
+        """기술지표 검증 및 수정 (최대 3회 재시도, 5% 임계치, ma120은 6% 임계치)"""
         try:
             logging.info("🔍 기술지표 검증 및 수정 시작")
             logging.info(f"   최대 재시도: {max_retries}회")
-            logging.info(f"   NULL 임계치: {null_threshold:.1%}")
+            logging.info(f"   NULL 임계치: {null_threshold:.1%} (ma120: {ma120_null_threshold:.1%})")
             
             for attempt in range(max_retries):
                 logging.info(f"🔄 {attempt + 1}차 검증 시도")
@@ -2966,62 +2936,41 @@ class StockDataCollector:
                 # 1. NULL 값 검사
                 null_stats = self.check_technical_indicators_null_ratio()
                 
-                # 2. 임계치 이하면 성공으로 간주
-                if null_stats['null_ratio'] < null_threshold:
-                    logging.info(f"✅ 기술지표 검증 완료 (NULL 비율: {null_stats['null_ratio']:.2%})")
+                # 2. ma120은 별도 임계치 적용, 나머지는 기본 임계치 적용
+                ma120_null_ratio = null_stats['null_counts']['ma120'] / null_stats['total_records'] if null_stats['total_records'] > 0 else 0
+                other_null_ratio = max([
+                    null_stats['null_counts']['ma5'] / null_stats['total_records'] if null_stats['total_records'] > 0 else 0,
+                    null_stats['null_counts']['ma20'] / null_stats['total_records'] if null_stats['total_records'] > 0 else 0,
+                    null_stats['null_counts']['ma60'] / null_stats['total_records'] if null_stats['total_records'] > 0 else 0,
+                    null_stats['null_counts']['rsi'] / null_stats['total_records'] if null_stats['total_records'] > 0 else 0,
+                    null_stats['null_counts']['macd'] / null_stats['total_records'] if null_stats['total_records'] > 0 else 0,
+                    null_stats['null_counts']['bb_upper'] / null_stats['total_records'] if null_stats['total_records'] > 0 else 0,
+                ])
+                
+                # 임계치 이하면 성공으로 간주
+                if ma120_null_ratio < ma120_null_threshold and other_null_ratio < null_threshold:
+                    logging.info(f"✅ 기술지표 검증 완료 (ma120 NULL 비율: {ma120_null_ratio:.2%}, 기타 NULL 비율: {other_null_ratio:.2%})")
                     return True
                 
                 # 3. 재시도 필요
                 if attempt < max_retries - 1:
-                    logging.warning(f"⚠️ 기술지표 NULL 값 {null_stats['null_ratio']:.2%} 발견 - {attempt + 1}차 재시도")
+                    logging.warning(f"⚠️ 기술지표 NULL 값 발견 - {attempt + 1}차 재시도")
+                    logging.warning(f"   ma120 NULL 비율: {ma120_null_ratio:.2%} (임계치: {ma120_null_threshold:.1%})")
+                    logging.warning(f"   기타 지표 NULL 비율: {other_null_ratio:.2%} (임계치: {null_threshold:.1%})")
                     if self.fix_technical_indicators_for_failed_stocks(null_stats['failed_stocks']):
                         logging.info(f"✅ {attempt + 1}차 재수집 완료")
                     else:
                         logging.error(f"❌ {attempt + 1}차 재수집 실패")
                 else:
-                    # 최종 실패 - technical_indicators_recollector.py를 직접 실행
+                    # 최종 실패
                     logging.error(f"❌ {max_retries}회 재시도 후에도 기술지표 문제 지속")
-                    logging.error(f"   최종 NULL 비율: {null_stats['null_ratio']:.2%}")
+                    logging.error(f"   ma120 최종 NULL 비율: {ma120_null_ratio:.2%} (임계치: {ma120_null_threshold:.1%})")
+                    logging.error(f"   기타 지표 최종 NULL 비율: {other_null_ratio:.2%} (임계치: {null_threshold:.1%})")
                     logging.error(f"   문제 종목 수: {len(null_stats['failed_stocks'])}개")
                     
                     # 실패한 종목 리스트 저장
                     self.save_failed_stocks_report(null_stats['failed_stocks'])
-                    
-                    # 🔥 강력한 재수집: technical_indicators_recollector.py를 직접 실행 (전체 종목 재수집)
-                    logging.warning("🔥 최종 재수집: technical_indicators_recollector.py를 직접 실행합니다...")
-                    try:
-                        import subprocess
-                        import sys
-                        
-                        # technical_indicators_recollector.py를 subprocess로 실행
-                        result = subprocess.run(
-                            [sys.executable, 'technical_indicators_recollector.py'],
-                            capture_output=True,
-                            text=True,
-                            encoding='utf-8'
-                        )
-                        
-                        if result.returncode == 0:
-                            logging.info("✅ technical_indicators_recollector.py 직접 실행 성공")
-                            
-                            # 재수집 후 다시 검증
-                            logging.info("🔍 재수집 후 최종 검증 시작...")
-                            final_null_stats = self.check_technical_indicators_null_ratio()
-                            
-                            if final_null_stats['null_ratio'] < null_threshold:
-                                logging.info(f"✅ 최종 검증 성공! NULL 비율: {final_null_stats['null_ratio']:.2%}")
-                                return True
-                            else:
-                                logging.error(f"❌ 최종 검증 실패. NULL 비율: {final_null_stats['null_ratio']:.2%}")
-                                return False
-                        else:
-                            logging.error(f"❌ technical_indicators_recollector.py 실행 실패")
-                            logging.error(f"   오류 출력: {result.stderr}")
-                            return False
-                            
-                    except Exception as e:
-                        logging.error(f"❌ technical_indicators_recollector.py 실행 중 오류: {e}")
-                        return False
+                    return False
             
             return False
             

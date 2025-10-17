@@ -11,10 +11,18 @@ import os
 import logging
 from datetime import datetime
 
-# 로깅 설정
+# 로그 파일 경로 설정
+log_dir = "logs"
+os.makedirs(log_dir, exist_ok=True)
+log_filename = os.path.join(log_dir, f"batch_analysis_{datetime.now().strftime('%Y%m%d')}.log")
+
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(log_filename, encoding='utf-8'),  # 파일로 저장
+        logging.StreamHandler()  # 콘솔에도 출력
+    ]
 )
 logger = logging.getLogger(__name__)
 

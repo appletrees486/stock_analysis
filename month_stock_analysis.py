@@ -1337,10 +1337,10 @@ def create_monthly_stock_chart(hist, stock_code):
         os.makedirs(charts_dir)
         print(f"📁 {charts_dir} 폴더를 생성했습니다.")
     
-    # 파일명 생성: monthly_종목명_종목코드_생성일.png (차트 제목에서 가져온 종목명 사용)
+    # 파일명 생성: monthly_종목명_종목코드_생성일.jpg (차트 제목에서 가져온 종목명 사용)
     current_date = datetime.now().strftime("%Y%m%d")
     # 종목명에서 띄어쓰기 제거하여 파일명 생성
-    base_filename = f"monthly_{chart_stock_name.replace(' ', '')}_{stock_code}_{current_date}.png"
+    base_filename = f"monthly_{chart_stock_name.replace(' ', '')}_{stock_code}_{current_date}.jpg"
     
     # 파일명에서 특수문자 제거 및 공백을 언더스코어로 변경
     base_filename = base_filename.replace(" ", "_").replace("/", "_").replace("\\", "_").replace(":", "_")
@@ -1358,9 +1358,12 @@ def create_monthly_stock_chart(hist, stock_code):
         filepath = os.path.join(charts_dir, filename)
         version += 1
     
-    # 차트 저장
-    plt.savefig(filepath, dpi=100, bbox_inches='tight')
+    # 차트 저장 (JPEG 포맷, 품질 95%)
+    plt.savefig(filepath, dpi=100, bbox_inches='tight',
+                facecolor='white', edgecolor='none',
+                format='jpg', pil_kwargs={'quality': 95})
     print(f"[SAVE] 차트가 저장되었습니다: {filepath}")
+    print(f"   [INFO] 이미지 포맷: JPEG (품질: 95%)")
     
     # 차트 뷰어를 띄우지 않고 차트 닫기
     plt.close(fig)  # 특정 figure 닫기

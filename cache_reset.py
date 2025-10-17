@@ -151,11 +151,12 @@ class CacheReset:
                             print(f"   ✅ {json_file.name} 삭제됨")
                             removed_count += 1
                     else:
-                        # PNG 파일들만 삭제
-                        for png_file in chart_path.glob('*.png'):
-                            png_file.unlink()
-                            print(f"   ✅ {png_file.name} 삭제됨")
-                            removed_count += 1
+                        # 이미지 파일들 삭제 (PNG, JPEG, JPG)
+                        for pattern in ['*.png', '*.jpeg', '*.jpg']:
+                            for image_file in chart_path.glob(pattern):
+                                image_file.unlink()
+                                print(f"   ✅ {image_file.name} 삭제됨")
+                                removed_count += 1
                 except Exception as e:
                     print(f"   ❌ {chart_dir} 정리 실패: {e}")
         
@@ -273,6 +274,8 @@ class CacheReset:
             chart_path = self.project_root / chart_dir
             if chart_path.exists():
                 chart_count += len(list(chart_path.glob('*.png')))
+                chart_count += len(list(chart_path.glob('*.jpg')))
+                chart_count += len(list(chart_path.glob('*.jpeg')))
         
         # JSON 차트 데이터 파일 개수
         json_chart_path = self.project_root / 'chart_data_json'

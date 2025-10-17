@@ -379,7 +379,7 @@ def run_ai_analysis_fast(stock_name: str, stock_code: str, chart_type: str, char
             return False
         
         # 차트 파일 찾기 (최적화)
-        chart_files = [f for f in os.listdir(charts_dir) if f.endswith('.png') and stock_code in f]
+        chart_files = [f for f in os.listdir(charts_dir) if f.endswith('.jpg') and stock_code in f]
         
         if not chart_files:
             print(f"❌ 종목 {stock_code}의 차트 파일을 찾을 수 없습니다")

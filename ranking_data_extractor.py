@@ -47,7 +47,7 @@ class RankingDataExtractor:
         거래율/거래대금 상위 50위 추출 및 txt 파일 저장
         
         Args:
-            target_date (str): 대상 날짜 (None이면 오늘)
+            target_date (str): 대상 날짜 (None이면 daily_data의 최신 trade_date)
             chart_type (str): 차트 타입 (일봉, 주봉, 월봉)
             batch_id (str): 배치 ID (파일명에 포함)
             
@@ -57,7 +57,26 @@ class RankingDataExtractor:
         try:
             # 대상 날짜 설정
             if target_date is None:
-                target_date = datetime.now().strftime('%Y-%m-%d')
+                # daily_data에서 가장 최신 trade_date 조회
+                from database_config import DatabaseManager
+                db = DatabaseManager()
+                
+                if db.connect():
+                    query = "SELECT MAX(trade_date) as latest_date FROM daily_data"
+                    result = db.fetch_one(query)
+                    db.disconnect()
+                    
+                    if result and result.get('latest_date'):
+                        target_date = result['latest_date'].strftime('%Y-%m-%d') if hasattr(result['latest_date'], 'strftime') else str(result['latest_date'])
+                        logger.info(f"daily_data 최신 날짜 사용: {target_date}")
+                    else:
+                        # 데이터가 없으면 오늘 날짜 사용 (fallback)
+                        target_date = datetime.now().strftime('%Y-%m-%d')
+                        logger.warning(f"daily_data가 비어있어 오늘 날짜 사용: {target_date}")
+                else:
+                    # DB 연결 실패 시 오늘 날짜 사용 (fallback)
+                    target_date = datetime.now().strftime('%Y-%m-%d')
+                    logger.warning(f"DB 연결 실패로 오늘 날짜 사용: {target_date}")
             
             logger.info(f"랭킹 데이터 추출 시작: {target_date} ({chart_type})")
             
