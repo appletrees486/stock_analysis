@@ -922,6 +922,40 @@ class StockDataCollector:
             logging.error(f"❌ {stock_code} 개별 유통주식수 조회 중 오류: {e}")
             return None
     
+    def get_past_data_for_indicators(self, stock_code, days=120):
+        """기술적 지표 계산을 위해 DB에서 과거 데이터 조회"""
+        try:
+            query = """
+            SELECT trade_date, open, high, low, close, volume
+            FROM daily_data
+            WHERE stock_code = %s
+            ORDER BY trade_date DESC
+            LIMIT %s
+            """
+            
+            result = self.db.fetch_all(query, (stock_code, days))
+            
+            if result and len(result) > 0:
+                df = pd.DataFrame(result)
+                df['trade_date'] = pd.to_datetime(df['trade_date'])
+                df.set_index('trade_date', inplace=True)
+                df = df.sort_index()  # 오름차순 정렬 (오래된 것부터)
+                
+                # 컬럼명 변경
+                df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+                
+                # Decimal 타입을 float로 변환
+                for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
+                    df[col] = df[col].astype(float)
+                
+                return df
+            else:
+                return None
+                
+        except Exception as e:
+            logging.error(f"❌ {stock_code} 과거 데이터 조회 중 오류: {e}")
+            return None
+    
     def save_daily_data(self, stock_code, hist_data):
         """일봉 데이터와 유통주식수, 시가총액을 함께 데이터베이스에 저장"""
         try:
@@ -1027,8 +1061,29 @@ class StockDataCollector:
                         logging.info(f"✅ {stock_code} 유통주식수 정보 저장 완료: {total_shares:,}주, 시가총액 {market_cap:,}")
                     
                     # 기술적 지표 계산 및 저장
-                    df_with_indicators = self.calculate_technical_indicators(hist_data.copy())
-                    self.save_technical_indicators(stock_code, df_with_indicators)
+                    # 증분 수집 시 충분한 데이터 확보를 위해 DB에서 과거 데이터 조회
+                    if len(hist_data) < 120:
+                        logging.info(f"🔧 {stock_code} 기술적 지표 계산을 위해 DB에서 과거 120일 데이터 조회 중...")
+                        past_data = self.get_past_data_for_indicators(stock_code, 120)
+                        if past_data is not None and not past_data.empty:
+                            # 과거 데이터와 새 데이터 합치기 (중복 제거)
+                            combined_data = pd.concat([past_data, hist_data])
+                            combined_data = combined_data[~combined_data.index.duplicated(keep='last')]
+                            combined_data = combined_data.sort_index()
+                            logging.info(f"✅ {stock_code} 과거 데이터 {len(past_data)}일 + 새 데이터 {len(hist_data)}일 = 총 {len(combined_data)}일")
+                            df_with_indicators = self.calculate_technical_indicators(combined_data.copy())
+                            # 새로운 데이터의 지표만 저장 (hist_data의 날짜에 해당하는 것만)
+                            new_dates = hist_data.index
+                            df_to_save = df_with_indicators.loc[df_with_indicators.index.isin(new_dates)]
+                            self.save_technical_indicators(stock_code, df_to_save)
+                        else:
+                            logging.warning(f"⚠️ {stock_code} 과거 데이터 조회 실패, 현재 데이터만으로 계산")
+                            df_with_indicators = self.calculate_technical_indicators(hist_data.copy())
+                            self.save_technical_indicators(stock_code, df_with_indicators)
+                    else:
+                        # 이미 충분한 데이터가 있으면 그대로 계산
+                        df_with_indicators = self.calculate_technical_indicators(hist_data.copy())
+                        self.save_technical_indicators(stock_code, df_with_indicators)
                     
                     # 수집 상태 업데이트
                     self.update_collection_status(stock_code, hist_data)
@@ -1699,7 +1754,27 @@ class StockDataCollector:
                 ))
             
             # 기술적 지표 계산 및 준비
-            df_with_indicators = self.calculate_technical_indicators(hist_data.copy())
+            # 증분 수집 시 충분한 데이터 확보를 위해 DB에서 과거 데이터 조회
+            if len(hist_data) < 120:
+                logging.info(f"🔧 {stock_code} 기술적 지표 계산을 위해 DB에서 과거 120일 데이터 조회 중...")
+                past_data = self.get_past_data_for_indicators(stock_code, 120)
+                if past_data is not None and not past_data.empty:
+                    # 과거 데이터와 새 데이터 합치기 (중복 제거)
+                    combined_data = pd.concat([past_data, hist_data])
+                    combined_data = combined_data[~combined_data.index.duplicated(keep='last')]
+                    combined_data = combined_data.sort_index()
+                    logging.info(f"✅ {stock_code} 과거 데이터 {len(past_data)}일 + 새 데이터 {len(hist_data)}일 = 총 {len(combined_data)}일")
+                    df_with_indicators = self.calculate_technical_indicators(combined_data.copy())
+                    # 새로운 데이터의 지표만 저장 (hist_data의 날짜에 해당하는 것만)
+                    new_dates = hist_data.index
+                    df_with_indicators = df_with_indicators.loc[df_with_indicators.index.isin(new_dates)]
+                else:
+                    logging.warning(f"⚠️ {stock_code} 과거 데이터 조회 실패, 현재 데이터만으로 계산")
+                    df_with_indicators = self.calculate_technical_indicators(hist_data.copy())
+            else:
+                # 이미 충분한 데이터가 있으면 그대로 계산
+                df_with_indicators = self.calculate_technical_indicators(hist_data.copy())
+            
             technical_data = []
             for date, row in df_with_indicators.iterrows():
                 # NaN 값 처리
