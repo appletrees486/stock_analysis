@@ -10,7 +10,7 @@ matplotlib.use('Agg')
 
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import mplfinance as mpf
@@ -423,35 +423,122 @@ def update_monthly_in_db(stock_code, monthly_df):
             pass
         return False
 
-def is_complete_month(target_date, current_date):
-    """해당 월이 완성되었는지 확인 (현재 월보다 이전 월인 경우만 완성된 월로 간주)"""
+def is_complete_month(target_date, current_date, db_latest_trade_date=None):
+    """
+    해당 월이 완성되었는지 확인 (장마감 및 다음 거래일까지 고려)
+    
+    Args:
+        target_date: 확인할 날짜 (datetime 또는 date)
+        current_date: 현재 시각 (datetime 또는 date)
+        db_latest_trade_date: DB에서 확인한 최신 거래일 (datetime 또는 date, optional)
+    
+    Returns:
+        bool: 완성된 월 여부
+    """
     try:
+        from datetime import date, timedelta
+        from korean_holiday_manager import KoreanHolidayManager
+        
         # target_date를 date 객체로 변환
         if hasattr(target_date, 'date'):
             target = target_date.date()
         else:
             target = target_date
         
-        # current_date를 date 객체로 변환
-        if hasattr(current_date, 'date'):
+        # current_date를 datetime 또는 date로 변환
+        if isinstance(current_date, datetime):
+            current_datetime = current_date
+            current = current_date.date()
+        elif hasattr(current_date, 'date'):
+            current_datetime = None
             current = current_date.date()
         else:
+            current_datetime = None
             current = current_date
         
-        # 해당 월의 첫째 날로 변환하여 비교
-        target_month = target.replace(day=1)
-        current_month = current.replace(day=1)
+        # DB 최신 거래일 사용 (없으면 target_date 사용)
+        if db_latest_trade_date:
+            if hasattr(db_latest_trade_date, 'date'):
+                latest_trade_date = db_latest_trade_date.date()
+            else:
+                latest_trade_date = db_latest_trade_date
+        else:
+            latest_trade_date = target
         
-        # target_date가 현재 월보다 이전 월인 경우만 완성된 월로 간주
-        is_complete = target_month < current_month
+        holiday_manager = KoreanHolidayManager()
         
-        if not is_complete:
-            print(f"   ⚠️ 미완성 월 감지: {target_month.strftime('%Y-%m')} (현재: {current_month.strftime('%Y-%m')})")
+        target_year = target.year
+        target_month = target.month
         
-        return is_complete
+        current_month_start = current.replace(day=1)
+        target_month_start = target.replace(day=1)
         
+        # 1) 이전 월이면 바로 완료 처리
+        if target_month_start < current_month_start:
+            print(f"   ✅ 완성된 월 확인: {target_year}년 {target_month}월 (이전 월)")
+            return True
+        
+        # 2) 현재 월인 경우 상세 검증
+        if target_month_start == current_month_start:
+            month_start = date(target_year, target_month, 1)
+            if target_month == 12:
+                next_month_start = date(target_year + 1, 1, 1)
+            else:
+                next_month_start = date(target_year, target_month + 1, 1)
+            
+            # 해당 월의 마지막 거래일 계산
+            last_trading_day_in_month = None
+            check_date = month_start
+            while check_date < next_month_start:
+                if holiday_manager.is_trading_day(check_date):
+                    last_trading_day_in_month = check_date
+                check_date += timedelta(days=1)
+            
+            if last_trading_day_in_month is None:
+                print(f"   ⚠️ {target_year}년 {target_month}월의 거래일을 찾을 수 없습니다.")
+                return False
+            
+            # 최신 거래일이 마지막 거래일인지 확인
+            is_last_trading_day = (latest_trade_date == last_trading_day_in_month)
+            
+            # 다음 거래일이 다음 달인지 확인
+            next_trading_day = holiday_manager.get_next_trading_day(latest_trade_date)
+            is_next_month = (next_trading_day.month != target_month)
+            
+            # 현재 시각이 장마감 이후인지 확인
+            is_after_market_close = False
+            if current_datetime:
+                market_status = holiday_manager.get_market_status(current_datetime)
+                is_after_market_close = (market_status == "after_market_close")
+            else:
+                if holiday_manager.is_trading_day(current) and is_next_month:
+                    is_after_market_close = True
+            
+            if is_last_trading_day and is_next_month and is_after_market_close:
+                print(f"   ✅ 완성된 월 확인: {target_year}년 {target_month}월")
+                print(f"      - 마지막 거래일: {last_trading_day_in_month.strftime('%Y-%m-%d')}")
+                print(f"      - DB 최신 거래일: {latest_trade_date.strftime('%Y-%m-%d')}")
+                print(f"      - 다음 거래일: {next_trading_day.strftime('%Y-%m-%d')} (다음 달)")
+                print(f"      - 장마감 이후 실행: {is_after_market_close}")
+                return True
+            
+            print(f"   ⚠️ 미완성 월 감지: {target_year}년 {target_month}월")
+            print(f"      - 마지막 거래일: {last_trading_day_in_month.strftime('%Y-%m-%d')}")
+            print(f"      - DB 최신 거래일: {latest_trade_date.strftime('%Y-%m-%d')}")
+            print(f"      - 다음 거래일: {next_trading_day.strftime('%Y-%m-%d')}")
+            print(f"      - 마지막 거래일 여부: {is_last_trading_day}")
+            print(f"      - 다음 달 여부: {is_next_month}")
+            print(f"      - 장마감 이후 실행: {is_after_market_close}")
+            return False
+        
+        # 3) 미래 월이면 아직 미완성
+        print(f"   ⚠️ 미완성 월 감지: {target_year}년 {target_month}월 (미래 월)")
+        return False
+    
     except Exception as e:
         print(f"   ❌ 월 완성도 확인 중 오류: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def convert_daily_to_monthly(daily_data, existing_monthly_data=None):
@@ -461,8 +548,8 @@ def convert_daily_to_monthly(daily_data, existing_monthly_data=None):
         daily_data_copy = daily_data.copy()
         daily_data_copy.index.name = 'Date'
         
-        # 현재 날짜 확인
-        current_date = datetime.now().date()
+        # 현재 날짜/시간 확인 (장마감 여부 판단을 위해)
+        current_datetime = datetime.now()
         
         # 월별로 그룹화
         daily_data_copy['Month'] = daily_data_copy.index.to_period('M')
@@ -476,7 +563,7 @@ def convert_daily_to_monthly(daily_data, existing_monthly_data=None):
                 month_last_day = group.index[-1]  # 월의 마지막 거래일
                 
                 # ✅ 완성된 월인지 확인 - 미완성 월은 제외
-                if not is_complete_month(month_last_day, current_date):
+                if not is_complete_month(month_last_day, current_datetime, db_latest_trade_date=month_last_day):
                     print(f"   ⚠️ 미완성 월 제외: {month_first_day.strftime('%Y-%m')}")
                     continue  # 미완성 월은 건너뛰기
                 
